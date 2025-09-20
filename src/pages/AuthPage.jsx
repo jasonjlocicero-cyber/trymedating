@@ -18,22 +18,17 @@ export default function AuthPage(){
   }
 
   return (
-    <div className="container" style={{padding:'40px 0', maxWidth:520}}>
+    <div style={{padding:40, fontFamily:'ui-sans-serif, system-ui', maxWidth:520}}>
       <h2>Sign in / Sign up</h2>
       <p>We’ll send a secure sign-in link to your email.</p>
       {sent ? (
-        <div className="card">Check your inbox for the magic link.</div>
+        <div>Check your inbox for the magic link.</div>
       ) : (
-        <form onSubmit={sendLink} className="card" style={{display:'grid', gap:12}}>
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={e=>setEmail(e.target.value)}
-            style={{padding:12, borderRadius:12, border:'1px solid #eee'}}
-          />
-          <button className="btn btn-primary" type="submit">Send Sign-in Link</button>
+        <form onSubmit={sendLink} style={{display:'grid', gap:12, marginTop:16}}>
+          <input type="email" required placeholder="you@example.com"
+                 value={email} onChange={e=>setEmail(e.target.value)}
+                 style={{padding:12, borderRadius:12, border:'1px solid #eee'}}/>
+          <button type="submit" style={{padding:'10px 14px'}}>Send Sign-in Link</button>
           {error && <div style={{color:'#c00'}}>{error}</div>}
         </form>
       )}
