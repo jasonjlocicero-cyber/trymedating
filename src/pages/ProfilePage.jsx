@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import QRCode from 'qrcode'
 
-export default function ProfilePage() {
+function ProfilePage() {
   const [user, setUser] = useState(null)
   const [form, setForm] = useState({
     handle: '',
@@ -14,14 +14,13 @@ export default function ProfilePage() {
   const [qr, setQr] = useState('')
   const [message, setMessage] = useState('')
 
-  // ✅ Guard: if Supabase client is missing, show message instead of crashing
+  // Guard if Supabase isn’t configured
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
         <h2>Your Profile</h2>
         <p>
-          Supabase is not configured. Add{' '}
-          <code>VITE_SUPABASE_URL</code> and{' '}
+          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and{' '}
           <code>VITE_SUPABASE_ANON_KEY</code> in Netlify → Site configuration → Build & deploy → Environment, then redeploy.
         </p>
       </div>
@@ -33,7 +32,7 @@ export default function ProfilePage() {
     supabase.auth.getUser().then(({ data }) => setUser(data.user || null))
   }, [])
 
-  // Generate QR code when handle changes
+  // Generate QR when handle changes
   useEffect(() => {
     if (form.handle) {
       const url = `${window.location.origin}/u/${encodeURIComponent(form.handle)}`
@@ -63,10 +62,7 @@ export default function ProfilePage() {
     if (!user) return
     setMessage('')
     const payload = { ...form, user_id: user.id }
-    const { error } = await supabase
-      .from('profiles')
-      .upsert(payload)
-      .eq('user_id', user.id)
+    const { error } = await supabase.from('profiles').upsert(payload).eq('user_id', user.id)
     if (error) setMessage(error.message)
     else setMessage('Profile saved ✅')
   }
@@ -180,7 +176,6 @@ export default function ProfilePage() {
   )
 }
 
-
-// ✅ This line is essential:
+// ✅ Only ONE default export
 export default ProfilePage
 
