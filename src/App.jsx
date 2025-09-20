@@ -1,34 +1,33 @@
 import React from 'react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
-import AuthPage from './pages/AuthPage'
-import ProfilePage from './pages/ProfilePage'
-import SettingsPage from './pages/SettingsPage'
-import PublicProfile from './pages/PublicProfile'
+import { Routes, Route, Link } from 'react-router-dom'
 
 function Home() {
-  const nav = useNavigate()
   return (
     <div className="container" style={{padding:'40px 0'}}>
-      <h1>TryMeDating — Home</h1>
-      <p>Router smoke test. If you can see this after deploy, routing compiles.</p>
+      <h1>TryMeDating — Home ✅</h1>
+      <p>If you see this, React Router is working. Next, we’ll re-add pages.</p>
       <div style={{display:'flex', gap:12, marginTop:12}}>
-        <button className="btn btn-primary" onClick={()=>nav('/auth')}>Go to Auth</button>
-        <button className="btn btn-secondary" onClick={()=>nav('/profile')}>Go to Profile</button>
+        <Link className="btn btn-primary" to="/auth">Go to Auth</Link>
+        <Link className="btn btn-secondary" to="/profile">Go to Profile</Link>
+        <Link className="btn btn-ghost" to="/u/test">Public Profile</Link>
       </div>
     </div>
   )
 }
 
+function AuthStub(){ return <div className="container" style={{padding:'40px 0'}}><h2>Auth stub</h2></div> }
+function ProfileStub(){ return <div className="container" style={{padding:'40px 0'}}><h2>Profile stub</h2></div> }
+function PublicStub(){ return <div className="container" style={{padding:'40px 0'}}><h2>Public stub</h2></div> }
+function SettingsStub(){ return <div className="container" style={{padding:'40px 0'}}><h2>Settings stub</h2></div> }
+
 export default function App() {
   return (
-    <div>
-      <Routes>
-        <Route path="/" element={<Home/>} />
-        <Route path="/auth" element={<AuthPage/>} />
-        <Route path="/profile" element={<ProfilePage/>} />
-        <Route path="/settings" element={<SettingsPage/>} />
-        <Route path="/u/:handle" element={<PublicProfile/>} />
-      </Routes>
-    </div>
+    <Routes>
+      <Route path="/" element={<Home/>} />
+      <Route path="/auth" element={<AuthStub/>} />
+      <Route path="/profile" element={<ProfileStub/>} />
+      <Route path="/settings" element={<SettingsStub/>} />
+      <Route path="/u/:handle" element={<PublicStub/>} />
+    </Routes>
   )
 }
