@@ -6,6 +6,15 @@ export default function AuthPage(){
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
+  if (!supabase) {
+    return (
+      <div style={{padding:40}}>
+        <h2>Auth</h2>
+        <p>Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Netlify → Site configuration → Build & deploy → <b>Environment</b>, then redeploy.</p>
+      </div>
+    )
+  }
+
   async function sendLink(e){
     e.preventDefault()
     setError('')
@@ -18,16 +27,14 @@ export default function AuthPage(){
   }
 
   return (
-    <div style={{padding:40, fontFamily:'ui-sans-serif, system-ui', maxWidth:520}}>
+    <div style={{padding:40, maxWidth:520}}>
       <h2>Sign in / Sign up</h2>
-      <p>We’ll send a secure sign-in link to your email.</p>
       {sent ? (
         <div>Check your inbox for the magic link.</div>
       ) : (
-        <form onSubmit={sendLink} style={{display:'grid', gap:12, marginTop:16}}>
-          <input type="email" required placeholder="you@example.com"
-                 value={email} onChange={e=>setEmail(e.target.value)}
-                 style={{padding:12, borderRadius:12, border:'1px solid #eee'}}/>
+        <form onSubmit={sendLink} style={{display:'grid', gap:12}}>
+          <input type="email" required placeholder="you@example.com" value={email}
+                 onChange={e=>setEmail(e.target.value)} style={{padding:12,border:'1px solid #eee',borderRadius:8}} />
           <button type="submit" style={{padding:'10px 14px'}}>Send Sign-in Link</button>
           {error && <div style={{color:'#c00'}}>{error}</div>}
         </form>
