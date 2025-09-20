@@ -1,23 +1,24 @@
 import React from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 
-// Import your page components
+// Page imports (these files must exist)
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
-// If you’ve added PublicProfile.jsx, uncomment this line:
+// If you've created it, uncomment both lines below:
 // import PublicProfile from './pages/PublicProfile'
 
 function Home() {
   return (
-    <div style={{padding:40, fontFamily:'ui-sans-serif, system-ui'}}>
-      <h1>TryMeDating — Home ✅</h1>
-      <p>Welcome to the TryMeDating prototype. Use the links below to navigate.</p>
-      <div style={{display:'flex', gap:12, marginTop:12}}>
+    <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui' }}>
+      <h1>TryMeDating — Home</h1>
+      <p>Welcome! Use the links below to navigate.</p>
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
         <Link className="btn btn-primary" to="/auth">Auth</Link>
         <Link className="btn btn-secondary" to="/profile">Profile</Link>
         <Link className="btn btn-ghost" to="/settings">Settings</Link>
-        {/* Uncomment this if PublicProfile.jsx exists */}
+        {/* If PublicProfile.jsx exists, you can keep a sample link like this: */}
         {/* <Link className="btn" to="/u/test">Public Profile</Link> */}
       </div>
     </div>
@@ -27,7 +28,7 @@ function Home() {
 export default function App() {
   return (
     <Routes>
-      {/* Home route */}
+      {/* Home */}
       <Route path="/" element={<Home />} />
 
       {/* Real pages */}
