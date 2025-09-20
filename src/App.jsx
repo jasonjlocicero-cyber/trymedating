@@ -1,25 +1,23 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 
-// Page imports (these files must exist)
-import AuthPage from './pages/AuthPage'
-import ProfilePage from './pages/ProfilePage'
-import SettingsPage from './pages/SettingsPage'
-// If you've created it, uncomment both lines below:
-// import PublicProfile from './pages/PublicProfile'
+// Lazy imports (pages must exist under src/pages/)
+const AuthPage = lazy(() => import('./pages/AuthPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
+const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 
 function Home() {
   return (
     <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui' }}>
       <h1>TryMeDating — Home</h1>
-      <p>Welcome! Use the links below to navigate.</p>
+      <p>If you can see this, routing and rendering are working 🎉</p>
 
       <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
         <Link className="btn btn-primary" to="/auth">Auth</Link>
         <Link className="btn btn-secondary" to="/profile">Profile</Link>
         <Link className="btn btn-ghost" to="/settings">Settings</Link>
-        {/* If PublicProfile.jsx exists, you can keep a sample link like this: */}
-        {/* <Link className="btn" to="/u/test">Public Profile</Link> */}
+        <Link className="btn" to="/u/test">Public Profile</Link>
       </div>
     </div>
   )
@@ -27,17 +25,19 @@ function Home() {
 
 export default function App() {
   return (
-    <Routes>
-      {/* Home */}
-      <Route path="/" element={<Home />} />
+    <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
+      <Routes>
+        {/* Home */}
+        <Route path="/" element={<Home />} />
 
-      {/* Real pages */}
-      <Route path="/auth" element={<AuthPage />} />
-      <Route path="/profile" element={<ProfilePage />} />
-      <Route path="/settings" element={<SettingsPage />} />
+        {/* Auth / Profile / Settings */}
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
 
-      {/* Public profile page (optional) */}
-      {/* <Route path="/u/:handle" element={<PublicProfile />} /> */}
-    </Routes>
+        {/* Public profile page */}
+        <Route path="/u/:handle" element={<PublicProfile />} />
+      </Routes>
+    </Suspense>
   )
 }
