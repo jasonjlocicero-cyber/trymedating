@@ -1,6 +1,54 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { ShoppingBag, HeartHandshake, ShieldCheck, ScanLine, MessageSquare, Users } from 'lucide-react';
+import React from 'react'
+import { Routes, Route, useNavigate } from 'react-router-dom'
+import AuthPage from './pages/AuthPage'
+import ProfilePage from './pages/ProfilePage'
+import SettingsPage from './pages/SettingsPage'
+import PublicProfile from './pages/PublicProfile'
+
+export default function App() {
+  const nav = useNavigate()
+
+  return (
+    <div>
+      {/* ✅ Nav bar shows on every page */}
+      <nav>
+        <button onClick={() => nav('/')}>Home</button>
+        <button onClick={() => nav('/auth')}>Sign Up</button>
+        <button onClick={() => nav('/profile')}>Profile</button>
+      </nav>
+
+      {/* ✅ Main content switches here */}
+      <Routes>
+        {/* Homepage */}
+        <Route path="/" element={
+          <>
+            <h1>Dating, the warmer way.</h1>
+            <p>Homepage hero and sections go here.</p>
+          </>
+        } />
+
+        {/* Auth / Sign In */}
+        <Route path="/auth" element={<AuthPage />} />
+
+        {/* User Profile */}
+        <Route path="/profile" element={<ProfilePage />} />
+
+        {/* Settings */}
+        <Route path="/settings" element={<SettingsPage />} />
+
+        {/* Public profile view */}
+        <Route path="/u/:handle" element={<PublicProfile />} />
+      </Routes>
+
+      {/* ✅ Footer shows on every page */}
+      <footer>
+        <p>© {new Date().getFullYear()} TryMeDating</p>
+      </footer>
+    </div>
+  )
+}
+
+
 
 const C = { coral:'#FF6B6B', teal:'#007A7A', green:'#3CCF4E', sand:'#F4EDE4', charcoal:'#2C2C2C', white:'#FFFFFF' };
 
