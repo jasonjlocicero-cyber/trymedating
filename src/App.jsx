@@ -5,48 +5,34 @@ import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
 import PublicProfile from './pages/PublicProfile'
 
-export default function App() {
+function Home() {
   const nav = useNavigate()
-
   return (
-    <div>
-      {/* ✅ Nav bar shows on every page */}
-      <nav>
-        <button onClick={() => nav('/')}>Home</button>
-        <button onClick={() => nav('/auth')}>Sign Up</button>
-        <button onClick={() => nav('/profile')}>Profile</button>
-      </nav>
-
-      {/* ✅ Main content switches here */}
-      <Routes>
-        {/* Homepage */}
-        <Route path="/" element={
-          <>
-            <h1>Dating, the warmer way.</h1>
-            <p>Homepage hero and sections go here.</p>
-          </>
-        } />
-
-        {/* Auth / Sign In */}
-        <Route path="/auth" element={<AuthPage />} />
-
-        {/* User Profile */}
-        <Route path="/profile" element={<ProfilePage />} />
-
-        {/* Settings */}
-        <Route path="/settings" element={<SettingsPage />} />
-
-        {/* Public profile view */}
-        <Route path="/u/:handle" element={<PublicProfile />} />
-      </Routes>
-
-      {/* ✅ Footer shows on every page */}
-      <footer>
-        <p>© {new Date().getFullYear()} TryMeDating</p>
-      </footer>
+    <div className="container" style={{padding:'40px 0'}}>
+      <h1>TryMeDating — Home</h1>
+      <p>Router smoke test. If you can see this after deploy, routing compiles.</p>
+      <div style={{display:'flex', gap:12, marginTop:12}}>
+        <button className="btn btn-primary" onClick={()=>nav('/auth')}>Go to Auth</button>
+        <button className="btn btn-secondary" onClick={()=>nav('/profile')}>Go to Profile</button>
+      </div>
     </div>
   )
 }
+
+export default function App() {
+  return (
+    <div>
+      <Routes>
+        <Route path="/" element={<Home/>} />
+        <Route path="/auth" element={<AuthPage/>} />
+        <Route path="/profile" element={<ProfilePage/>} />
+        <Route path="/settings" element={<SettingsPage/>} />
+        <Route path="/u/:handle" element={<PublicProfile/>} />
+      </Routes>
+    </div>
+  )
+}
+
 
 
 
