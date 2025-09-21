@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import QRCode from 'qrcode'
 
+// Turn any text into a safe handle (slug)
 const slugify = (s) =>
-  s.toLowerCase().trim()
-   .replace(/\s+/g, '-')        // spaces → dashes
-   .replace(/[^a-z0-9\-]/g, '') // remove non-url chars
-   .replace(/\-+/g, '-')        // collapse ---
-   .replace(/^\-+|\-+$/g, '')   // trim - -
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')        // spaces → dashes
+    .replace(/[^a-z0-9\-]/g, '') // strip non-url chars
+    .replace(/\-+/g, '-')        // collapse ---
+    .replace(/^\-+|\-+$/g, '')   // trim - -
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
@@ -26,19 +29,22 @@ export default function ProfilePage() {
   const [handleStatus, setHandleStatus] = useState('idle') // idle | checking | ok | taken | invalid
   const [avatarUploading, setAvatarUploading] = useState(false)
 
-  // Stop early if Supabase isn’t configured
+  // If Supabase env vars aren’t set, show a friendly message instead of crashing
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
         <h2>Your Profile</h2>
-        <p>Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Netlify env, then redeploy.</p>
+        <p>
+          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>
+          {' '}in Netlify → Site configuration → Environment, then redeploy.
+        </p>
       </div>
     )
   }
 
-  // 1) Get current user (redirect to /auth if not logged in)
+  // 1) Get current user; if not signed in, send to /auth
   useEffect(() => {
-    (async () => {
+    ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         window.location.href = '/auth'
@@ -48,33 +54,35 @@ export default function ProfilePage() {
     })()
   }, [])
 
-  // 2) Load existing profile row
+  // 2) Load existing profile row for this user
   useEffect(() => {
     if (!user) return
     ;(async () => {
       setLoading(true)
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle()
-      if (data) setForm(prev => ({ ...prev, ...data }))
+
+      if (!error && data) {
+        setForm(prev => ({ ...prev, ...data }))
+      }
       setLoading(false)
     })()
   }, [user])
 
   // 3) Build QR when handle changes
   useEffect(() => {
-    const makeQR = async () => {
+    const build = async () => {
       if (!form.handle) return setQr('')
       const url = `${window.location.origin}/u/${encodeURIComponent(form.handle)}`
-      const dataUrl = await QRCode.toDataURL(url)
-      setQr(dataUrl)
+      setQr(await QRCode.toDataURL(url))
     }
-    makeQR()
+    build()
   }, [form.handle])
 
-  // 4) Check handle availability (debounced)
+  // 4) Debounced, case-insensitive handle availability check
   useEffect(() => {
     if (!form.handle) { setHandleStatus('idle'); return }
     const val = slugify(form.handle)
@@ -83,13 +91,12 @@ export default function ProfilePage() {
     let alive = true
     setHandleStatus('checking')
     const t = setTimeout(async () => {
-      // if you already own this handle, it's OK
+      // If user already owns this handle, it's OK
       const { data: mine } = await supabase
         .from('profiles')
         .select('handle,user_id')
         .eq('user_id', user?.id || '')
         .maybeSingle()
-
       if (mine && mine.handle === val) {
         if (alive) setHandleStatus('ok')
         return
@@ -109,23 +116,21 @@ export default function ProfilePage() {
     return () => { alive = false; clearTimeout(t) }
   }, [form.handle, user])
 
-  // Derived URL for display/copy
+  // Helpers
+  const onChange = (patch) => setForm(prev => ({ ...prev, ...patch }))
   const publicUrl = useMemo(
     () => (form.handle ? `${window.location.origin}/u/${encodeURIComponent(slugify(form.handle))}` : ''),
     [form.handle]
   )
 
-  // Change helper
-  const onChange = (patch) => setForm(prev => ({ ...prev, ...patch }))
-
-  // 5) Avatar upload
+  // 5) Avatar upload to Supabase Storage (public bucket: avatars)
   async function onAvatarChange(e) {
     const file = e.target.files?.[0]
     if (!file || !user) return
     setAvatarUploading(true)
     setMessage('')
     try {
-      // (Optional) client-side checks
+      // Basic client-side checks
       const maxSize = 2 * 1024 * 1024 // 2 MB
       if (file.size > maxSize) throw new Error('Max file size is 2 MB')
       if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) throw new Error('Use PNG/JPG/WEBP/GIF')
@@ -133,7 +138,7 @@ export default function ProfilePage() {
       const ext = (file.name.split('.').pop() || 'png').toLowerCase()
       const path = `users/${user.id}/${Date.now()}.${ext}`
 
-      // Upload to 'avatars' bucket (public)
+      // Upload to 'avatars' bucket (must exist, public read enabled)
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: false })
       if (upErr) throw upErr
 
@@ -142,19 +147,17 @@ export default function ProfilePage() {
       const url = pub?.publicUrl
       if (!url) throw new Error('Could not get public URL')
 
-      // Update local state (you still need to hit Save to persist in DB)
       setForm(prev => ({ ...prev, avatar_url: url }))
       setMessage('Avatar uploaded ✓ (click Save to persist)')
-    } catch (e) {
-      setMessage(e.message || 'Upload failed')
+    } catch (e2) {
+      setMessage(e2.message || 'Upload failed')
     } finally {
       setAvatarUploading(false)
-      // allow re-selecting the same file
       if (e?.target) e.target.value = ''
     }
   }
 
-  // 6) Save profile to DB
+  // 6) Save profile (upsert)
   async function save() {
     setMessage('')
     if (!user) return
@@ -183,12 +186,12 @@ export default function ProfilePage() {
     else setMessage('Profile saved ✅')
   }
 
+  // Utilities
   function copyLink() {
     if (!publicUrl) return
     navigator.clipboard.writeText(publicUrl)
     setMessage('Link copied to clipboard ✅')
   }
-
   function downloadQR() {
     if (!qr) return
     const a = document.createElement('a')
