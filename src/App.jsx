@@ -8,6 +8,7 @@ import SettingsPage from './pages/SettingsPage'
 import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
+import Contact from './pages/Contact'
 
 // Simple color constants
 const C = {
@@ -106,7 +107,8 @@ function Footer() {
   return (
     <div style={{ textAlign: 'center', padding: 20, borderTop: '1px solid #eee', marginTop: 40 }}>
       <Link to="/terms" style={{ marginRight: 16 }}>Terms</Link>
-      <Link to="/privacy">Privacy</Link>
+      <Link to="/privacy" style={{ marginRight: 16 }}>Privacy</Link>
+      <Link to="/contact">Contact</Link>
     </div>
   )
 }
@@ -125,6 +127,7 @@ export default function App() {
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
         </Routes>
       </Suspense>
@@ -132,3 +135,4 @@ export default function App() {
     </div>
   )
 }
+
