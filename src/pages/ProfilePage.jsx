@@ -17,14 +17,16 @@ export default function ProfilePage() {
     bio: '',
     mode: 'dating',
     is_public: true,
+    avatar_url: ''
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [qr, setQr] = useState('')
   const [handleStatus, setHandleStatus] = useState('idle') // idle | checking | ok | taken | invalid
+  const [avatarUploading, setAvatarUploading] = useState(false)
 
-  // Guard if Supabase isn’t configured
+  // Stop early if Supabase isn’t configured
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
@@ -34,7 +36,7 @@ export default function ProfilePage() {
     )
   }
 
-  // Get current user; redirect if not logged in
+  // 1) Get current user (redirect to /auth if not logged in)
   useEffect(() => {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -46,18 +48,22 @@ export default function ProfilePage() {
     })()
   }, [])
 
-  // Load existing profile
+  // 2) Load existing profile row
   useEffect(() => {
     if (!user) return
     ;(async () => {
       setLoading(true)
-      const { data } = await supabase.from('profiles').select('*').eq('user_id', user.id).maybeSingle()
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle()
       if (data) setForm(prev => ({ ...prev, ...data }))
       setLoading(false)
     })()
   }, [user])
 
-  // Generate QR when handle changes
+  // 3) Build QR when handle changes
   useEffect(() => {
     const makeQR = async () => {
       if (!form.handle) return setQr('')
@@ -68,7 +74,7 @@ export default function ProfilePage() {
     makeQR()
   }, [form.handle])
 
-  // Check handle availability (debounced)
+  // 4) Check handle availability (debounced)
   useEffect(() => {
     if (!form.handle) { setHandleStatus('idle'); return }
     const val = slugify(form.handle)
@@ -77,7 +83,7 @@ export default function ProfilePage() {
     let alive = true
     setHandleStatus('checking')
     const t = setTimeout(async () => {
-      // If user is editing and already owns this handle, mark ok
+      // if you already own this handle, it's OK
       const { data: mine } = await supabase
         .from('profiles')
         .select('handle,user_id')
@@ -103,15 +109,52 @@ export default function ProfilePage() {
     return () => { alive = false; clearTimeout(t) }
   }, [form.handle, user])
 
-  // Derived
+  // Derived URL for display/copy
   const publicUrl = useMemo(
     () => (form.handle ? `${window.location.origin}/u/${encodeURIComponent(slugify(form.handle))}` : ''),
     [form.handle]
   )
 
-  // Actions
+  // Change helper
   const onChange = (patch) => setForm(prev => ({ ...prev, ...patch }))
 
+  // 5) Avatar upload
+  async function onAvatarChange(e) {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+    setAvatarUploading(true)
+    setMessage('')
+    try {
+      // (Optional) client-side checks
+      const maxSize = 2 * 1024 * 1024 // 2 MB
+      if (file.size > maxSize) throw new Error('Max file size is 2 MB')
+      if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) throw new Error('Use PNG/JPG/WEBP/GIF')
+
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase()
+      const path = `users/${user.id}/${Date.now()}.${ext}`
+
+      // Upload to 'avatars' bucket (public)
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: false })
+      if (upErr) throw upErr
+
+      // Get public URL
+      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
+      const url = pub?.publicUrl
+      if (!url) throw new Error('Could not get public URL')
+
+      // Update local state (you still need to hit Save to persist in DB)
+      setForm(prev => ({ ...prev, avatar_url: url }))
+      setMessage('Avatar uploaded ✓ (click Save to persist)')
+    } catch (e) {
+      setMessage(e.message || 'Upload failed')
+    } finally {
+      setAvatarUploading(false)
+      // allow re-selecting the same file
+      if (e?.target) e.target.value = ''
+    }
+  }
+
+  // 6) Save profile to DB
   async function save() {
     setMessage('')
     if (!user) return
@@ -128,10 +171,11 @@ export default function ProfilePage() {
     const payload = {
       user_id: user.id,
       handle,
-      display_name: form.display_name,
-      bio: form.bio,
+      display_name: form.display_name.trim(),
+      bio: (form.bio || '').trim(),
       mode: form.mode,
       is_public: !!form.is_public,
+      avatar_url: form.avatar_url || null
     }
     const { error } = await supabase.from('profiles').upsert(payload).eq('user_id', user.id)
     setSaving(false)
@@ -156,14 +200,28 @@ export default function ProfilePage() {
   }
 
   useEffect(() => { document.title = 'Your Profile • TryMeDating' }, [])
-
   if (loading) return <div style={{ padding: 40 }}>Loading…</div>
 
   return (
     <div style={{ padding: 40, maxWidth: 720, fontFamily: 'ui-sans-serif, system-ui' }}>
       <h2>Your Profile</h2>
 
+      {/* Avatar */}
+      <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:12 }}>
+        <img
+          src={form.avatar_url || 'https://via.placeholder.com/96?text=%F0%9F%98%8A'}
+          alt="Avatar"
+          style={{ width:96, height:96, borderRadius:'50%', objectFit:'cover', border:'1px solid #eee' }}
+        />
+        <label style={{ display:'inline-block' }}>
+          <span style={{ display:'block', fontSize:13, marginBottom:6 }}>Avatar</span>
+          <input type="file" accept="image/*" onChange={onAvatarChange} disabled={avatarUploading} />
+          {avatarUploading && <div style={{ fontSize:12, opacity:.7 }}>Uploading…</div>}
+        </label>
+      </div>
+
       <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+        {/* Handle */}
         <label>
           Handle <span style={{ opacity:.6 }}>(public URL)</span>
           <input
@@ -187,6 +245,7 @@ export default function ProfilePage() {
           )}
         </label>
 
+        {/* Display name */}
         <label>
           Display name
           <input
@@ -197,6 +256,7 @@ export default function ProfilePage() {
           />
         </label>
 
+        {/* Bio */}
         <label>
           Bio
           <textarea
@@ -207,6 +267,7 @@ export default function ProfilePage() {
           />
         </label>
 
+        {/* Mode */}
         <label>
           Mode
           <select
@@ -220,6 +281,7 @@ export default function ProfilePage() {
           </select>
         </label>
 
+        {/* Public toggle */}
         <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
             type="checkbox"
@@ -229,6 +291,7 @@ export default function ProfilePage() {
           Public profile
         </label>
 
+        {/* Actions */}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <button onClick={save} disabled={saving || handleStatus !== 'ok'} style={{ padding:'10px 14px' }}>
             {saving ? 'Saving…' : 'Save'}
@@ -249,4 +312,5 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
