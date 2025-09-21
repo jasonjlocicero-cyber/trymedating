@@ -6,7 +6,8 @@ import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
 import PublicProfile from './pages/PublicProfile'
-import Terms from './pages/Terms'   // ✅ new import
+import Terms from './pages/Terms'
+import Privacy from './pages/Privacy'
 
 // Simple color constants
 const C = {
@@ -122,7 +123,8 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/u/:handle" element={<PublicProfile />} />
-          <Route path="/terms" element={<Terms />} />   {/* ✅ new route */}
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
         </Routes>
       </Suspense>
