@@ -6,6 +6,7 @@ import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
 import PublicProfile from './pages/PublicProfile'
+import Terms from './pages/Terms'   // ✅ new import
 
 // Simple color constants
 const C = {
@@ -14,7 +15,7 @@ const C = {
   teal: '#2A9D8F'
 }
 
-// Home page (hero)
+// Home page
 function Home() {
   const nav = useNavigate()
   return (
@@ -121,6 +122,7 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/u/:handle" element={<PublicProfile />} />
+          <Route path="/terms" element={<Terms />} />   {/* ✅ new route */}
           <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
         </Routes>
       </Suspense>
