@@ -18,36 +18,21 @@ const C = {
 function NavBar() {
   const nav = useNavigate()
   return (
-    <div style={{
-      position: 'sticky', top: 0, zIndex: 20,
-      backdropFilter: 'blur(6px)', background: 'rgba(255,255,255,.85)',
-      borderBottom: `1px solid ${C.sand}`
-    }}>
-      <nav style={{
-        maxWidth: 1100, margin: '0 auto', height: 64,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px'
-      }}>
-        <Link to="/" style={{ textDecoration: 'none', fontWeight: 800, color: C.teal, fontSize: 18 }}>
-          TryMe<span style={{ color: C.coral }}>Dating</span>
-        </Link>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-          <Link to="/#how" style={{ color: C.ink, textDecoration: 'none' }}>How it works</Link>
-          <Link to="/#community" style={{ color: C.ink, textDecoration: 'none' }}>Community</Link>
-          <Link to="/#faqs" style={{ color: C.ink, textDecoration: 'none' }}>FAQs</Link>
-          <button
-            onClick={() => nav('/auth')}
-            style={{
-              padding: '10px 14px', borderRadius: 10, border: 'none',
-              background: C.coral, color: '#fff', cursor: 'pointer', fontWeight: 700
-            }}
-          >
-            Sign up
-          </button>
-        </div>
-      </nav>
-    </div>
-  )
-}
+<div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+  <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
+    Profile
+  </Link>
+  <Link to="/#how" style={{ color: C.ink, textDecoration: 'none' }}>How it works</Link>
+  <Link to="/#community" style={{ color: C.ink, textDecoration: 'none' }}>Community</Link>
+  <Link to="/#faqs" style={{ color: C.ink, textDecoration: 'none' }}>FAQs</Link>
+<button
+  onClick={() => nav('/profile')}
+  style={{ padding: '10px 14px', borderRadius: 10, border: 'none', background: C.teal, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+>
+  Go to your Profile
+</button>
+</div>
+
 
 function Footer() {
   return (
