@@ -5,9 +5,8 @@ import { supabase } from '../lib/supabaseClient'
 export default function PublicProfile(){
   const { handle } = useParams()
   const [data, setData] = useState(null)
-  const [state, setState] = useState('loading') // 'loading' | 'ok' | 'notfound' | 'error'
+  const [state, setState] = useState('loading') // loading | ok | notfound | error
 
-  // Guard if Supabase isn’t configured
   if (!supabase) {
     return (
       <div style={{padding:40}}>
@@ -18,29 +17,29 @@ export default function PublicProfile(){
   }
 
   useEffect(() => {
-    async function load(){
+    document.title = `${handle} • TryMeDating`
+  }, [handle])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
       const { data, error } = await supabase
         .from('profiles')
         .select('handle, display_name, bio, mode, is_public')
         .eq('handle', handle)
         .maybeSingle()
-      if (error) return setState('error')
-      if (!data || data.is_public === false) return setState('notfound')
-      setData(data)
-      setState('ok')
-    }
-    load()
+
+      if (!alive) return
+      if (error) { setState('error'); return }
+      if (!data || data.is_public === false) { setState('notfound'); return }
+      setData(data); setState('ok')
+    })()
+    return () => { alive = false }
   }, [handle])
 
-  if (state === 'loading') {
-    return <div style={{padding:40}}><div>Loading…</div></div>
-  }
-  if (state === 'notfound') {
-    return <div style={{padding:40}}><div>This profile is private or does not exist.</div></div>
-  }
-  if (state === 'error') {
-    return <div style={{padding:40}}><div>Something went wrong loading this profile.</div></div>
-  }
+  if (state === 'loading') return <div style={{padding:40}}>Loading…</div>
+  if (state === 'notfound') return <div style={{padding:40}}>This profile is private or does not exist.</div>
+  if (state === 'error') return <div style={{padding:40}}>Something went wrong.</div>
 
   return (
     <div style={{padding:40, maxWidth:720, fontFamily:'ui-sans-serif, system-ui'}}>
