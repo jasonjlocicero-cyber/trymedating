@@ -25,7 +25,7 @@ export default function PublicProfile(){
     ;(async () => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('handle, display_name, bio, mode, is_public')
+        .select('handle, display_name, bio, mode, is_public, avatar_url')
         .eq('handle', handle)
         .maybeSingle()
 
@@ -43,11 +43,17 @@ export default function PublicProfile(){
 
   return (
     <div style={{padding:40, maxWidth:720, fontFamily:'ui-sans-serif, system-ui'}}>
-      <h2>{data.display_name}</h2>
-      <div style={{opacity:.8, marginBottom:8}}>@{data.handle} · {data.mode}</div>
+      <img
+        src={data.avatar_url || 'https://via.placeholder.com/96?text=%F0%9F%98%8A'}
+        alt={`${data.display_name} avatar`}
+        style={{ width: 96, height: 96, borderRadius: '50%', objectFit:'cover', border:'1px solid #eee', marginBottom:12 }}
+      />
+      <h2 style={{margin:0}}>{data.display_name}</h2>
+      <div style={{opacity:.8, margin:'6px 0 12px'}}>@{data.handle} · {data.mode}</div>
       <div style={{border:'1px solid #eee', borderRadius:8, padding:16}}>
-        <p style={{whiteSpace:'pre-wrap'}}>{data.bio}</p>
+        <p style={{whiteSpace:'pre-wrap', margin:0}}>{data.bio}</p>
       </div>
     </div>
   )
 }
+
