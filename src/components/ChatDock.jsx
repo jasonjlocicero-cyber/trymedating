@@ -225,10 +225,16 @@ export default function ChatDock() {
 
   if (!supabase) return null
 
-  return (
-    <div style={{
-      position:'fixed', right:16, bottom:16, display:'flex', gap:12, zIndex: 50
-    }}>
+return (
+  <div style={{
+      position:'fixed',
+      right:16,
+      bottom:80,    // ⬅️ was 16, now lifted above footer
+      display:'flex',
+      gap:12,
+      zIndex: 50
+  }}>
+
       {items.map(item => (
         <div key={item.key} style={{ transform: item.minimized ? 'translateY(360px)' : 'translateY(0)', transition:'transform .18s ease' }}>
           <ChatWindow
