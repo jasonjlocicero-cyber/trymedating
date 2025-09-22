@@ -9,6 +9,7 @@ import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
+import Explore from './pages/Explore'  // ✅ new
 
 // Simple color constants
 const C = {
@@ -60,7 +61,7 @@ function Home() {
   )
 }
 
-// Top navigation bar (now includes Settings)
+// Top navigation bar (includes Settings + Explore)
 function NavBar() {
   const nav = useNavigate()
   return (
@@ -77,6 +78,9 @@ function NavBar() {
         TryMeDating
       </Link>
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <Link to="/explore" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
+          Explore
+        </Link>
         <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
           Profile
         </Link>
@@ -124,6 +128,7 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/explore" element={<Explore />} />   {/* ✅ new */}
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
@@ -138,4 +143,5 @@ export default function App() {
     </div>
   )
 }
+
 
