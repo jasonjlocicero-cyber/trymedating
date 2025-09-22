@@ -9,7 +9,8 @@ import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
-import Explore from './pages/Explore'  // ✅ new
+import Explore from './pages/Explore'
+import ResetPassword from './pages/ResetPassword' // ✅ new
 
 // Simple color constants
 const C = {
@@ -128,8 +129,9 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/explore" element={<Explore />} />   {/* ✅ new */}
+          <Route path="/explore" element={<Explore />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/reset" element={<ResetPassword />} />  {/* ✅ new route */}
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/u/:handle" element={<PublicProfile />} />
