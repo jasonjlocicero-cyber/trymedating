@@ -4,9 +4,11 @@ import { supabase } from '../lib/supabaseClient'
 export default function SettingsPage() {
   const [user, setUser] = useState(null)
   const [pw, setPw] = useState('')
+  const [newEmail, setNewEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
+  // Friendly message if env vars are missing
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
@@ -31,6 +33,7 @@ export default function SettingsPage() {
     })()
   }, [])
 
+  // CHANGE PASSWORD
   async function changePassword(e) {
     e.preventDefault()
     if (!pw || pw.length < 8) {
@@ -40,10 +43,36 @@ export default function SettingsPage() {
     setBusy(true); setMsg('')
     const { error } = await supabase.auth.updateUser({ password: pw })
     setBusy(false)
-    setPw('')
-    setMsg(error ? error.message : 'Password updated ✅')
+    if (error) setMsg(error.message)
+    else {
+      setPw('')
+      setMsg('Password updated ✅')
+    }
   }
 
+  // CHANGE EMAIL
+  async function changeEmail(e) {
+    e.preventDefault()
+    if (!newEmail) {
+      setMsg('Enter a new email.')
+      return
+    }
+    setBusy(true); setMsg('')
+    try {
+      const { error } = await supabase.auth.updateUser({ email: newEmail })
+      if (error) setMsg(error.message)
+      else {
+        setMsg('If confirmations are enabled, check your inbox to confirm the change.')
+        setNewEmail('')
+      }
+    } catch (err) {
+      setMsg(err.message || 'Email update failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // SIGN OUT
   async function signOut() {
     setBusy(true); setMsg('')
     await supabase.auth.signOut()
@@ -51,13 +80,14 @@ export default function SettingsPage() {
     window.location.href = '/auth'
   }
 
+  // DELETE ACCOUNT (calls Netlify Function with service_role)
   async function deleteAccount() {
     if (!user) return
     const sure = confirm('This permanently deletes your account and profile. Continue?')
     if (!sure) return
     setBusy(true); setMsg('Deleting account…')
 
-    // Get current session access token to prove identity to the function
+    // Get access token for verification
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
     if (!token) {
@@ -78,7 +108,6 @@ export default function SettingsPage() {
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body.error || 'Delete failed')
 
-      // Clear local session after server-side delete
       await supabase.auth.signOut()
       window.location.href = '/'
     } catch (e) {
@@ -93,8 +122,11 @@ export default function SettingsPage() {
 
       <section style={{ marginTop: 20 }}>
         <h3>Account</h3>
-        <div style={{ opacity:.8, fontSize:14, marginBottom:12 }}>Signed in as: {user?.email}</div>
+        <div style={{ opacity:.8, fontSize:14, marginBottom:12 }}>
+          Signed in as: {user?.email}
+        </div>
 
+        {/* Change Password */}
         <form onSubmit={changePassword} style={{ display:'grid', gap:12, maxWidth:420 }}>
           <label>
             New password
@@ -115,7 +147,29 @@ export default function SettingsPage() {
           </button>
         </form>
 
-        <div style={{ display:'flex', gap:12, marginTop:20 }}>
+        {/* Change Email */}
+        <form onSubmit={changeEmail} style={{ display:'grid', gap:12, maxWidth:420, marginTop:20 }}>
+          <label>
+            New email
+            <input
+              type="email"
+              placeholder="you@newmail.com"
+              value={newEmail}
+              onChange={e=>setNewEmail(e.target.value)}
+              style={{ width:'100%', padding:10, borderRadius:8, border:'1px solid #ddd', marginTop:6 }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={busy || !newEmail}
+            style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#2A9D8F', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}
+          >
+            {busy ? 'Working…' : 'Change email'}
+          </button>
+        </form>
+
+        {/* Quick Actions */}
+        <div style={{ display:'flex', gap:12, marginTop:20, flexWrap:'wrap' }}>
           <button
             onClick={signOut}
             disabled={busy}
@@ -133,8 +187,9 @@ export default function SettingsPage() {
           </button>
         </div>
 
-        {msg && <div style={{ marginTop:12, color:'#C0392B' }}>{msg}</div>}
+        {msg && <div style={{ marginTop:12, color: msg.includes('✅') ? '#2A9D8F' : '#C0392B' }}>{msg}</div>}
       </section>
     </div>
   )
 }
+
