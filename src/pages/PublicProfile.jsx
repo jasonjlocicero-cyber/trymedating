@@ -49,7 +49,7 @@ export default function PublicProfile() {
     return () => { alive = false }
   }, [handle])
 
-  // Check like/mutual state
+  // Check like/mutual state (optional)
   useEffect(() => {
     if (!viewer || !data?.user_id) return
     let alive = true
@@ -125,7 +125,7 @@ export default function PublicProfile() {
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.bio}</p>
       </div>
 
-      {/* Actions: Like/Unlike + Message */}
+      {/* Actions: Like/Unlike + Message (always allowed when signed in) */}
       <div style={{ marginTop: 16, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
         {viewer && viewer.id === data.user_id ? (
           <div style={{ fontSize:13, opacity:.7 }}>This is your profile.</div>
@@ -142,13 +142,13 @@ export default function PublicProfile() {
         )}
 
         <button
-          onClick={() => mutual ? nav(`/messages/${encodeURIComponent(data.handle)}`) : alert('You can message after a mutual like.')}
+          onClick={() => viewer ? nav(`/messages/${encodeURIComponent(data.handle)}`) : (window.location.href = '/auth')}
           style={{ padding:'10px 14px', borderRadius:10, border:'1px solid #ddd', background:'#fff' }}
         >
           Message
         </button>
 
-        {mutual && <span style={{ fontSize:13, color:'#2A9D8F' }}>It’s a match! 🎉 You can message now.</span>}
+        {mutual && <span style={{ fontSize:13, color:'#2A9D8F' }}>It’s a match! 🎉</span>}
         {err && <span style={{ fontSize:13, color:'#C0392B' }}>{err}</span>}
       </div>
 
