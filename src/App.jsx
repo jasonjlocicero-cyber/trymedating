@@ -1,5 +1,5 @@
 import React, { Suspense, useEffect, useState } from 'react'
-import { Routes, Route, Link, useNavigate } from 'react-router-dom'
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 
 // Pages
@@ -130,12 +130,21 @@ function Footer() {
 }
 
 export default function App() {
+  // Hide footer on messages routes or while chat pop-ups are open
+  const location = useLocation()
+  const inMessages = location.pathname.startsWith('/messages')
+  const [chatOpen, setChatOpen] = useState(false)
+
+  useEffect(() => {
+    function onStatus(e) { setChatOpen(!!e.detail?.open) }
+    window.addEventListener('chatdock:status', onStatus)
+    return () => window.removeEventListener('chatdock:status', onStatus)
+  }, [])
+
   return (
-    // Sticky footer layout: full-height column, footer pinned to bottom when content is short
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <NavBar />
 
-      {/* Main grows to fill available space; no bottom padding here */}
       <main style={{ flex: 1 }}>
         <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
           <Routes>
@@ -157,10 +166,10 @@ export default function App() {
         </Suspense>
       </main>
 
-      {/* Footer stays at the very bottom on short pages */}
-      <Footer />
+      {/* Footer is hidden in messages contexts and while chat windows are open */}
+      {(!inMessages && !chatOpen) && <Footer />}
 
-      {/* Floating chat dock appears on all pages (position:fixed; sits above footer) */}
+      {/* Floating chat dock (pop-ups) */}
       <ChatDock />
     </div>
   )
