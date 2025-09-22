@@ -113,7 +113,7 @@ function Footer() {
 // Main App
 export default function App() {
   return (
-    <div>
+    <div style={{ paddingBottom: '140px' /* keep content above the chat dock */ }}>
       <NavBar />
       <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
         <Routes>
@@ -134,6 +134,7 @@ export default function App() {
         </Routes>
       </Suspense>
       <Footer />
+      <ChatDock />
     </div>
   )
 }
