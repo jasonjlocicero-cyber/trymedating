@@ -8,7 +8,11 @@ export default function AuthPage() {
   const [sent, setSent] = useState(false)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const redirectTo = typeof window !== 'undefined' ? window.location.origin + '/profile' : undefined
+
+  // Where to land after normal auth
+  const redirectToProfile = typeof window !== 'undefined' ? window.location.origin + '/profile' : undefined
+  // Where to land after password reset (recovery flow)
+  const redirectToReset = typeof window !== 'undefined' ? window.location.origin + '/reset' : undefined
 
   if (!supabase) {
     return (
@@ -41,7 +45,7 @@ export default function AuthPage() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setMsg(error.message)
-      // success triggers onAuthStateChange → redirects
+      // success will redirect via onAuthStateChange
     } catch (err) {
       setMsg(err.message || 'Sign-in failed.')
     } finally { setBusy(false) }
@@ -51,7 +55,10 @@ export default function AuthPage() {
     e.preventDefault()
     setMsg(''); setBusy(true)
     try {
-      const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } })
+      const { error } = await supabase.auth.signUp({
+        email, password,
+        options: { emailRedirectTo: redirectToProfile }
+      })
       if (error) setMsg(error.message)
       else setMsg('Account created. Check your email if confirmations are on, then sign in.')
     } catch (err) {
@@ -63,11 +70,26 @@ export default function AuthPage() {
     e.preventDefault()
     setMsg(''); setBusy(true)
     try {
-      const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } })
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: redirectToProfile }
+      })
       if (error) setMsg(error.message)
       else setSent(true)
     } catch (err) {
       setMsg(err.message || 'Something went wrong.')
+    } finally { setBusy(false) }
+  }
+
+  async function sendReset(e) {
+    e.preventDefault()
+    if (!email) { setMsg('Enter your email first.'); return }
+    setMsg('Sending reset email…'); setBusy(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirectToReset })
+      setMsg(error ? error.message : 'Check your email for the reset link.')
+    } catch (err) {
+      setMsg(err.message || 'Could not send reset email.')
     } finally { setBusy(false) }
   }
 
@@ -113,8 +135,9 @@ export default function AuthPage() {
             style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#2A9D8F', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
-          <small style={{ opacity:.7 }}>
-            Forgot your password? <a href="#" onClick={async (e)=>{e.preventDefault(); setMsg('Sending reset email…'); const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo }); setMsg(error ? error.message : 'Check your email for the reset link.') }}>Reset it</a>.
+          <small style={{ opacity:.7, display:'block', marginTop:8 }}>
+            Forgot your password?{' '}
+            <a href="#" onClick={sendReset}>Send reset link</a>
           </small>
         </form>
       )}
@@ -161,7 +184,7 @@ export default function AuthPage() {
         )
       )}
 
-      {msg && <div style={{ color: '#C0392B', marginTop: 10 }}>{msg}</div>}
+      {msg && <div style={{ color: msg.includes('✅') ? '#2A9D8F' : '#C0392B', marginTop: 10 }}>{msg}</div>}
     </div>
   )
 }
