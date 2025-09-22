@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import QRCode from 'qrcode'
 
-// Turn any text into a safe handle (slug)
+// Make any text a safe handle (slug)
 const slugify = (s) =>
   (s || '')
     .toLowerCase()
@@ -29,20 +29,20 @@ export default function ProfilePage() {
   const [handleStatus, setHandleStatus] = useState('idle') // idle | checking | ok | taken | invalid
   const [avatarUploading, setAvatarUploading] = useState(false)
 
-  // If Supabase env vars aren’t set, show a friendly message instead of crashing
+  // Guard for missing env
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
         <h2>Your Profile</h2>
         <p>
-          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>
-          {' '}in Netlify → Site configuration → Environment, then redeploy.
+          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in
+          Netlify → Site configuration → Environment, then redeploy.
         </p>
       </div>
     )
   }
 
-  // 1) Get current user; if not signed in, send to /auth
+  // 1) Get current user (redirect if not signed in)
   useEffect(() => {
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -54,7 +54,7 @@ export default function ProfilePage() {
     })()
   }, [])
 
-  // 2) Load existing profile row for this user
+  // 2) Load existing profile row
   useEffect(() => {
     if (!user) return
     ;(async () => {
@@ -64,10 +64,7 @@ export default function ProfilePage() {
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle()
-
-      if (!error && data) {
-        setForm(prev => ({ ...prev, ...data }))
-      }
+      if (!error && data) setForm(prev => ({ ...prev, ...data }))
       setLoading(false)
     })()
   }, [user])
@@ -82,7 +79,7 @@ export default function ProfilePage() {
     build()
   }, [form.handle])
 
-  // 4) Debounced, case-insensitive handle availability check
+  // 4) Debounced handle availability check
   useEffect(() => {
     if (!form.handle) { setHandleStatus('idle'); return }
     const val = slugify(form.handle)
@@ -91,7 +88,7 @@ export default function ProfilePage() {
     let alive = true
     setHandleStatus('checking')
     const t = setTimeout(async () => {
-      // If user already owns this handle, it's OK
+      // If it's already mine, it's OK
       const { data: mine } = await supabase
         .from('profiles')
         .select('handle,user_id')
@@ -107,7 +104,6 @@ export default function ProfilePage() {
         .select('handle')
         .eq('handle', val)
         .maybeSingle()
-
       if (!alive) return
       if (error) { setHandleStatus('invalid'); return }
       setHandleStatus(data ? 'taken' : 'ok')
@@ -123,14 +119,13 @@ export default function ProfilePage() {
     [form.handle]
   )
 
-  // 5) Avatar upload to Supabase Storage (public bucket: avatars)
+  // 5) Avatar upload to Storage (bucket: avatars)
   async function onAvatarChange(e) {
     const file = e.target.files?.[0]
     if (!file || !user) return
     setAvatarUploading(true)
     setMessage('')
     try {
-      // Basic client-side checks
       const maxSize = 2 * 1024 * 1024 // 2 MB
       if (file.size > maxSize) throw new Error('Max file size is 2 MB')
       if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) throw new Error('Use PNG/JPG/WEBP/GIF')
@@ -138,11 +133,9 @@ export default function ProfilePage() {
       const ext = (file.name.split('.').pop() || 'png').toLowerCase()
       const path = `users/${user.id}/${Date.now()}.${ext}`
 
-      // Upload to 'avatars' bucket (must exist, public read enabled)
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: false })
       if (upErr) throw upErr
 
-      // Get public URL
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
       const url = pub?.publicUrl
       if (!url) throw new Error('Could not get public URL')
@@ -157,7 +150,7 @@ export default function ProfilePage() {
     }
   }
 
-  // 6) Save profile (upsert)
+  // 6) Save profile (upsert with explicit conflict target)
   async function save() {
     setMessage('')
     if (!user) return
@@ -180,7 +173,11 @@ export default function ProfilePage() {
       is_public: !!form.is_public,
       avatar_url: form.avatar_url || null
     }
-    const { error } = await supabase.from('profiles').upsert(payload).eq('user_id', user.id)
+
+    const { error } = await supabase
+      .from('profiles')
+      .upsert(payload, { onConflict: 'user_id' }) // ✅ key change here
+
     setSaving(false)
     if (error) setMessage(error.message)
     else setMessage('Profile saved ✅')
