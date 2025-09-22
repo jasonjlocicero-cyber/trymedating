@@ -13,12 +13,13 @@ import Contact from './pages/Contact'
 import Explore from './pages/Explore'
 import ResetPassword from './pages/ResetPassword'
 import Likes from './pages/Likes'
-import Messages from './pages/Messages'
+import Messages from './pages/Messages' // You can still use the full tab
 
-// Simple color constants
+// Components
+import ChatDock from './components/ChatDock'
+
 const C = { ink: '#222', coral: '#E76F51', teal: '#2A9D8F' }
 
-// Home page
 function Home() {
   const nav = useNavigate()
   return (
@@ -26,10 +27,16 @@ function Home() {
       <h1 style={{ fontSize: 48, marginBottom: 20 }}>Welcome to TryMeDating</h1>
       <p style={{ fontSize: 20, opacity: 0.8 }}>A warmer approach to meeting new people.</p>
       <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 24 }}>
-        <button onClick={() => nav('/profile')} style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.teal, color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+        <button
+          onClick={() => nav('/profile')}
+          style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.teal, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+        >
           Go to your Profile
         </button>
-        <button onClick={() => nav('/auth')} style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+        <button
+          onClick={() => nav('/auth')}
+          style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+        >
           Sign up / Log in
         </button>
       </div>
@@ -37,7 +44,6 @@ function Home() {
   )
 }
 
-// Top navigation bar (with auth-aware right side)
 function NavBar() {
   const nav = useNavigate()
   const [user, setUser] = useState(null)
@@ -46,26 +52,33 @@ function NavBar() {
   useEffect(() => {
     let alive = true
     async function prime() {
-      if (!supabase) return
       const { data: { session } } = await supabase.auth.getSession()
       if (!alive) return
       setUser(session?.user || null)
       if (session?.user) {
-        const { data } = await supabase.from('profiles').select('avatar_url').eq('user_id', session.user.id).maybeSingle()
+        const { data } = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
         if (!alive) return
         setAvatar(data?.avatar_url || '')
       }
     }
     prime()
-    const { data: sub } = supabase?.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null)
       if (!session?.user) setAvatar('')
       else {
-        supabase.from('profiles').select('avatar_url').eq('user_id', session.user.id).maybeSingle()
+        supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
           .then(({ data }) => setAvatar(data?.avatar_url || ''))
       }
-    }) || { data: { subscription: { unsubscribe(){} } } }
-    return () => { alive = false; sub.subscription?.unsubscribe?.() }
+    })
+    return () => { alive = false; sub.subscription.unsubscribe() }
   }, [])
 
   async function signOut() { await supabase.auth.signOut(); nav('/auth') }
@@ -79,17 +92,24 @@ function NavBar() {
         <Link to="/messages" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Messages</Link>
         <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Profile</Link>
         <Link to="/settings" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Settings</Link>
-        <Link to="/#how" style={{ color: C.ink, textDecoration: 'none' }}>How it works</Link>
-        <Link to="/#community" style={{ color: C.ink, textDecoration: 'none' }}>Community</Link>
-        <Link to="/#faqs" style={{ color: C.ink, textDecoration: 'none' }}>FAQs</Link>
         {!user ? (
-          <button onClick={() => nav('/auth')} style={{ padding: '10px 14px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+          <button
+            onClick={() => nav('/auth')}
+            style={{ padding: '10px 14px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', cursor: 'pointer', fontWeight: 700 }}
+          >
             Sign up
           </button>
         ) : (
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <img src={avatar || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'} alt="me" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #eee' }} />
-            <button onClick={signOut} style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+            <img
+              src={avatar || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'}
+              alt="me"
+              style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #eee' }}
+            />
+            <button
+              onClick={signOut}
+              style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
+            >
               Sign out
             </button>
           </div>
@@ -99,7 +119,6 @@ function NavBar() {
   )
 }
 
-// Footer
 function Footer() {
   return (
     <div style={{ textAlign: 'center', padding: 20, borderTop: '1px solid #eee', marginTop: 40 }}>
@@ -110,10 +129,10 @@ function Footer() {
   )
 }
 
-// Main App
 export default function App() {
   return (
-    <div style={{ paddingBottom: '140px' /* keep content above the chat dock */ }}>
+    // ⬇️ Reserve space so the floating ChatDock never overlaps the footer or inputs
+    <div style={{ paddingBottom: '140px' }}>
       <NavBar />
       <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
         <Routes>
@@ -121,7 +140,7 @@ export default function App() {
           <Route path="/explore" element={<Explore />} />
           <Route path="/likes" element={<Likes />} />
           <Route path="/messages" element={<Messages />} />
-          <Route path="/messages/:handle" element={<Messages />} /> {/* deep link to a chat */}
+          <Route path="/messages/:handle" element={<Messages />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/reset" element={<ResetPassword />} />
           <Route path="/profile" element={<ProfilePage />} />
@@ -134,9 +153,12 @@ export default function App() {
         </Routes>
       </Suspense>
       <Footer />
+
+      {/* Floating chat dock appears on all pages */}
       <ChatDock />
     </div>
   )
 }
+
 
 
