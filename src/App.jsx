@@ -1,5 +1,6 @@
-import React, { Suspense } from 'react'
+import React, { Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Link, useNavigate } from 'react-router-dom'
+import { supabase } from './lib/supabaseClient'
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -11,7 +12,7 @@ import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 import Explore from './pages/Explore'
 import ResetPassword from './pages/ResetPassword'
-import Likes from './pages/Likes' // ✅ new
+import Likes from './pages/Likes'
 
 // Simple color constants
 const C = {
@@ -63,9 +64,54 @@ function Home() {
   )
 }
 
-// Top navigation bar (includes Likes)
+// Top navigation bar (conditionally shows Sign up or Sign out)
 function NavBar() {
   const nav = useNavigate()
+  const [user, setUser] = useState(null)
+  const [avatar, setAvatar] = useState('')
+
+  useEffect(() => {
+    let alive = true
+
+    async function prime() {
+      if (!supabase) return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!alive) return
+      setUser(session?.user || null)
+      if (session?.user) {
+        // try to grab avatar from profiles (optional)
+        const { data } = await supabase
+          .from('profiles')
+          .select('avatar_url')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
+        if (!alive) return
+        setAvatar(data?.avatar_url || '')
+      }
+    }
+    prime()
+
+    const { data: sub } = supabase?.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null)
+      if (!session?.user) setAvatar('')
+      else {
+        // Refresh avatar on auth change
+        supabase.from('profiles')
+          .select('avatar_url')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
+          .then(({ data }) => setAvatar(data?.avatar_url || ''))
+      }
+    }) || { data: { subscription: { unsubscribe(){} } } }
+
+    return () => { alive = false; sub.subscription?.unsubscribe?.() }
+  }, [])
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    nav('/auth')
+  }
+
   return (
     <div
       style={{
@@ -95,20 +141,45 @@ function NavBar() {
         <Link to="/#how" style={{ color: C.ink, textDecoration: 'none' }}>How it works</Link>
         <Link to="/#community" style={{ color: C.ink, textDecoration: 'none' }}>Community</Link>
         <Link to="/#faqs" style={{ color: C.ink, textDecoration: 'none' }}>FAQs</Link>
-        <button
-          onClick={() => nav('/auth')}
-          style={{
-            padding: '10px 14px',
-            borderRadius: 10,
-            border: 'none',
-            background: C.coral,
-            color: '#fff',
-            cursor: 'pointer',
-            fontWeight: 700
-          }}
-        >
-          Sign up
-        </button>
+
+        {/* Right side: Sign up when logged out, or avatar + Sign out when logged in */}
+        {!user ? (
+          <button
+            onClick={() => nav('/auth')}
+            style={{
+              padding: '10px 14px',
+              borderRadius: 10,
+              border: 'none',
+              background: C.coral,
+              color: '#fff',
+              cursor: 'pointer',
+              fontWeight: 700
+            }}
+          >
+            Sign up
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <img
+              src={avatar || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'}
+              alt="me"
+              style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #eee' }}
+            />
+            <button
+              onClick={signOut}
+              style={{
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: '1px solid #ddd',
+                background: '#fff',
+                cursor: 'pointer',
+                fontWeight: 700
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -134,7 +205,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/explore" element={<Explore />} />
-          <Route path="/likes" element={<Likes />} /> {/* ✅ new route */}
+          <Route path="/likes" element={<Likes />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/reset" element={<ResetPassword />} />
           <Route path="/profile" element={<ProfilePage />} />
