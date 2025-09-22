@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react'
+import React, { Suspense } from 'react'
 import { Routes, Route, Link, useNavigate } from 'react-router-dom'
 
 // Pages
@@ -60,7 +60,7 @@ function Home() {
   )
 }
 
-// Top navigation bar
+// Top navigation bar (now includes Settings)
 function NavBar() {
   const nav = useNavigate()
   return (
@@ -79,6 +79,9 @@ function NavBar() {
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
         <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
           Profile
+        </Link>
+        <Link to="/settings" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
+          Settings
         </Link>
         <Link to="/#how" style={{ color: C.ink, textDecoration: 'none' }}>How it works</Link>
         <Link to="/#community" style={{ color: C.ink, textDecoration: 'none' }}>Community</Link>
