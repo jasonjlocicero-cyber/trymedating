@@ -14,6 +14,7 @@ const slugify = (s) =>
 
 export default function ProfilePage() {
   const [user, setUser] = useState(null)
+  const [emailVerified, setEmailVerified] = useState(true)
   const [form, setForm] = useState({
     handle: '',
     display_name: '',
@@ -28,6 +29,8 @@ export default function ProfilePage() {
   const [qr, setQr] = useState('')
   const [handleStatus, setHandleStatus] = useState('idle') // idle | checking | ok | taken | invalid
   const [avatarUploading, setAvatarUploading] = useState(false)
+  const [resendMsg, setResendMsg] = useState('')
+  const [resendBusy, setResendBusy] = useState(false)
 
   // Guard for missing env
   if (!supabase) {
@@ -51,6 +54,7 @@ export default function ProfilePage() {
         return
       }
       setUser(user)
+      setEmailVerified(!!user.email_confirmed_at)
     })()
   }, [])
 
@@ -199,12 +203,55 @@ export default function ProfilePage() {
     a.remove()
   }
 
+  // 7) Resend verification email
+  async function resendVerification() {
+    if (!user?.email) return
+    setResendMsg('Sending verification email…'); setResendBusy(true)
+    try {
+      const redirectTo = window.location.origin + '/profile'
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: user.email,
+        options: { emailRedirectTo: redirectTo }
+      })
+      if (error) setResendMsg(error.message)
+      else setResendMsg('Verification email sent ✅ Check your inbox.')
+    } catch (e) {
+      setResendMsg(e.message || 'Failed to send verification email.')
+    } finally {
+      setResendBusy(false)
+    }
+  }
+
   useEffect(() => { document.title = 'Your Profile • TryMeDating' }, [])
   if (loading) return <div style={{ padding: 40 }}>Loading…</div>
 
   return (
     <div style={{ padding: 40, maxWidth: 720, fontFamily: 'ui-sans-serif, system-ui' }}>
       <h2>Your Profile</h2>
+
+      {/* Email verification banner */}
+      {!emailVerified && (
+        <div style={{
+          background:'#FFF9E6', border:'1px solid #F2E2A4', padding:12, borderRadius:10,
+          display:'flex', flexWrap:'wrap', gap:12, alignItems:'center', margin:'12px 0'
+        }}>
+          <div>
+            <strong>Email not verified.</strong>{' '}
+            Please verify <code>{user?.email}</code> to protect your account and enable all features.
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button
+              onClick={resendVerification}
+              disabled={resendBusy}
+              style={{ padding:'8px 10px', borderRadius:8, border:'1px solid #ddd', background:'#fff' }}
+            >
+              {resendBusy ? 'Sending…' : 'Resend verification email'}
+            </button>
+            {resendMsg && <div style={{ alignSelf:'center', fontSize:13 }}>{resendMsg}</div>}
+          </div>
+        </div>
+      )}
 
       {/* Avatar */}
       <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:12 }}>
