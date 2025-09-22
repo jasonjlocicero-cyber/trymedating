@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabaseClient'
  * - Fixed dock at bottom-right (lifted above footer)
  * - Multiple ChatWindow popups (up to 3)
  * - Global helper: window.trymeChat.open({ handle, user_id })
+ * - Emits window event 'chatdock:status' with { open: boolean } so App.jsx can hide Footer
  */
 
 function useMe() {
@@ -188,6 +189,15 @@ export default function ChatDock() {
   const [items, setItems] = useState([]) // [{key, partner, minimized}]
   const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
 
+  // Announce open/close status to App.jsx so it can hide/show Footer
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: items.length > 0 } }))
+    return () => {
+      // on unmount, announce closed
+      window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: false } }))
+    }
+  }, [items.length])
+
   // Expose a global open() so any page can open chats
   useEffect(() => {
     window.trymeChat = {
@@ -231,8 +241,7 @@ export default function ChatDock() {
     <div style={{
       position:'fixed',
       right:16,
-      // Lift dock above footer (and iOS safe area)
-      bottom: 'calc(env(safe-area-inset-bottom) + 120px)',
+      bottom: 'calc(env(safe-area-inset-bottom) + 120px)', // lifted above footer
       display:'flex',
       gap:12,
       zIndex: 9999
@@ -256,3 +265,4 @@ export default function ChatDock() {
     </div>
   )
 }
+
