@@ -1,18 +1,18 @@
 import React, { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
   const { handle } = useParams()
-  const [viewer, setViewer] = useState(null)        // current signed-in user (can be null)
-  const [data, setData] = useState(null)            // profile being viewed
-  const [state, setState] = useState('loading')     // loading | ok | notfound | error
-  const [liked, setLiked] = useState(false)         // whether viewer liked this user
-  const [mutual, setMutual] = useState(false)       // whether both liked each other
+  const nav = useNavigate()
+  const [viewer, setViewer] = useState(null)
+  const [data, setData] = useState(null)
+  const [state, setState] = useState('loading') // loading | ok | notfound | error
+  const [liked, setLiked] = useState(false)
+  const [mutual, setMutual] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
-  // If Supabase isn't configured, show a friendly message
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
@@ -22,7 +22,6 @@ export default function PublicProfile() {
     )
   }
 
-  // Load viewer (if signed in)
   useEffect(() => {
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -30,7 +29,7 @@ export default function PublicProfile() {
     })()
   }, [])
 
-  // Fetch profile by handle (include user_id so we know who to like)
+  // Fetch profile by handle (include user_id)
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -50,28 +49,20 @@ export default function PublicProfile() {
     return () => { alive = false }
   }, [handle])
 
-  // Check like status (viewer → profile user) and mutual status
+  // Check like/mutual state
   useEffect(() => {
     if (!viewer || !data?.user_id) return
     let alive = true
     ;(async () => {
-      // Did I like them?
       const { data: myLike } = await supabase
-        .from('likes')
-        .select('liker, likee')
-        .eq('liker', viewer.id)
-        .eq('likee', data.user_id)
-        .maybeSingle()
-      if (alive) setLiked(!!myLike)
-
-      // Did they like me?
+        .from('likes').select('liker, likee')
+        .eq('liker', viewer.id).eq('likee', data.user_id).maybeSingle()
       const { data: theirLike } = await supabase
-        .from('likes')
-        .select('liker, likee')
-        .eq('liker', data.user_id)
-        .eq('likee', viewer.id)
-        .maybeSingle()
-      if (alive) setMutual(!!theirLike && !!myLike)
+        .from('likes').select('liker, likee')
+        .eq('liker', data.user_id).eq('likee', viewer.id).maybeSingle()
+      if (!alive) return
+      setLiked(!!myLike)
+      setMutual(!!myLike && !!theirLike)
     })()
     return () => { alive = false }
   }, [viewer, data?.user_id])
@@ -84,13 +75,9 @@ export default function PublicProfile() {
       const { error } = await supabase.from('likes').insert({ liker: viewer.id, likee: data.user_id })
       if (error && !String(error.message || '').includes('duplicate key')) throw error
       setLiked(true)
-      // Re-check mutual
       const { data: theirLike } = await supabase
-        .from('likes')
-        .select('liker, likee')
-        .eq('liker', data.user_id)
-        .eq('likee', viewer.id)
-        .maybeSingle()
+        .from('likes').select('liker, likee')
+        .eq('liker', data.user_id).eq('likee', viewer.id).maybeSingle()
       setMutual(!!theirLike)
     } catch (e) {
       setErr(e.message || 'Could not like.')
@@ -104,10 +91,8 @@ export default function PublicProfile() {
     setBusy(true); setErr('')
     try {
       const { error } = await supabase
-        .from('likes')
-        .delete()
-        .eq('liker', viewer.id)
-        .eq('likee', data.user_id)
+        .from('likes').delete()
+        .eq('liker', viewer.id).eq('likee', data.user_id)
       if (error) throw error
       setLiked(false)
       setMutual(false)
@@ -118,12 +103,10 @@ export default function PublicProfile() {
     }
   }
 
-  // States
   if (state === 'loading') return <div style={{ padding: 40 }}>Loading…</div>
   if (state === 'notfound') return <div style={{ padding: 40 }}>This profile is private or does not exist.</div>
   if (state === 'error') return <div style={{ padding: 40 }}>Something went wrong.</div>
 
-  // Render
   return (
     <div style={{ padding: 40, maxWidth: 720, margin: '0 auto', fontFamily: 'ui-sans-serif, system-ui' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
@@ -142,8 +125,8 @@ export default function PublicProfile() {
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.bio}</p>
       </div>
 
-      {/* Like / Unlike */}
-      <div style={{ marginTop: 16, display:'flex', gap:10, alignItems:'center' }}>
+      {/* Actions: Like/Unlike + Message */}
+      <div style={{ marginTop: 16, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
         {viewer && viewer.id === data.user_id ? (
           <div style={{ fontSize:13, opacity:.7 }}>This is your profile.</div>
         ) : liked ? (
@@ -158,7 +141,14 @@ export default function PublicProfile() {
           </button>
         )}
 
-        {mutual && <span style={{ fontSize:13, color:'#2A9D8F' }}>It’s a match! 🎉</span>}
+        <button
+          onClick={() => mutual ? nav(`/messages/${encodeURIComponent(data.handle)}`) : alert('You can message after a mutual like.')}
+          style={{ padding:'10px 14px', borderRadius:10, border:'1px solid #ddd', background:'#fff' }}
+        >
+          Message
+        </button>
+
+        {mutual && <span style={{ fontSize:13, color:'#2A9D8F' }}>It’s a match! 🎉 You can message now.</span>}
         {err && <span style={{ fontSize:13, color:'#C0392B' }}>{err}</span>}
       </div>
 
