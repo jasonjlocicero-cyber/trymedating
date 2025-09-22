@@ -1,55 +1,63 @@
 // netlify/functions/delete-account.js
-import { createClient } from '@supabase/supabase-js'
+const { createClient } = require('@supabase/supabase-js')
 
-const SUPABASE_URL = process.env.SUPABASE_URL
-const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE
+const url = process.env.SUPABASE_URL
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE
 
-// Basic CORS headers so the browser can call this function
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-}
+const supabase = createClient(url, serviceRole, {
+  auth: { persistSession: false }
+})
 
-export const handler = async (event) => {
-  // Handle CORS preflight
+exports.handler = async (event) => {
+  // CORS preflight (optional but handy if you ever call cross-origin)
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers: corsHeaders, body: '' }
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'authorization, content-type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
+      body: ''
+    }
   }
 
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers: corsHeaders, body: 'Method Not Allowed' }
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) }
   }
 
   try {
-    // Expect Authorization: Bearer <access_token>
-    const authHeader = event.headers.authorization || event.headers.Authorization
-    if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
-      return { statusCode: 401, headers: corsHeaders, body: 'Missing bearer token' }
+    const authHeader = event.headers.authorization || ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+    if (!token) return { statusCode: 401, body: JSON.stringify({ error: 'Missing token' }) }
+
+    const { user_id } = JSON.parse(event.body || '{}')
+    if (!user_id) return { statusCode: 400, body: JSON.stringify({ error: 'Missing user_id' }) }
+
+    // Verify the token belongs to the same user (prevents deleting others)
+    const { data: userFromToken, error: tokenErr } = await supabase.auth.getUser(token)
+    if (tokenErr || !userFromToken?.user) {
+      return { statusCode: 401, body: JSON.stringify({ error: 'Invalid token' }) }
     }
-    const accessToken = authHeader.split(' ')[1]
-
-    // Service role client (admin privileges)
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE)
-
-    // Verify the token → get user id
-    const { data: userData, error: getUserErr } = await admin.auth.getUser(accessToken)
-    if (getUserErr || !userData?.user) {
-      return { statusCode: 401, headers: corsHeaders, body: 'Invalid token' }
+    if (userFromToken.user.id !== user_id) {
+      return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) }
     }
-    const targetUserId = userData.user.id
 
-    // 1) Delete profile row
-    await admin.from('profiles').delete().eq('user_id', targetUserId)
+    // Delete profile row first (optional; auth deletion will cascade if FK on delete cascade is set)
+    await supabase.from('profiles').delete().eq('user_id', user_id)
 
-    // 2) Delete auth user
-    const { error: delErr } = await admin.auth.admin.deleteUser(targetUserId)
+    // Delete the auth user (service role required)
+    const { error: delErr } = await supabase.auth.admin.deleteUser(user_id)
     if (delErr) {
-      return { statusCode: 500, headers: corsHeaders, body: 'Failed to delete account' }
+      return { statusCode: 500, body: JSON.stringify({ error: delErr.message }) }
     }
 
-    return { statusCode: 200, headers: corsHeaders, body: 'ok' }
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: true })
+    }
   } catch (e) {
-    return { statusCode: 500, headers: corsHeaders, body: e.message }
+    return { statusCode: 500, body: JSON.stringify({ error: e.message || 'Server error' }) }
   }
 }
