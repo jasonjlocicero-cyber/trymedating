@@ -10,7 +10,8 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 import Explore from './pages/Explore'
-import ResetPassword from './pages/ResetPassword' // ✅ new
+import ResetPassword from './pages/ResetPassword'
+import Likes from './pages/Likes' // ✅ new
 
 // Simple color constants
 const C = {
@@ -62,7 +63,7 @@ function Home() {
   )
 }
 
-// Top navigation bar (includes Settings + Explore)
+// Top navigation bar (includes Likes)
 function NavBar() {
   const nav = useNavigate()
   return (
@@ -81,6 +82,9 @@ function NavBar() {
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
         <Link to="/explore" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
           Explore
+        </Link>
+        <Link to="/likes" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
+          Likes
         </Link>
         <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>
           Profile
@@ -130,8 +134,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/explore" element={<Explore />} />
+          <Route path="/likes" element={<Likes />} /> {/* ✅ new route */}
           <Route path="/auth" element={<AuthPage />} />
-          <Route path="/reset" element={<ResetPassword />} />  {/* ✅ new route */}
+          <Route path="/reset" element={<ResetPassword />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/u/:handle" element={<PublicProfile />} />
@@ -145,5 +150,4 @@ export default function App() {
     </div>
   )
 }
-
 
