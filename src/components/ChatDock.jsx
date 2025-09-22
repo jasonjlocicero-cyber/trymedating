@@ -3,9 +3,9 @@ import { supabase } from '../lib/supabaseClient'
 
 /**
  * ChatDock
- * - Fixed dock at bottom-right
- * - Manage multiple ChatWindow popups
- * - Exposes window.trymeChat.open({ handle? , user_id? })
+ * - Fixed dock at bottom-right (lifted above footer)
+ * - Multiple ChatWindow popups (up to 3)
+ * - Global helper: window.trymeChat.open({ handle, user_id })
  */
 
 function useMe() {
@@ -72,7 +72,7 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
     })()
   }, [me, partner?.user_id])
 
-  // Realtime subscription for this pair
+  // Realtime for this pair
   useEffect(() => {
     if (!me || !partner?.user_id) return
     const channel = supabase
@@ -131,7 +131,7 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
         </div>
       </div>
 
-      {/* Messages */}
+      {/* Messages (scrolling area) */}
       <div style={{ flex:1, overflow:'auto', padding:10, background:'#fafafa' }}>
         {loading && <div>Loading…</div>}
         {error && <div style={{ color:'#C0392B' }}>{error}</div>}
@@ -157,7 +157,7 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
       </div>
 
       {/* Composer */}
-      <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6 }}>
+      <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, background:'#fff' }}>
         <input
           value={draft}
           onChange={e=>setDraft(e.target.value)}
@@ -165,7 +165,11 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
           placeholder="Type a message…"
           style={{ flex:1, padding:10, borderRadius:10, border:'1px solid #ddd' }}
         />
-        <button onClick={send} disabled={!draft.trim()} style={{ padding:'8px 12px', border:'none', borderRadius:10, background:'#2A9D8F', color:'#fff', fontWeight:700 }}>
+        <button
+          onClick={send}
+          disabled={!draft.trim()}
+          style={{ padding:'8px 12px', border:'none', borderRadius:10, background:'#2A9D8F', color:'#fff', fontWeight:700 }}
+        >
           Send
         </button>
       </div>
@@ -184,7 +188,7 @@ export default function ChatDock() {
   const [items, setItems] = useState([]) // [{key, partner, minimized}]
   const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
 
-  // Expose a global open() helper so any page can open chats
+  // Expose a global open() so any page can open chats
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle, user_id } = {}) => {
@@ -202,14 +206,12 @@ export default function ChatDock() {
         setProfilesCache(prev => ({ ...prev, [prof.user_id]: prof }))
 
         setItems(prev => {
-          // Already open? Un-minimize and bring to front
           const exists = prev.find(x => x.partner.user_id === prof.user_id)
           if (exists) {
             return prev.map(x => x.partner.user_id === prof.user_id ? { ...x, minimized:false } : x)
           }
-          // Max 3 windows → drop the oldest
           const next = [...prev, { key: `w-${prof.user_id}`, partner: prof, minimized:false }]
-          return next.slice(-3)
+          return next.slice(-3) // cap at 3 windows
         })
       }
     }
@@ -225,20 +227,24 @@ export default function ChatDock() {
 
   if (!supabase) return null
 
-return (
-  <div style={{
+  return (
+    <div style={{
       position:'fixed',
       right:16,
-      // Lift the dock well above the footer (and account for iOS safe area)
+      // Lift dock above footer (and iOS safe area)
       bottom: 'calc(env(safe-area-inset-bottom) + 120px)',
       display:'flex',
       gap:12,
       zIndex: 9999
-  }}>
-
-
+    }}>
       {items.map(item => (
-        <div key={item.key} style={{ transform: item.minimized ? 'translateY(360px)' : 'translateY(0)', transition:'transform .18s ease' }}>
+        <div
+          key={item.key}
+          style={{
+            transform: item.minimized ? 'translateY(360px)' : 'translateY(0)',
+            transition:'transform .18s ease'
+          }}
+        >
           <ChatWindow
             me={me}
             partner={item.partner}
