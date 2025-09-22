@@ -229,11 +229,13 @@ return (
   <div style={{
       position:'fixed',
       right:16,
-      bottom:80,    // ⬅️ was 16, now lifted above footer
+      // Lift the dock well above the footer (and account for iOS safe area)
+      bottom: 'calc(env(safe-area-inset-bottom) + 120px)',
       display:'flex',
       gap:12,
-      zIndex: 50
+      zIndex: 9999
   }}>
+
 
       {items.map(item => (
         <div key={item.key} style={{ transform: item.minimized ? 'translateY(360px)' : 'translateY(0)', transition:'transform .18s ease' }}>
