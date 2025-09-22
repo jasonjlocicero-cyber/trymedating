@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
   const { handle } = useParams()
-  const nav = useNavigate()
   const [viewer, setViewer] = useState(null)
   const [data, setData] = useState(null)
   const [state, setState] = useState('loading') // loading | ok | notfound | error
@@ -29,7 +28,7 @@ export default function PublicProfile() {
     })()
   }, [])
 
-  // Fetch profile by handle (include user_id)
+  // Fetch profile by handle
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -49,7 +48,7 @@ export default function PublicProfile() {
     return () => { alive = false }
   }, [handle])
 
-  // Check like/mutual state (optional)
+  // Check like/mutual
   useEffect(() => {
     if (!viewer || !data?.user_id) return
     let alive = true
@@ -103,6 +102,16 @@ export default function PublicProfile() {
     }
   }
 
+  function openChat() {
+    if (!viewer) { window.location.href = '/auth'; return }
+    if (window?.trymeChat?.open) {
+      window.trymeChat.open({ handle })
+    } else {
+      // fallback: go to Messages tab
+      window.location.href = `/messages/${encodeURIComponent(handle)}`
+    }
+  }
+
   if (state === 'loading') return <div style={{ padding: 40 }}>Loading…</div>
   if (state === 'notfound') return <div style={{ padding: 40 }}>This profile is private or does not exist.</div>
   if (state === 'error') return <div style={{ padding: 40 }}>Something went wrong.</div>
@@ -125,7 +134,7 @@ export default function PublicProfile() {
         <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.bio}</p>
       </div>
 
-      {/* Actions: Like/Unlike + Message (always allowed when signed in) */}
+      {/* Actions */}
       <div style={{ marginTop: 16, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
         {viewer && viewer.id === data.user_id ? (
           <div style={{ fontSize:13, opacity:.7 }}>This is your profile.</div>
@@ -142,7 +151,7 @@ export default function PublicProfile() {
         )}
 
         <button
-          onClick={() => viewer ? nav(`/messages/${encodeURIComponent(data.handle)}`) : (window.location.href = '/auth')}
+          onClick={openChat}
           style={{ padding:'10px 14px', borderRadius:10, border:'1px solid #ddd', background:'#fff' }}
         >
           Message
