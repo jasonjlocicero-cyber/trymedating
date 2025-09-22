@@ -1,38 +1,70 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-export default function SettingsPage(){
+export default function SettingsPage() {
   const [user, setUser] = useState(null)
+  const [pw, setPw] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
-  useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getUser().then(({ data }) => setUser(data.user || null))
-  }, [])
-
   if (!supabase) {
     return (
-      <div style={{padding:40}}>
+      <div style={{ padding: 40 }}>
         <h2>Settings</h2>
-        <p>Supabase is not configured. Add env vars and redeploy.</p>
+        <p>
+          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and{' '}
+          <code>VITE_SUPABASE_ANON_KEY</code> to Netlify Environment variables and redeploy.
+        </p>
       </div>
     )
   }
 
-  async function signOut(){
-    await supabase.auth.signOut()
-    window.location.href = '/'
+  useEffect(() => {
+    document.title = 'Settings • TryMeDating'
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        window.location.href = '/auth'
+        return
+      }
+      setUser(user)
+    })()
+  }, [])
+
+  async function changePassword(e) {
+    e.preventDefault()
+    if (!pw || pw.length < 8) {
+      setMsg('Password must be at least 8 characters.')
+      return
+    }
+    setBusy(true); setMsg('')
+    const { error } = await supabase.auth.updateUser({ password: pw })
+    setBusy(false)
+    setPw('')
+    setMsg(error ? error.message : 'Password updated ✅')
   }
 
-  async function deleteAccountCompletely(){
-    if (!user) return
-    if (!confirm('Delete your account permanently? This cannot be undone.')) return
+  async function signOut() {
     setBusy(true); setMsg('')
-    // Get current access token
+    await supabase.auth.signOut()
+    setBusy(false)
+    window.location.href = '/auth'
+  }
+
+  async function deleteAccount() {
+    if (!user) return
+    const sure = confirm('This permanently deletes your account and profile. Continue?')
+    if (!sure) return
+    setBusy(true); setMsg('Deleting account…')
+
+    // Get current session access token to prove identity to the function
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
-    if (!token) { setBusy(false); setMsg('No active session'); return }
+    if (!token) {
+      setBusy(false)
+      setMsg('No active session. Please sign in again.')
+      return
+    }
 
     try {
       const res = await fetch('/.netlify/functions/delete-account', {
@@ -41,64 +73,68 @@ export default function SettingsPage(){
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({}) // we don't need to send user_id; server derives it from token
+        body: JSON.stringify({ user_id: user.id })
       })
-      if (res.ok) {
-        // Best-effort local signout; token may already be invalid
-        await supabase.auth.signOut()
-        alert('Your account has been deleted.')
-        window.location.href = '/'
-      } else {
-        const text = await res.text()
-        setMsg(`Failed to delete account: ${text}`)
-      }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Delete failed')
+
+      // Clear local session after server-side delete
+      await supabase.auth.signOut()
+      window.location.href = '/'
     } catch (e) {
-      setMsg(`Error: ${e.message}`)
-    } finally {
+      setMsg(e.message)
       setBusy(false)
     }
   }
 
   return (
-    <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui', maxWidth: 720 }}>
+    <div style={{ padding: 40, maxWidth: 640, fontFamily: 'ui-sans-serif, system-ui' }}>
       <h2>Settings</h2>
 
-      {!user ? (
-        <div style={{ marginTop: 16 }}>Please sign in to manage your settings. <a href="/auth">Go to Auth</a></div>
-      ) : (
-        <>
-          <div style={{ marginTop: 16 }}>
-            <div style={{ opacity: .8 }}>
-              <div><strong>Signed in as:</strong> {user.email}</div>
-              <div style={{ fontSize: 13, opacity: .8 }}>User ID: {user.id}</div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-              <button onClick={signOut} disabled={busy} style={{ padding: '10px 14px' }}>Sign out</button>
-            </div>
-          </div>
+      <section style={{ marginTop: 20 }}>
+        <h3>Account</h3>
+        <div style={{ opacity:.8, fontSize:14, marginBottom:12 }}>Signed in as: {user?.email}</div>
 
-          <div style={{ border: '1px solid #eee', borderRadius: 12, padding: 16, marginTop: 20 }}>
-            <h3 style={{ margin: 0 }}>Danger zone</h3>
-            <p style={{ opacity: .8 }}>This action is permanent and removes your account and profile.</p>
-            <button
-              onClick={deleteAccountCompletely}
-              disabled={busy}
-              style={{
-                padding: '10px 14px',
-                background: '#fff',
-                border: '2px solid #E03A3A',
-                color: '#E03A3A',
-                borderRadius: 8,
-                cursor: 'pointer'
-              }}
-            >
-              Delete account permanently
-            </button>
-          </div>
-        </>
-      )}
+        <form onSubmit={changePassword} style={{ display:'grid', gap:12, maxWidth:420 }}>
+          <label>
+            New password
+            <input
+              type="password"
+              placeholder="At least 8 characters"
+              value={pw}
+              onChange={e=>setPw(e.target.value)}
+              style={{ width:'100%', padding:10, borderRadius:8, border:'1px solid #ddd', marginTop:6 }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={busy || !pw}
+            style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#2A9D8F', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}
+          >
+            {busy ? 'Working…' : 'Change password'}
+          </button>
+        </form>
 
-      {msg && <div style={{ marginTop: 12 }}>{msg}</div>}
+        <div style={{ display:'flex', gap:12, marginTop:20 }}>
+          <button
+            onClick={signOut}
+            disabled={busy}
+            style={{ padding:'10px 14px', borderRadius:10, border:'1px solid #ddd', background:'#fff', cursor: busy?'not-allowed':'pointer' }}
+          >
+            Sign out
+          </button>
+
+          <button
+            onClick={deleteAccount}
+            disabled={busy}
+            style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#E76F51', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}
+          >
+            Delete account
+          </button>
+        </div>
+
+        {msg && <div style={{ marginTop:12, color:'#C0392B' }}>{msg}</div>}
+      </section>
     </div>
   )
 }
