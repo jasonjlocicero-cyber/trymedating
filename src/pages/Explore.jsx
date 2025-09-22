@@ -2,12 +2,26 @@ import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
+/**
+ * Explore page
+ * - Lists public profiles
+ * - Server-side search (handle/display_name/bio)
+ * - Mode filter (dating/friends/browsing)
+ * - Pagination with "Load more"
+ */
 export default function Explore() {
   const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState('')        // simple search by handle/name
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [q, setQ] = useState('')
+  const [mode, setMode] = useState('all') // all | dating | friends | browsing
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
 
+  // Page size for pagination
+  const PAGE_SIZE = 12
+
+  // Friendly message if env vars are missing
   if (!supabase) {
     return (
       <div style={{ padding: 40 }}>
@@ -19,51 +33,139 @@ export default function Explore() {
 
   useEffect(() => { document.title = 'Explore • TryMeDating' }, [])
 
-  async function load() {
-    setLoading(true); setError('')
-    // Basic “search”: filter client-side for simplicity
-    const { data, error } = await supabase
+  // Build a server-side query for profiles
+  function buildQuery() {
+    let query = supabase
       .from('profiles')
       .select('handle, display_name, bio, avatar_url, mode, updated_at')
       .eq('is_public', true)
-      .order('updated_at', { ascending: false })
-      .limit(60)
-    if (error) setError(error.message)
-    setRows(data || [])
-    setLoading(false)
+
+    if (mode !== 'all') {
+      query = query.eq('mode', mode)
+    }
+
+    const term = q.trim()
+    if (term) {
+      // Safely escape percent signs to avoid breaking ilike pattern
+      const safe = term.replace(/%/g, '\\%').replace(/_/g, '\\_')
+      // Search handle OR display_name OR bio
+      query = query.or(
+        `handle.ilike.%${safe}%,display_name.ilike.%${safe}%,bio.ilike.%${safe}%`
+      )
+    }
+
+    // Newest first
+    query = query.order('updated_at', { ascending: false })
+
+    // Pagination range
+    const from = page * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    query = query.range(from, to)
+
+    return query
   }
 
-  useEffect(() => { load() }, [])
+  // Load a page (appends results unless reset=true)
+  async function load({ reset = false } = {}) {
+    setLoading(true)
+    setError('')
+    try {
+      const { data, error } = await buildQuery()
+      if (error) throw error
 
-  const filtered = rows.filter(p => {
-    if (!q.trim()) return true
-    const s = q.toLowerCase()
-    return (p.display_name || '').toLowerCase().includes(s) ||
-           (p.handle || '').toLowerCase().includes(s) ||
-           (p.bio || '').toLowerCase().includes(s)
-  })
+      const arr = data || []
+      setHasMore(arr.length === PAGE_SIZE)
+
+      if (reset) {
+        setRows(arr)
+      } else {
+        setRows(prev => [...prev, ...arr])
+      }
+    } catch (e) {
+      setError(e.message || 'Failed to load profiles.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Initial load
+  useEffect(() => {
+    setPage(0)
+    setHasMore(true)
+    load({ reset: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // run once
+
+  // When filters/search change → reset to page 0 and reload
+  useEffect(() => {
+    setPage(0)
+    setHasMore(true)
+    load({ reset: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
+  // Submit search
+  function onSearch(e) {
+    e?.preventDefault()
+    setPage(0)
+    setHasMore(true)
+    load({ reset: true })
+  }
+
+  // Load next page
+  async function loadMore() {
+    if (loading || !hasMore) return
+    setPage(prev => prev + 1)
+    // Wait for state update to reflect in buildQuery; a tiny timeout avoids using stale "page"
+    setTimeout(() => load({ reset: false }), 0)
+  }
 
   return (
     <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui' }}>
       <h2 style={{ marginBottom: 12 }}>Explore public profiles</h2>
-      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
+
+      {/* Controls */}
+      <form onSubmit={onSearch} style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:16 }}>
         <input
           value={q}
           onChange={e=>setQ(e.target.value)}
           placeholder="Search by name, handle, or bio…"
           style={{ padding:10, border:'1px solid #ddd', borderRadius:8, minWidth:260 }}
         />
-        <button onClick={load} style={{ padding:'10px 12px', border:'1px solid #ddd', borderRadius:8, background:'#fff' }}>
-          Refresh
+        <select
+          value={mode}
+          onChange={e=>setMode(e.target.value)}
+          style={{ padding:10, border:'1px solid #ddd', borderRadius:8 }}
+        >
+          <option value="all">All modes</option>
+          <option value="dating">Dating</option>
+          <option value="friends">Friends</option>
+          <option value="browsing">Browsing</option>
+        </select>
+        <button
+          type="submit"
+          style={{ padding:'10px 12px', border:'1px solid #ddd', borderRadius:8, background:'#fff' }}
+          disabled={loading}
+        >
+          {loading ? 'Searching…' : 'Search'}
         </button>
-      </div>
+        <button
+          type="button"
+          onClick={() => { setQ(''); setMode('all'); onSearch() }}
+          style={{ padding:'10px 12px', border:'1px solid #ddd', borderRadius:8, background:'#fff' }}
+          disabled={loading}
+        >
+          Reset
+        </button>
+      </form>
 
-      {loading && <div>Loading…</div>}
-      {error && <div style={{ color:'#C0392B' }}>{error}</div>}
-      {!loading && filtered.length === 0 && <div>No public profiles yet.</div>}
+      {/* Status */}
+      {error && <div style={{ color:'#C0392B', marginBottom:12 }}>{error}</div>}
+      {rows.length === 0 && !loading && !error && <div>No public profiles found.</div>}
 
+      {/* Grid */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:16 }}>
-        {filtered.map(p => (
+        {rows.map(p => (
           <Link
             key={p.handle}
             to={`/u/${encodeURIComponent(p.handle)}`}
@@ -85,10 +187,29 @@ export default function Explore() {
                 {(p.bio || '').slice(0,140)}
                 {p.bio && p.bio.length > 140 ? '…' : ''}
               </p>
+              <div style={{ fontSize:12, opacity:.6, marginTop:8 }}>
+                Updated {new Date(p.updated_at).toLocaleDateString()}
+              </div>
             </div>
           </Link>
         ))}
       </div>
+
+      {/* Load more */}
+      <div style={{ display:'flex', justifyContent:'center', marginTop:20 }}>
+        {hasMore ? (
+          <button
+            onClick={loadMore}
+            disabled={loading}
+            style={{ padding:'10px 14px', border:'1px solid #ddd', borderRadius:8, background:'#fff' }}
+          >
+            {loading ? 'Loading…' : 'Load more'}
+          </button>
+        ) : (
+          rows.length > 0 && <div style={{ opacity:.7 }}>No more results.</div>
+        )}
+      </div>
     </div>
   )
 }
+
