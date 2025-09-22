@@ -2,28 +2,19 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
-/**
- * Messages
- * - Left: conversation list (people you've chatted with, newest first)
- * - Right: chat with selected person
- * - Realtime: new incoming/outgoing messages append live
- * - Deep link: /messages/:handle opens that chat
- */
 export default function Messages() {
   const { handle: routeHandle } = useParams()
   const nav = useNavigate()
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [allMsgs, setAllMsgs] = useState([])   // recent messages (flat)
-  const [partners, setPartners] = useState({}) // user_id -> profile
-  const [activeId, setActiveId] = useState(null)  // user_id of current chat partner
+  const [allMsgs, setAllMsgs] = useState([])
+  const [partners, setPartners] = useState({})
+  const [activeId, setActiveId] = useState(null)
   const [draft, setDraft] = useState('')
   const bottomRef = useRef(null)
 
-  if (!supabase) {
-    return <div style={{ padding: 40 }}>Supabase not configured. Add env vars and redeploy.</div>
-  }
+  if (!supabase) return <div style={{ padding: 40 }}>Supabase not configured.</div>
 
   useEffect(() => { document.title = 'Messages • TryMeDating' }, [])
 
@@ -36,13 +27,12 @@ export default function Messages() {
     })()
   }, [])
 
-  // 2) Load recent messages that involve me (both directions)
+  // 2) Load recent messages that involve me
   useEffect(() => {
     if (!me) return
     ;(async () => {
       try {
         setLoading(true); setError('')
-        // Pull the latest 400 messages involving me (enough to build a conversation list)
         const { data, error } = await supabase
           .from('messages')
           .select('id, sender, recipient, body, created_at')
@@ -52,14 +42,12 @@ export default function Messages() {
         if (error) throw error
         setAllMsgs(data || [])
 
-        // Build set of partner IDs
+        // Preload partner profiles
         const ids = new Set()
         ;(data || []).forEach(m => {
           const other = m.sender === me.id ? m.recipient : m.sender
           ids.add(other)
         })
-
-        // Fetch partner profiles
         if (ids.size) {
           const arr = Array.from(ids)
           const { data: profs, error: e2 } = await supabase
@@ -81,21 +69,51 @@ export default function Messages() {
     })()
   }, [me])
 
-  // 3) Realtime subscription to new messages
+  // 3) Realtime subscription: append and ensure partner profile exists
   useEffect(() => {
     if (!me) return
     const channel = supabase
       .channel('realtime:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async payload => {
         const m = payload.new
-        if (m.sender !== me.id && m.recipient !== me.id) return // not my convo
+        // Only care about messages involving me
+        if (m.sender !== me.id && m.recipient !== me.id) return
+
+        // Append immediately
         setAllMsgs(prev => [m, ...prev])
+
+        // Determine the "other" user
+        const other = m.sender === me.id ? m.recipient : m.sender
+
+        // If we don't have their profile yet, fetch it once
+        if (!partners[other]) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('user_id, handle, display_name, avatar_url, is_public, mode')
+            .eq('user_id', other)
+            .maybeSingle()
+          if (prof) {
+            setPartners(prev => ({ ...prev, [other]: prof }))
+          }
+        }
+
+        // If we currently have no active chat selected, auto-open this one
+        setActiveId(prev => prev ?? other)
+        const h = partners[other]?.handle || (await (async () => {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('handle')
+            .eq('user_id', other)
+            .maybeSingle()
+          return prof?.handle
+        })())
+        if (h) nav(`/messages/${encodeURIComponent(h)}`, { replace: true })
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [me])
+  }, [me, partners, nav])
 
-  // 4) If a handle was provided in URL, resolve it and select that chat
+  // 4) Deep-linked handle → resolve and select
   useEffect(() => {
     if (!me) return
     ;(async () => {
@@ -112,19 +130,15 @@ export default function Messages() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeHandle, me])
 
-  // 5) Conversation list computed from messages
+  // 5) Build thread list
   const threads = useMemo(() => {
-    const lastByPartner = new Map() // partnerId -> last message
+    const lastByPartner = new Map()
     for (const m of allMsgs) {
       const other = m.sender === me?.id ? m.recipient : m.sender
       if (!other) continue
-      if (!lastByPartner.has(other)) lastByPartner.set(other, m) // first seen is newest due to sort
+      if (!lastByPartner.has(other)) lastByPartner.set(other, m) // newest first
     }
-    // To include a deep-linked partner with no messages yet
-    if (activeId && !lastByPartner.has(activeId)) {
-      lastByPartner.set(activeId, null)
-    }
-    // Turn into sorted array (by last message time desc; new chats first)
+    if (activeId && !lastByPartner.has(activeId)) lastByPartner.set(activeId, null)
     const arr = Array.from(lastByPartner.entries()).map(([partnerId, last]) => ({
       partnerId,
       lastAt: last?.created_at || '1970-01-01T00:00:00Z',
@@ -134,7 +148,17 @@ export default function Messages() {
     return arr
   }, [allMsgs, me, activeId])
 
-  // 6) Messages for active chat (oldest-first)
+  // 5.5) Auto-open latest when landing on /messages with no selection
+  useEffect(() => {
+    if (!routeHandle && !activeId && threads.length > 0) {
+      setActiveId(threads[0].partnerId)
+      const h = partners[threads[0].partnerId]?.handle
+      if (h) nav(`/messages/${encodeURIComponent(h)}`, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threads.length, routeHandle, activeId])
+
+  // 6) Active chat messages (oldest-first)
   const activeMsgs = useMemo(() => {
     if (!activeId) return []
     return allMsgs
@@ -156,16 +180,9 @@ export default function Messages() {
     if (error) setError(error.message)
   }
 
-  // UI helpers
-  function avatarOf(uid) {
-    return partners[uid]?.avatar_url || 'https://via.placeholder.com/40?text=%F0%9F%98%8A'
-  }
-  function nameOf(uid) {
-    return partners[uid]?.display_name || partners[uid]?.handle || 'Unknown'
-  }
-  function handleOf(uid) {
-    return partners[uid]?.handle || 'unknown'
-  }
+  function avatarOf(uid) { return partners[uid]?.avatar_url || 'https://via.placeholder.com/40?text=%F0%9F%98%8A' }
+  function nameOf(uid) { return partners[uid]?.display_name || partners[uid]?.handle || 'Unknown' }
+  function handleOf(uid) { return partners[uid]?.handle || 'unknown' }
 
   return (
     <div style={{ height: 'calc(100vh - 120px)', display: 'grid', gridTemplateColumns: '320px 1fr', gap: 0 }}>
