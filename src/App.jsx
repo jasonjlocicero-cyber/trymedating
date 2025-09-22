@@ -13,7 +13,7 @@ import Contact from './pages/Contact'
 import Explore from './pages/Explore'
 import ResetPassword from './pages/ResetPassword'
 import Likes from './pages/Likes'
-import Messages from './pages/Messages' // You can still use the full tab
+import Messages from './pages/Messages'
 
 // Components
 import ChatDock from './components/ChatDock'
@@ -131,30 +131,36 @@ function Footer() {
 
 export default function App() {
   return (
-    // ⬇️ Reserve space so the floating ChatDock never overlaps the footer or inputs
-    <div style={{ paddingBottom: '140px' }}>
+    // Sticky footer layout: full-height column, footer pinned to bottom when content is short
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <NavBar />
-      <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/explore" element={<Explore />} />
-          <Route path="/likes" element={<Likes />} />
-          <Route path="/messages" element={<Messages />} />
-          <Route path="/messages/:handle" element={<Messages />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/reset" element={<ResetPassword />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/u/:handle" element={<PublicProfile />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
-        </Routes>
-      </Suspense>
+
+      {/* Main grows to fill available space; no bottom padding here */}
+      <main style={{ flex: 1 }}>
+        <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/explore" element={<Explore />} />
+            <Route path="/likes" element={<Likes />} />
+            <Route path="/messages" element={<Messages />} />
+            <Route path="/messages/:handle" element={<Messages />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/reset" element={<ResetPassword />} />
+            <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/u/:handle" element={<PublicProfile />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
+          </Routes>
+        </Suspense>
+      </main>
+
+      {/* Footer stays at the very bottom on short pages */}
       <Footer />
 
-      {/* Floating chat dock appears on all pages */}
+      {/* Floating chat dock appears on all pages (position:fixed; sits above footer) */}
       <ChatDock />
     </div>
   )
