@@ -48,6 +48,7 @@ function NavBar() {
   const nav = useNavigate()
   const [user, setUser] = useState(null)
   const [avatar, setAvatar] = useState('')
+  const [unreadCount, setUnreadCount] = useState(0) // 🔴 messages badge
 
   useEffect(() => {
     let alive = true
@@ -81,6 +82,16 @@ function NavBar() {
     return () => { alive = false; sub.subscription.unsubscribe() }
   }, [])
 
+  // Listen for unread count from ChatDock
+  useEffect(() => {
+    function onUnread(e) {
+      const n = Number(e.detail?.count || 0)
+      setUnreadCount(isNaN(n) ? 0 : n)
+    }
+    window.addEventListener('chatdock:unread', onUnread)
+    return () => window.removeEventListener('chatdock:unread', onUnread)
+  }, [])
+
   async function signOut() { await supabase.auth.signOut(); nav('/auth') }
 
   return (
@@ -88,8 +99,28 @@ function NavBar() {
       <Link to="/" style={{ fontSize: 20, fontWeight: 700, color: C.ink, textDecoration: 'none' }}>TryMeDating</Link>
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
         <Link to="/explore" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Explore</Link>
+
+        {/* Messages link with red dot badge */}
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+          <Link to="/messages" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Messages</Link>
+          {unreadCount > 0 && (
+            <span
+              aria-label={`${unreadCount} unread`}
+              title={`${unreadCount} unread`}
+              style={{
+                position: 'absolute',
+                top: -4, right: -10,
+                minWidth: 8, height: 8,
+                background: '#E63946',
+                borderRadius: 999,
+                boxShadow: '0 0 0 2px #fff',
+                display: 'inline-block'
+              }}
+            />
+          )}
+        </span>
+
         <Link to="/likes" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Likes</Link>
-        <Link to="/messages" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Messages</Link>
         <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Profile</Link>
         <Link to="/settings" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Settings</Link>
         {!user ? (
