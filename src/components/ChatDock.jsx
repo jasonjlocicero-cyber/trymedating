@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (QoL edition)
+ * ChatDock (QoL + Typing Indicators)
  * - Multiple pop-up chat windows (up to 3)
- * - Auto-focus input when window is active & visible
- * - Unread badges per conversation (stored via localStorage last-read markers)
+ * - Auto-focus input when active & visible
+ * - Unread badges via localStorage last-read markers
+ * - Typing indicators via Supabase Realtime Broadcast channels
  * - Emits:
  *   - 'chatdock:status'  { open: boolean }
  *   - 'chatdock:unread'  { count: number }
@@ -47,7 +48,7 @@ async function fetchProfileByUserId(user_id) {
   return data || null
 }
 
-// ---- ChatWindow ------------------------------------------------------------
+// ---------- ChatWindow ------------------------------------------------------
 
 function ChatWindow({
   me, partner,
@@ -60,26 +61,28 @@ function ChatWindow({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [draft, setDraft] = useState('')
+  const [theirTyping, setTheirTyping] = useState(false)
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
+  const typingTimerRef = useRef(null)
+  const lastTypingSentRef = useRef(0)
 
   const lastReadKey = me && partner
     ? `tmd_last_read_${me.id}_${partner.user_id}`
     : null
 
-  // Helper to read & write last-read timestamp
+  // Helpers: read/write last-read timestamp
   function getLastRead() {
     if (!lastReadKey) return 0
     const raw = localStorage.getItem(lastReadKey)
     return raw ? Number(raw) : 0
-  }
+    }
   function markReadNow() {
     if (!lastReadKey) return
-    const now = Date.now()
-    localStorage.setItem(lastReadKey, String(now))
+    localStorage.setItem(lastReadKey, String(Date.now()))
   }
 
-  // Initial load
+  // Load history
   useEffect(() => {
     if (!me || !partner?.user_id) return
     ;(async () => {
@@ -102,7 +105,7 @@ function ChatWindow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id, partner?.user_id])
 
-  // Realtime for this pair
+  // Realtime: DB inserts for this pair
   useEffect(() => {
     if (!me || !partner?.user_id) return
     const channel = supabase
@@ -122,6 +125,47 @@ function ChatWindow({
     return () => { supabase.removeChannel(channel) }
   }, [me?.id, partner?.user_id])
 
+  // Realtime: Typing indicator via Broadcast channel (no SQL)
+  useEffect(() => {
+    if (!me?.id || !partner?.user_id) return
+    // Stable room name for both sides (sorted UUIDs)
+    const [a, b] = [me.id, partner.user_id].sort()
+    const room = `typing:${a}:${b}`
+
+    const channel = supabase.channel(room)
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const { from, to } = payload.payload || {}
+        if (from === partner.user_id && to === me.id) {
+          // they are typing to me
+          setTheirTyping(true)
+          // auto-clear after 3s of silence
+          if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+          typingTimerRef.current = setTimeout(() => setTheirTyping(false), 3000)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+      supabase.removeChannel(channel)
+    }
+  }, [me?.id, partner?.user_id])
+
+  // Send "typing" broadcast (throttled) when I type
+  async function sendTypingSignal() {
+    if (!me?.id || !partner?.user_id) return
+    const now = Date.now()
+    if (now - lastTypingSentRef.current < 800) return // throttle to ~0.8s
+    lastTypingSentRef.current = now
+    const [a, b] = [me.id, partner.user_id].sort()
+    const room = `typing:${a}:${b}`
+    await supabase.channel(room).send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { from: me.id, to: partner.user_id }
+    })
+  }
+
   // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -130,12 +174,11 @@ function ChatWindow({
   // Auto-focus when active & not minimized
   useEffect(() => {
     if (active && !minimized) {
-      // small delay to ensure the input is in the DOM
       setTimeout(() => inputRef.current?.focus(), 0)
     }
   }, [active, minimized])
 
-  // Compute unread & notify parent whenever messages OR visibility changes
+  // Unread computation & mark-as-read when visible
   useEffect(() => {
     if (!messages.length || !partner?.user_id) {
       onUnreadChange?.(partner?.user_id, 0)
@@ -146,7 +189,6 @@ function ChatWindow({
       m => m.sender === partner.user_id && new Date(m.created_at).getTime() > lastReadAt
     ).length
 
-    // If window is active and visible, mark as read now
     if (active && !minimized) {
       if (unread > 0) {
         markReadNow()
@@ -170,7 +212,7 @@ function ChatWindow({
       body
     })
     if (error) setError(error.message)
-    // After send, keep focus for rapid typing
+    // keep focus for fast typing
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -225,12 +267,17 @@ function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
+      {/* Typing indicator */}
+      <div style={{ minHeight: theirTyping ? 18 : 0, padding: theirTyping ? '0 10px 6px' : 0, fontSize: 12, color:'#7a7a7a' }}>
+        {theirTyping ? `${partner?.display_name || partner?.handle || 'They'} is typing…` : null}
+      </div>
+
       {/* Composer */}
       <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, background:'#fff' }}>
         <input
           ref={inputRef}
           value={draft}
-          onChange={e=>setDraft(e.target.value)}
+          onChange={e=>{ setDraft(e.target.value); sendTypingSignal() }}
           onKeyDown={e=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
           placeholder="Type a message…"
           style={{ flex:1, padding:10, borderRadius:10, border:'1px solid #ddd' }}
@@ -253,7 +300,7 @@ const iconBtnStyle = {
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
 
-// ---- ChatDock --------------------------------------------------------------
+// ---------- ChatDock --------------------------------------------------------
 
 export default function ChatDock() {
   const me = useMe()
@@ -261,16 +308,16 @@ export default function ChatDock() {
   const [items, setItems] = useState([]) // [{key, partner, minimized, unread}]
   const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
 
-  // Helper to emit global status/unread for App.jsx (footer hiding, nav badges, etc.)
+  // Emit status + unread for navbar badge/footer hiding
   function emitStatus() {
     window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: items.length > 0 } }))
     const totalUnread = items.reduce((sum, x) => sum + (x.unread || 0), 0)
     window.dispatchEvent(new CustomEvent('chatdock:unread', { detail: { count: totalUnread } }))
   }
   useEffect(() => { emitStatus() }, [items.length])
-  useEffect(() => { emitStatus() }, [items.map(i => i.unread).join(',')]) // react to unread changes
+  useEffect(() => { emitStatus() }, [items.map(i => i.unread).join(',')])
 
-  // Expose a global open() so any page can open chats
+  // Global open()
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle, user_id } = {}) => {
@@ -290,17 +337,15 @@ export default function ChatDock() {
         setItems(prev => {
           const exists = prev.find(x => x.partner.user_id === prof.user_id)
           if (exists) {
-            // un-minimize and bring to front
             const updated = prev.map(x =>
               x.partner.user_id === prof.user_id ? { ...x, minimized:false } : x
             )
             setActiveUserId(prof.user_id)
             return updated
           }
-          // add new window; cap at 3
           const next = [...prev, { key: `w-${prof.user_id}`, partner: prof, minimized:false, unread:0 }]
           setActiveUserId(prof.user_id)
-          return next.slice(-3)
+          return next.slice(-3) // cap at 3 windows
         })
       }
     }
