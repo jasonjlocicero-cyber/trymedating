@@ -2,16 +2,12 @@ import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (Draggable)
- * - Multiple pop-up chat windows (up to 3)
- * - Drag & drop windows by header (mouse + touch)
- * - Auto-focus input when active & visible
- * - Unread badges via localStorage last-read markers
- * - Typing indicators via Supabase Realtime Broadcast
- * - Emits:
- *   - 'chatdock:status'  { open: boolean }
- *   - 'chatdock:unread'  { count: number }
- * - Global helper: window.trymeChat.open({ handle, user_id })
+ * ChatDock (Draggable + Persisted positions)
+ * - Multiple draggable chat windows (up to 3)
+ * - Positions saved/restored per partner in localStorage
+ * - Auto-focus input, unread badges, typing indicators
+ * - Emits 'chatdock:status' and 'chatdock:unread'
+ * - Global: window.trymeChat.open({ handle, user_id })
  */
 
 const WIN_W = 320
@@ -54,7 +50,7 @@ async function fetchProfileByUserId(user_id) {
   return data || null
 }
 
-// ---------- ChatWindow (inner UI) -------------------------------------------
+// ---------- ChatWindow (UI) -------------------------------------------------
 
 function ChatWindow({
   me, partner,
@@ -62,7 +58,7 @@ function ChatWindow({
   onClose, onMinimize,
   onFocus,
   onUnreadChange,
-  inputAutoFocusRef // for focusing from parent if needed
+  inputAutoFocusRef
 }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -74,12 +70,9 @@ function ChatWindow({
   const typingTimerRef = useRef(null)
   const lastTypingSentRef = useRef(0)
 
-  // expose ref up
   useEffect(() => { if (inputAutoFocusRef) inputAutoFocusRef.current = inputRef.current }, [inputAutoFocusRef])
 
-  const lastReadKey = me && partner
-    ? `tmd_last_read_${me.id}_${partner.user_id}`
-    : null
+  const lastReadKey = me && partner ? `tmd_last_read_${me.id}_${partner.user_id}` : null
 
   function getLastRead() {
     if (!lastReadKey) return 0
@@ -91,7 +84,6 @@ function ChatWindow({
     localStorage.setItem(lastReadKey, String(Date.now()))
   }
 
-  // Load history
   useEffect(() => {
     if (!me || !partner?.user_id) return
     ;(async () => {
@@ -104,17 +96,15 @@ function ChatWindow({
           .order('created_at', { ascending: false })
           .limit(100)
         if (error) throw error
-        setMessages((data || []).reverse()) // oldest first
+        setMessages((data || []).reverse())
       } catch (e) {
         setError(e.message || 'Failed to load messages.')
       } finally {
         setLoading(false)
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id, partner?.user_id])
 
-  // Realtime: DB inserts for this pair
   useEffect(() => {
     if (!me || !partner?.user_id) return
     const channel = supabase
@@ -134,7 +124,7 @@ function ChatWindow({
     return () => { supabase.removeChannel(channel) }
   }, [me?.id, partner?.user_id])
 
-  // Realtime: Typing via broadcast
+  // Typing indicator
   useEffect(() => {
     if (!me?.id || !partner?.user_id) return
     const [a, b] = [me.id, partner.user_id].sort()
@@ -169,11 +159,9 @@ function ChatWindow({
     })
   }
 
-  // Scroll & focus
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
   useEffect(() => { if (active && !minimized) setTimeout(() => inputRef.current?.focus(), 0) }, [active, minimized])
 
-  // Unread
   useEffect(() => {
     if (!messages.length || !partner?.user_id) {
       onUnreadChange?.(partner?.user_id, 0)
@@ -189,7 +177,6 @@ function ChatWindow({
     } else {
       onUnreadChange?.(partner.user_id, unread)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, active, minimized, partner?.user_id])
 
   async function send() {
@@ -217,13 +204,12 @@ function ChatWindow({
         display:'flex', flexDirection:'column', overflow:'hidden'
       }}
     >
-      {/* Header (drag handle) */}
       <div
         className="drag-handle"
         style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'8px 10px', borderBottom:'1px solid #eee', background:'#f9fafb',
-          cursor:'move', userSelect:'none', WebkitUserSelect:'none'
+          cursor:'move', userSelect:'none'
         }}
       >
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -238,7 +224,6 @@ function ChatWindow({
         </div>
       </div>
 
-      {/* Messages */}
       <div style={{ flex:1, overflow:'auto', padding:10, background:'#fafafa' }}>
         {loading && <div>Loading…</div>}
         {error && <div style={{ color:'#C0392B' }}>{error}</div>}
@@ -263,12 +248,10 @@ function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
-      {/* Typing indicator */}
       <div style={{ minHeight: theirTyping ? 18 : 0, padding: theirTyping ? '0 10px 6px' : 0, fontSize: 12, color:'#7a7a7a' }}>
         {theirTyping ? `${partner?.display_name || partner?.handle || 'They'} is typing…` : null}
       </div>
 
-      {/* Composer */}
       <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, background:'#fff' }}>
         <input
           ref={inputRef}
@@ -296,15 +279,14 @@ const iconBtnStyle = {
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
 
-// ---------- ChatDock (draggable layer) --------------------------------------
+// ---------- ChatDock (with persisted positions) -----------------------------
 
 export default function ChatDock() {
   const me = useMe()
   const [activeUserId, setActiveUserId] = useState(null)
-  const [items, setItems] = useState([]) // [{key, partner, minimized, unread, x, y, z}]
-  const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
+  const [items, setItems] = useState([])
+  const [profilesCache, setProfilesCache] = useState({})
 
-  // Emit status + unread (for footer + navbar dot)
   function emitStatus(updated = items) {
     window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: updated.length > 0 } }))
     const totalUnread = updated.reduce((sum, x) => sum + (x.unread || 0), 0)
@@ -312,19 +294,25 @@ export default function ChatDock() {
   }
   useEffect(() => { emitStatus() }, [items])
 
-  // Helpers
   function clamp(val, min, max) { return Math.max(min, Math.min(max, val)) }
-  function viewport() {
-    return { w: window.innerWidth, h: window.innerHeight }
-  }
-  function initialPos(index) {
+  function viewport() { return { w: window.innerWidth, h: window.innerHeight } }
+  function initialPos(index, uid) {
+    // try restore from localStorage
+    const raw = localStorage.getItem(`tmd_pos_${uid}`)
+    if (raw) {
+      try { return JSON.parse(raw) } catch {}
+    }
     const { w, h } = viewport()
     const x = w - EDGE_GAP - WIN_W - index * (WIN_W + 12)
     const y = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
     return { x: Math.max(EDGE_GAP, x), y: Math.max(EDGE_GAP, y) }
   }
 
-  // Global open()
+  // Save position
+  function savePos(uid, x, y) {
+    localStorage.setItem(`tmd_pos_${uid}`, JSON.stringify({ x, y }))
+  }
+
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle, user_id } = {}) => {
@@ -344,7 +332,6 @@ export default function ChatDock() {
         setItems(prev => {
           const exists = prev.find(x => x.partner.user_id === prof.user_id)
           if (exists) {
-            // bring to front + unminimize
             const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
             const updated = prev.map(x =>
               x.partner.user_id === prof.user_id ? { ...x, minimized:false, z: maxZ + 1 } : x
@@ -353,8 +340,7 @@ export default function ChatDock() {
             emitStatus(updated)
             return updated
           }
-          // place new window with stacked initial position
-          const pos = initialPos(prev.length)
+          const pos = initialPos(prev.length, prof.user_id)
           const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
           const next = [...prev, {
             key: `w-${prof.user_id}`,
@@ -366,14 +352,13 @@ export default function ChatDock() {
           }]
           setActiveUserId(prof.user_id)
           emitStatus(next)
-          return next.slice(-3) // cap at 3 windows
+          return next.slice(-3)
         })
       }
     }
     return () => { delete window.trymeChat }
   }, [me, profilesCache])
 
-  // Close / minimize / focus / unread
   function closeFor(user_id) {
     setItems(prev => {
       const next = prev.filter(x => x.partner.user_id !== user_id)
@@ -395,24 +380,17 @@ export default function ChatDock() {
   }
 
   // --- Drag logic (mouse + touch) ------------------------------------------
-  const dragRef = useRef({
-    uid: null,
-    startX: 0, startY: 0,
-    baseX: 0, baseY: 0
-  })
+  const dragRef = useRef({ uid: null, startX: 0, startY: 0, baseX: 0, baseY: 0 })
 
   function onDragStart(uid, clientX, clientY) {
     const win = items.find(x => x.partner.user_id === uid)
     if (!win) return
-    // bring to front
     focusFor(uid)
-
     dragRef.current.uid = uid
     dragRef.current.startX = clientX
     dragRef.current.startY = clientY
     dragRef.current.baseX = win.x
     dragRef.current.baseY = win.y
-
     window.addEventListener('mousemove', onDragMove)
     window.addEventListener('mouseup', onDragEnd)
     window.addEventListener('touchmove', onDragMove, { passive: false })
@@ -427,33 +405,33 @@ export default function ChatDock() {
     const clientY = isTouch ? e.touches[0].clientY : e.clientY
     const dx = clientX - dragRef.current.startX
     const dy = clientY - dragRef.current.startY
-
     const { w, h } = viewport()
     const minX = EDGE_GAP
     const maxX = w - EDGE_GAP - WIN_W
     const minY = EDGE_GAP
     const maxY = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
-
     const nx = clamp(dragRef.current.baseX + dx, minX, maxX)
     const ny = clamp(dragRef.current.baseY + dy, minY, maxY)
-
     setItems(prev => prev.map(x =>
       x.partner.user_id === dragRef.current.uid ? { ...x, x: nx, y: ny } : x
     ))
   }
 
   function onDragEnd() {
+    const uid = dragRef.current.uid
     dragRef.current.uid = null
     window.removeEventListener('mousemove', onDragMove)
     window.removeEventListener('mouseup', onDragEnd)
     window.removeEventListener('touchmove', onDragMove)
     window.removeEventListener('touchend', onDragEnd)
+    // persist final position
+    const win = items.find(x => x.partner.user_id === uid)
+    if (win) savePos(uid, win.x, win.y)
   }
 
   if (!supabase) return null
 
   return (
-    // Full-screen fixed layer; each window is positioned independently
     <div style={{ position:'fixed', top:0, left:0, width:'100vw', height:'100vh', zIndex: 9999, pointerEvents:'none' }}>
       {items.map(item => {
         const isActive = activeUserId === item.partner.user_id && !item.minimized
@@ -470,7 +448,6 @@ export default function ChatDock() {
         }
         return (
           <div key={item.key} style={styleFixed}>
-            {/* Unread badge (shows when minimized OR not active) */}
             {(item.unread > 0 && (item.minimized || !isActive)) && (
               <div style={{
                 position:'absolute', top:-6, right:-6,
@@ -483,7 +460,6 @@ export default function ChatDock() {
               </div>
             )}
 
-            {/* Drag listeners on header via event delegation */}
             <div
               onMouseDown={(e) => {
                 const el = e.target.closest('.drag-handle')
