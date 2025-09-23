@@ -2,16 +2,22 @@ import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (QoL + Typing Indicators)
+ * ChatDock (Draggable)
  * - Multiple pop-up chat windows (up to 3)
+ * - Drag & drop windows by header (mouse + touch)
  * - Auto-focus input when active & visible
  * - Unread badges via localStorage last-read markers
- * - Typing indicators via Supabase Realtime Broadcast channels
+ * - Typing indicators via Supabase Realtime Broadcast
  * - Emits:
  *   - 'chatdock:status'  { open: boolean }
  *   - 'chatdock:unread'  { count: number }
  * - Global helper: window.trymeChat.open({ handle, user_id })
  */
+
+const WIN_W = 320
+const WIN_H = 420
+const EDGE_GAP = 16
+const FOOTER_CLEAR = 120 // keep above footer
 
 function useMe() {
   const [me, setMe] = useState(null)
@@ -48,14 +54,15 @@ async function fetchProfileByUserId(user_id) {
   return data || null
 }
 
-// ---------- ChatWindow ------------------------------------------------------
+// ---------- ChatWindow (inner UI) -------------------------------------------
 
 function ChatWindow({
   me, partner,
   active, minimized,
   onClose, onMinimize,
-  onFocus,                // tell parent this window became active
-  onUnreadChange          // (partnerId, unreadCount) -> void
+  onFocus,
+  onUnreadChange,
+  inputAutoFocusRef // for focusing from parent if needed
 }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -67,16 +74,18 @@ function ChatWindow({
   const typingTimerRef = useRef(null)
   const lastTypingSentRef = useRef(0)
 
+  // expose ref up
+  useEffect(() => { if (inputAutoFocusRef) inputAutoFocusRef.current = inputRef.current }, [inputAutoFocusRef])
+
   const lastReadKey = me && partner
     ? `tmd_last_read_${me.id}_${partner.user_id}`
     : null
 
-  // Helpers: read/write last-read timestamp
   function getLastRead() {
     if (!lastReadKey) return 0
     const raw = localStorage.getItem(lastReadKey)
     return raw ? Number(raw) : 0
-    }
+  }
   function markReadNow() {
     if (!lastReadKey) return
     localStorage.setItem(lastReadKey, String(Date.now()))
@@ -125,37 +134,31 @@ function ChatWindow({
     return () => { supabase.removeChannel(channel) }
   }, [me?.id, partner?.user_id])
 
-  // Realtime: Typing indicator via Broadcast channel (no SQL)
+  // Realtime: Typing via broadcast
   useEffect(() => {
     if (!me?.id || !partner?.user_id) return
-    // Stable room name for both sides (sorted UUIDs)
     const [a, b] = [me.id, partner.user_id].sort()
     const room = `typing:${a}:${b}`
-
     const channel = supabase.channel(room)
       .on('broadcast', { event: 'typing' }, (payload) => {
         const { from, to } = payload.payload || {}
         if (from === partner.user_id && to === me.id) {
-          // they are typing to me
           setTheirTyping(true)
-          // auto-clear after 3s of silence
           if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
           typingTimerRef.current = setTimeout(() => setTheirTyping(false), 3000)
         }
       })
       .subscribe()
-
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
       supabase.removeChannel(channel)
     }
   }, [me?.id, partner?.user_id])
 
-  // Send "typing" broadcast (throttled) when I type
   async function sendTypingSignal() {
     if (!me?.id || !partner?.user_id) return
     const now = Date.now()
-    if (now - lastTypingSentRef.current < 800) return // throttle to ~0.8s
+    if (now - lastTypingSentRef.current < 800) return
     lastTypingSentRef.current = now
     const [a, b] = [me.id, partner.user_id].sort()
     const room = `typing:${a}:${b}`
@@ -166,19 +169,11 @@ function ChatWindow({
     })
   }
 
-  // Auto-scroll on new messages
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length])
+  // Scroll & focus
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
+  useEffect(() => { if (active && !minimized) setTimeout(() => inputRef.current?.focus(), 0) }, [active, minimized])
 
-  // Auto-focus when active & not minimized
-  useEffect(() => {
-    if (active && !minimized) {
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
-  }, [active, minimized])
-
-  // Unread computation & mark-as-read when visible
+  // Unread
   useEffect(() => {
     if (!messages.length || !partner?.user_id) {
       onUnreadChange?.(partner?.user_id, 0)
@@ -188,14 +183,9 @@ function ChatWindow({
     const unread = messages.filter(
       m => m.sender === partner.user_id && new Date(m.created_at).getTime() > lastReadAt
     ).length
-
     if (active && !minimized) {
-      if (unread > 0) {
-        markReadNow()
-        onUnreadChange?.(partner.user_id, 0)
-      } else {
-        onUnreadChange?.(partner.user_id, 0)
-      }
+      if (unread > 0) { markReadNow(); onUnreadChange?.(partner.user_id, 0) }
+      else { onUnreadChange?.(partner.user_id, 0) }
     } else {
       onUnreadChange?.(partner.user_id, unread)
     }
@@ -212,7 +202,6 @@ function ChatWindow({
       body
     })
     if (error) setError(error.message)
-    // keep focus for fast typing
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
@@ -223,13 +212,20 @@ function ChatWindow({
     <div
       onMouseDown={() => onFocus?.(partner.user_id)}
       style={{
-        width: 320, height: 420, background:'#fff',
+        width: WIN_W, height: WIN_H, background:'#fff',
         border:'1px solid #ddd', borderRadius:12, boxShadow:'0 8px 24px rgba(0,0,0,0.08)',
         display:'flex', flexDirection:'column', overflow:'hidden'
       }}
     >
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 10px', borderBottom:'1px solid #eee', background:'#f9fafb' }}>
+      {/* Header (drag handle) */}
+      <div
+        className="drag-handle"
+        style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          padding:'8px 10px', borderBottom:'1px solid #eee', background:'#f9fafb',
+          cursor:'move', userSelect:'none', WebkitUserSelect:'none'
+        }}
+      >
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <img src={avatar} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', border:'1px solid #eee' }} />
           <div style={{ fontWeight:700, fontSize:14 }}>
@@ -300,22 +296,33 @@ const iconBtnStyle = {
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
 
-// ---------- ChatDock --------------------------------------------------------
+// ---------- ChatDock (draggable layer) --------------------------------------
 
 export default function ChatDock() {
   const me = useMe()
   const [activeUserId, setActiveUserId] = useState(null)
-  const [items, setItems] = useState([]) // [{key, partner, minimized, unread}]
+  const [items, setItems] = useState([]) // [{key, partner, minimized, unread, x, y, z}]
   const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
 
-  // Emit status + unread for navbar badge/footer hiding
-  function emitStatus() {
-    window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: items.length > 0 } }))
-    const totalUnread = items.reduce((sum, x) => sum + (x.unread || 0), 0)
+  // Emit status + unread (for footer + navbar dot)
+  function emitStatus(updated = items) {
+    window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: updated.length > 0 } }))
+    const totalUnread = updated.reduce((sum, x) => sum + (x.unread || 0), 0)
     window.dispatchEvent(new CustomEvent('chatdock:unread', { detail: { count: totalUnread } }))
   }
-  useEffect(() => { emitStatus() }, [items.length])
-  useEffect(() => { emitStatus() }, [items.map(i => i.unread).join(',')])
+  useEffect(() => { emitStatus() }, [items])
+
+  // Helpers
+  function clamp(val, min, max) { return Math.max(min, Math.min(max, val)) }
+  function viewport() {
+    return { w: window.innerWidth, h: window.innerHeight }
+  }
+  function initialPos(index) {
+    const { w, h } = viewport()
+    const x = w - EDGE_GAP - WIN_W - index * (WIN_W + 12)
+    const y = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
+    return { x: Math.max(EDGE_GAP, x), y: Math.max(EDGE_GAP, y) }
+  }
 
   // Global open()
   useEffect(() => {
@@ -337,14 +344,28 @@ export default function ChatDock() {
         setItems(prev => {
           const exists = prev.find(x => x.partner.user_id === prof.user_id)
           if (exists) {
+            // bring to front + unminimize
+            const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
             const updated = prev.map(x =>
-              x.partner.user_id === prof.user_id ? { ...x, minimized:false } : x
+              x.partner.user_id === prof.user_id ? { ...x, minimized:false, z: maxZ + 1 } : x
             )
             setActiveUserId(prof.user_id)
+            emitStatus(updated)
             return updated
           }
-          const next = [...prev, { key: `w-${prof.user_id}`, partner: prof, minimized:false, unread:0 }]
+          // place new window with stacked initial position
+          const pos = initialPos(prev.length)
+          const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
+          const next = [...prev, {
+            key: `w-${prof.user_id}`,
+            partner: prof,
+            minimized:false,
+            unread:0,
+            x: pos.x, y: pos.y,
+            z: maxZ + 1
+          }]
           setActiveUserId(prof.user_id)
+          emitStatus(next)
           return next.slice(-3) // cap at 3 windows
         })
       }
@@ -352,43 +373,103 @@ export default function ChatDock() {
     return () => { delete window.trymeChat }
   }, [me, profilesCache])
 
+  // Close / minimize / focus / unread
   function closeFor(user_id) {
-    setItems(prev => prev.filter(x => x.partner.user_id !== user_id))
-    if (activeUserId === user_id) setActiveUserId(null)
+    setItems(prev => {
+      const next = prev.filter(x => x.partner.user_id !== user_id)
+      if (activeUserId === user_id) setActiveUserId(null)
+      emitStatus(next)
+      return next
+    })
   }
   function minimizeFor(user_id) {
     setItems(prev => prev.map(x => x.partner.user_id === user_id ? { ...x, minimized:!x.minimized } : x))
   }
   function focusFor(user_id) {
+    const maxZ = items.reduce((m, it) => Math.max(m, it.z || 1), 1)
+    setItems(prev => prev.map(x => x.partner.user_id === user_id ? { ...x, minimized:false, z: maxZ + 1 } : x))
     setActiveUserId(user_id)
-    setItems(prev => prev.map(x => x.partner.user_id === user_id ? { ...x, minimized:false } : x))
   }
   function setUnread(partnerId, count) {
     setItems(prev => prev.map(x => x.partner.user_id === partnerId ? { ...x, unread: count } : x))
   }
 
+  // --- Drag logic (mouse + touch) ------------------------------------------
+  const dragRef = useRef({
+    uid: null,
+    startX: 0, startY: 0,
+    baseX: 0, baseY: 0
+  })
+
+  function onDragStart(uid, clientX, clientY) {
+    const win = items.find(x => x.partner.user_id === uid)
+    if (!win) return
+    // bring to front
+    focusFor(uid)
+
+    dragRef.current.uid = uid
+    dragRef.current.startX = clientX
+    dragRef.current.startY = clientY
+    dragRef.current.baseX = win.x
+    dragRef.current.baseY = win.y
+
+    window.addEventListener('mousemove', onDragMove)
+    window.addEventListener('mouseup', onDragEnd)
+    window.addEventListener('touchmove', onDragMove, { passive: false })
+    window.addEventListener('touchend', onDragEnd)
+  }
+
+  function onDragMove(e) {
+    e.preventDefault?.()
+    if (!dragRef.current.uid) return
+    const isTouch = e.touches && e.touches.length
+    const clientX = isTouch ? e.touches[0].clientX : e.clientX
+    const clientY = isTouch ? e.touches[0].clientY : e.clientY
+    const dx = clientX - dragRef.current.startX
+    const dy = clientY - dragRef.current.startY
+
+    const { w, h } = viewport()
+    const minX = EDGE_GAP
+    const maxX = w - EDGE_GAP - WIN_W
+    const minY = EDGE_GAP
+    const maxY = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
+
+    const nx = clamp(dragRef.current.baseX + dx, minX, maxX)
+    const ny = clamp(dragRef.current.baseY + dy, minY, maxY)
+
+    setItems(prev => prev.map(x =>
+      x.partner.user_id === dragRef.current.uid ? { ...x, x: nx, y: ny } : x
+    ))
+  }
+
+  function onDragEnd() {
+    dragRef.current.uid = null
+    window.removeEventListener('mousemove', onDragMove)
+    window.removeEventListener('mouseup', onDragEnd)
+    window.removeEventListener('touchmove', onDragMove)
+    window.removeEventListener('touchend', onDragEnd)
+  }
+
   if (!supabase) return null
 
   return (
-    <div style={{
-      position:'fixed',
-      right:16,
-      bottom: 'calc(env(safe-area-inset-bottom) + 120px)', // lifted above footer
-      display:'flex',
-      gap:12,
-      zIndex: 9999
-    }}>
+    // Full-screen fixed layer; each window is positioned independently
+    <div style={{ position:'fixed', top:0, left:0, width:'100vw', height:'100vh', zIndex: 9999, pointerEvents:'none' }}>
       {items.map(item => {
         const isActive = activeUserId === item.partner.user_id && !item.minimized
+        const styleFixed = {
+          position:'fixed',
+          left: item.x,
+          top: item.y,
+          width: WIN_W,
+          height: item.minimized ? 60 : WIN_H,
+          transform: item.minimized ? 'translateY(360px)' : 'none',
+          transition: 'transform .18s ease',
+          pointerEvents:'auto',
+          zIndex: item.z || 1000
+        }
         return (
-          <div
-            key={item.key}
-            style={{
-              position:'relative',
-              transform: item.minimized ? 'translateY(360px)' : 'translateY(0)',
-              transition:'transform .18s ease'
-            }}
-          >
+          <div key={item.key} style={styleFixed}>
             {/* Unread badge (shows when minimized OR not active) */}
             {(item.unread > 0 && (item.minimized || !isActive)) && (
               <div style={{
@@ -402,20 +483,33 @@ export default function ChatDock() {
               </div>
             )}
 
-            <ChatWindow
-              me={me}
-              partner={item.partner}
-              active={isActive}
-              minimized={item.minimized}
-              onClose={() => closeFor(item.partner.user_id)}
-              onMinimize={() => minimizeFor(item.partner.user_id)}
-              onFocus={(uid) => focusFor(uid)}
-              onUnreadChange={(uid, count) => setUnread(uid, count)}
-            />
+            {/* Drag listeners on header via event delegation */}
+            <div
+              onMouseDown={(e) => {
+                const el = e.target.closest('.drag-handle')
+                if (el) onDragStart(item.partner.user_id, e.clientX, e.clientY)
+              }}
+              onTouchStart={(e) => {
+                const t = e.touches[0]
+                const el = e.target.closest('.drag-handle')
+                if (el && t) onDragStart(item.partner.user_id, t.clientX, t.clientY)
+              }}
+            >
+              <ChatWindow
+                me={me}
+                partner={item.partner}
+                active={isActive}
+                minimized={item.minimized}
+                onClose={() => closeFor(item.partner.user_id)}
+                onMinimize={() => minimizeFor(item.partner.user_id)}
+                onFocus={(uid) => focusFor(uid)}
+                onUnreadChange={(uid, count) => setUnread(uid, count)}
+                inputAutoFocusRef={useRef(null)}
+              />
+            </div>
           </div>
         )
       })}
     </div>
   )
 }
-
