@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock
- * - Fixed dock at bottom-right (lifted above footer)
- * - Multiple ChatWindow popups (up to 3)
+ * ChatDock (QoL edition)
+ * - Multiple pop-up chat windows (up to 3)
+ * - Auto-focus input when window is active & visible
+ * - Unread badges per conversation (stored via localStorage last-read markers)
+ * - Emits:
+ *   - 'chatdock:status'  { open: boolean }
+ *   - 'chatdock:unread'  { count: number }
  * - Global helper: window.trymeChat.open({ handle, user_id })
- * - Emits window event 'chatdock:status' with { open: boolean } so App.jsx can hide Footer
  */
 
 function useMe() {
@@ -44,12 +47,37 @@ async function fetchProfileByUserId(user_id) {
   return data || null
 }
 
-function ChatWindow({ me, partner, onClose, onMinimize }) {
+// ---- ChatWindow ------------------------------------------------------------
+
+function ChatWindow({
+  me, partner,
+  active, minimized,
+  onClose, onMinimize,
+  onFocus,                // tell parent this window became active
+  onUnreadChange          // (partnerId, unreadCount) -> void
+}) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [draft, setDraft] = useState('')
+  const inputRef = useRef(null)
   const bottomRef = useRef(null)
+
+  const lastReadKey = me && partner
+    ? `tmd_last_read_${me.id}_${partner.user_id}`
+    : null
+
+  // Helper to read & write last-read timestamp
+  function getLastRead() {
+    if (!lastReadKey) return 0
+    const raw = localStorage.getItem(lastReadKey)
+    return raw ? Number(raw) : 0
+  }
+  function markReadNow() {
+    if (!lastReadKey) return
+    const now = Date.now()
+    localStorage.setItem(lastReadKey, String(now))
+  }
 
   // Initial load
   useEffect(() => {
@@ -71,7 +99,8 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
         setLoading(false)
       }
     })()
-  }, [me, partner?.user_id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id, partner?.user_id])
 
   // Realtime for this pair
   useEffect(() => {
@@ -91,11 +120,45 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [me, partner?.user_id])
+  }, [me?.id, partner?.user_id])
 
+  // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
+
+  // Auto-focus when active & not minimized
+  useEffect(() => {
+    if (active && !minimized) {
+      // small delay to ensure the input is in the DOM
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [active, minimized])
+
+  // Compute unread & notify parent whenever messages OR visibility changes
+  useEffect(() => {
+    if (!messages.length || !partner?.user_id) {
+      onUnreadChange?.(partner?.user_id, 0)
+      return
+    }
+    const lastReadAt = getLastRead()
+    const unread = messages.filter(
+      m => m.sender === partner.user_id && new Date(m.created_at).getTime() > lastReadAt
+    ).length
+
+    // If window is active and visible, mark as read now
+    if (active && !minimized) {
+      if (unread > 0) {
+        markReadNow()
+        onUnreadChange?.(partner.user_id, 0)
+      } else {
+        onUnreadChange?.(partner.user_id, 0)
+      }
+    } else {
+      onUnreadChange?.(partner.user_id, unread)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, active, minimized, partner?.user_id])
 
   async function send() {
     if (!draft.trim() || !me || !partner?.user_id) return
@@ -107,17 +170,22 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
       body
     })
     if (error) setError(error.message)
+    // After send, keep focus for rapid typing
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const avatar = partner?.avatar_url || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'
   const name = partner?.display_name || partner?.handle || 'Unknown'
 
   return (
-    <div style={{
-      width: 320, height: 420, background:'#fff',
-      border:'1px solid #ddd', borderRadius:12, boxShadow:'0 8px 24px rgba(0,0,0,0.08)',
-      display:'flex', flexDirection:'column', overflow:'hidden'
-    }}>
+    <div
+      onMouseDown={() => onFocus?.(partner.user_id)}
+      style={{
+        width: 320, height: 420, background:'#fff',
+        border:'1px solid #ddd', borderRadius:12, boxShadow:'0 8px 24px rgba(0,0,0,0.08)',
+        display:'flex', flexDirection:'column', overflow:'hidden'
+      }}
+    >
       {/* Header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 10px', borderBottom:'1px solid #eee', background:'#f9fafb' }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -132,7 +200,7 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
         </div>
       </div>
 
-      {/* Messages (scrolling area) */}
+      {/* Messages */}
       <div style={{ flex:1, overflow:'auto', padding:10, background:'#fafafa' }}>
         {loading && <div>Loading…</div>}
         {error && <div style={{ color:'#C0392B' }}>{error}</div>}
@@ -160,6 +228,7 @@ function ChatWindow({ me, partner, onClose, onMinimize }) {
       {/* Composer */}
       <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, background:'#fff' }}>
         <input
+          ref={inputRef}
           value={draft}
           onChange={e=>setDraft(e.target.value)}
           onKeyDown={e=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
@@ -184,19 +253,22 @@ const iconBtnStyle = {
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
 
+// ---- ChatDock --------------------------------------------------------------
+
 export default function ChatDock() {
   const me = useMe()
-  const [items, setItems] = useState([]) // [{key, partner, minimized}]
+  const [activeUserId, setActiveUserId] = useState(null)
+  const [items, setItems] = useState([]) // [{key, partner, minimized, unread}]
   const [profilesCache, setProfilesCache] = useState({}) // user_id -> profile
 
-  // Announce open/close status to App.jsx so it can hide/show Footer
-  useEffect(() => {
+  // Helper to emit global status/unread for App.jsx (footer hiding, nav badges, etc.)
+  function emitStatus() {
     window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: items.length > 0 } }))
-    return () => {
-      // on unmount, announce closed
-      window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: false } }))
-    }
-  }, [items.length])
+    const totalUnread = items.reduce((sum, x) => sum + (x.unread || 0), 0)
+    window.dispatchEvent(new CustomEvent('chatdock:unread', { detail: { count: totalUnread } }))
+  }
+  useEffect(() => { emitStatus() }, [items.length])
+  useEffect(() => { emitStatus() }, [items.map(i => i.unread).join(',')]) // react to unread changes
 
   // Expose a global open() so any page can open chats
   useEffect(() => {
@@ -218,10 +290,17 @@ export default function ChatDock() {
         setItems(prev => {
           const exists = prev.find(x => x.partner.user_id === prof.user_id)
           if (exists) {
-            return prev.map(x => x.partner.user_id === prof.user_id ? { ...x, minimized:false } : x)
+            // un-minimize and bring to front
+            const updated = prev.map(x =>
+              x.partner.user_id === prof.user_id ? { ...x, minimized:false } : x
+            )
+            setActiveUserId(prof.user_id)
+            return updated
           }
-          const next = [...prev, { key: `w-${prof.user_id}`, partner: prof, minimized:false }]
-          return next.slice(-3) // cap at 3 windows
+          // add new window; cap at 3
+          const next = [...prev, { key: `w-${prof.user_id}`, partner: prof, minimized:false, unread:0 }]
+          setActiveUserId(prof.user_id)
+          return next.slice(-3)
         })
       }
     }
@@ -230,9 +309,17 @@ export default function ChatDock() {
 
   function closeFor(user_id) {
     setItems(prev => prev.filter(x => x.partner.user_id !== user_id))
+    if (activeUserId === user_id) setActiveUserId(null)
   }
   function minimizeFor(user_id) {
     setItems(prev => prev.map(x => x.partner.user_id === user_id ? { ...x, minimized:!x.minimized } : x))
+  }
+  function focusFor(user_id) {
+    setActiveUserId(user_id)
+    setItems(prev => prev.map(x => x.partner.user_id === user_id ? { ...x, minimized:false } : x))
+  }
+  function setUnread(partnerId, count) {
+    setItems(prev => prev.map(x => x.partner.user_id === partnerId ? { ...x, unread: count } : x))
   }
 
   if (!supabase) return null
@@ -246,22 +333,43 @@ export default function ChatDock() {
       gap:12,
       zIndex: 9999
     }}>
-      {items.map(item => (
-        <div
-          key={item.key}
-          style={{
-            transform: item.minimized ? 'translateY(360px)' : 'translateY(0)',
-            transition:'transform .18s ease'
-          }}
-        >
-          <ChatWindow
-            me={me}
-            partner={item.partner}
-            onClose={() => closeFor(item.partner.user_id)}
-            onMinimize={() => minimizeFor(item.partner.user_id)}
-          />
-        </div>
-      ))}
+      {items.map(item => {
+        const isActive = activeUserId === item.partner.user_id && !item.minimized
+        return (
+          <div
+            key={item.key}
+            style={{
+              position:'relative',
+              transform: item.minimized ? 'translateY(360px)' : 'translateY(0)',
+              transition:'transform .18s ease'
+            }}
+          >
+            {/* Unread badge (shows when minimized OR not active) */}
+            {(item.unread > 0 && (item.minimized || !isActive)) && (
+              <div style={{
+                position:'absolute', top:-6, right:-6,
+                minWidth:18, height:18, padding:'0 5px',
+                background:'#E63946', color:'#fff', fontSize:12, fontWeight:700,
+                borderRadius:999, display:'flex', alignItems:'center', justifyContent:'center',
+                boxShadow:'0 1px 2px rgba(0,0,0,0.2)'
+              }}>
+                {item.unread > 99 ? '99+' : item.unread}
+              </div>
+            )}
+
+            <ChatWindow
+              me={me}
+              partner={item.partner}
+              active={isActive}
+              minimized={item.minimized}
+              onClose={() => closeFor(item.partner.user_id)}
+              onMinimize={() => minimizeFor(item.partner.user_id)}
+              onFocus={(uid) => focusFor(uid)}
+              onUnreadChange={(uid, count) => setUnread(uid, count)}
+            />
+          </div>
+        )
+      })}
     </div>
   )
 }
