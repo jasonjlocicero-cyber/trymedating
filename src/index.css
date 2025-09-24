@@ -6,12 +6,12 @@
   --muted: #6b7280;
   --border: #e5e7eb;
 
-  /* Softer brand palette */
-  --primary: #2A9D8F;       /* teal-500 */
-  --primary-600: #238379;   /* teal-600 */
-  --secondary: #6366f1;     /* indigo-500 */
-  --secondary-600: #4f46e5; /* indigo-600 */
-  --danger: #e11d48;        /* rose-600 */
+  /* Brand palette from logo */
+  --primary: #e86f61;        /* coral (for Dating) */
+  --primary-600: #d65d50;    /* darker coral */
+  --secondary: #2a9d8f;      /* teal (for TryMe) */
+  --secondary-600: #238379;  /* darker teal */
+  --danger: #dc2626;         /* keep red for destructive actions */
 
   --radius: 12px;
   --shadow: 0 8px 24px rgba(0,0,0,.08);
