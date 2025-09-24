@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-const CHATDOCK_VERSION = 'attachments-lean-2-bubbles';
+const CHATDOCK_VERSION = 'attachments-lean-3-brand-empty-bubble';
 if (typeof window !== 'undefined') window.trymeChatVersion = CHATDOCK_VERSION;
 
 /**
@@ -9,7 +9,10 @@ if (typeof window !== 'undefined') window.trymeChatVersion = CHATDOCK_VERSION;
  * - Multiple chat windows (open/close/minimize)
  * - Text + image/GIF attachments (📎 + preview)
  * - Uploads to Supabase Storage bucket "attachments" (Public)
- * - Brand styling: my bubbles use a teal→coral gradient; theirs are neutral
+ * - Brand styling:
+ *    • My bubbles: teal→coral gradient
+ *    • Their bubbles: neutral white with subtle brand-tinted border
+ *    • Empty-state tip bubble: teal→coral gradient (white text)
  */
 
 const DEF_W = 340
@@ -140,7 +143,7 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
     setTimeout(()=>inputRef.current?.focus(),0)
   }
 
-  // Styles that use your CSS variables
+  // Brand styles
   const myBubbleStyle = {
     background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
     color: '#fff',
@@ -186,7 +189,25 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
           <div style={{ flex:1, overflowY:'auto', padding:10, background:'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)' }}>
             {loading && <div>Loading…</div>}
             {error && <div style={{ color:'#C0392B' }}>{error}</div>}
-            {!loading && messages.length===0 && <div style={{ opacity:.7 }}>Say hi 👋 (Tip: use the 📎 to attach an image)</div>}
+
+            {/* Empty-state gradient bubble */}
+            {!loading && messages.length===0 && (
+              <div style={{ display:'flex', justifyContent:'center', marginTop: 12 }}>
+                <div style={{
+                  maxWidth:'85%',
+                  background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
+                  color: '#fff',
+                  borderRadius: 14,
+                  padding: '10px 14px',
+                  boxShadow: '0 8px 20px rgba(42,157,143,.20)',
+                  textAlign: 'center',
+                  fontWeight: 600
+                }}>
+                  Say hi 👋 — you can also attach an image with the 📎
+                </div>
+              </div>
+            )}
+
             {messages.map(m=>{
               const mine=m.sender===me?.id
               return (
@@ -312,6 +333,7 @@ export default function ChatDock(){
     </div>
   )
 }
+
 
 
 
