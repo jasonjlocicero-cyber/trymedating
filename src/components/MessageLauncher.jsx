@@ -17,10 +17,7 @@ export default function MessageLauncher() {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setMe(session?.user || null)
     })
-    return () => {
-      alive = false
-      sub.subscription.unsubscribe()
-    }
+    return () => { alive = false; sub.subscription.unsubscribe() }
   }, [])
 
   function openChat() {
@@ -31,7 +28,6 @@ export default function MessageLauncher() {
       return
     }
     if (!me) {
-      // send to auth, then back to the same URL (no custom next param here)
       window.location.href = '/auth'
       return
     }
@@ -46,27 +42,23 @@ export default function MessageLauncher() {
       {open && (
         <div style={{
           pointerEvents: 'auto',
-          marginBottom: 8,
-          width: 280,
-          padding: 12,
+          marginBottom: 10,
+          width: 320,
+          padding: 14,
           background: '#ffffff',
           border: '1px solid #e5e7eb',
-          borderRadius: 12,
-          boxShadow: '0 8px 24px rgba(0,0,0,.08)',
+          borderRadius: 14,
+          boxShadow: '0 8px 24px rgba(0,0,0,.12)'
         }}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>Start a message</div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ fontWeight: 800, marginBottom: 10, fontSize: 15 }}>Start a message</div>
+          <div style={{ display: 'flex', gap: 10 }}>
             <input
               value={handle}
               onChange={e => setHandle(e.target.value)}
               placeholder="Enter a handle (e.g. alex)"
-              style={{ flex: 1, padding: 8, borderRadius: 8, border: '1px solid #e5e7eb' }}
+              style={{ flex: 1, padding: 10, borderRadius: 10, border: '1px solid #e5e7eb' }}
             />
-            <button
-              onClick={openChat}
-              className="btn btn-primary"
-              style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}
-            >
+            <button onClick={openChat} className="btn btn-primary" style={{ whiteSpace: 'nowrap' }}>
               Open
             </button>
           </div>
@@ -74,20 +66,45 @@ export default function MessageLauncher() {
         </div>
       )}
 
-      {/* Floating Button */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="btn btn-secondary"
-        style={{
+      {/* Floating Button + Label */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+        {/* Desktop label (hidden on small screens via CSS) */}
+        <div className="ml-label" style={{
           pointerEvents: 'auto',
-          width: 56, height: 56, borderRadius: '50%',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 800
-        }}
-        title="Messages"
-      >
-        💬
-      </button>
+          padding: '10px 14px',
+          borderRadius: 999,
+          background: 'rgba(255,255,255,.9)',
+          border: '1px solid #e5e7eb',
+          boxShadow: '0 6px 18px rgba(0,0,0,.08)',
+          fontWeight: 700
+        }}>
+          Messages
+        </div>
+
+        {/* Big gradient FAB with subtle pulse */}
+        <button
+          onClick={() => setOpen(v => !v)}
+          title="Messages"
+          className="ml-pulse"
+          style={{
+            pointerEvents: 'auto',
+            width: 72, height: 72, borderRadius: '50%',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            border: '0',
+            color: '#fff',
+            fontSize: 28,
+            fontWeight: 800,
+            boxShadow: '0 18px 40px rgba(42,157,143,.35)',
+            background: 'linear-gradient(135deg, #2A9D8F 0%, #4F46E5 100%)',
+            transition: 'transform .06s ease'
+          }}
+          onMouseDown={e => (e.currentTarget.style.transform = 'scale(0.98)')}
+          onMouseUp={e => (e.currentTarget.style.transform = 'scale(1)')}
+        >
+          💬
+        </button>
+      </div>
     </div>
   )
 }
+
