@@ -1,8 +1,8 @@
-import React, { Suspense, useEffect, useState } from 'react'
-import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom'
-import { supabase } from './lib/supabaseClient'
+import React from 'react'
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import ChatDock from './components/ChatDock'
 
-// Pages
+// --- Your pages (adjust paths if your filenames differ) ---
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
@@ -10,201 +10,77 @@ import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
-import Explore from './pages/Explore'
-import ResetPassword from './pages/ResetPassword'
-import Likes from './pages/Likes'
-import Messages from './pages/Messages'
 
-// Components
-import ChatDock from './components/ChatDock'
-// ...
-<ChatDock />
-
-const C = { ink: '#222', coral: '#E76F51', teal: '#2A9D8F' }
-
+// Optional: a simple home screen (you can replace this with your real Home)
 function Home() {
-  const nav = useNavigate()
   return (
-    <div style={{ padding: '60px 20px', textAlign: 'center' }}>
-      <h1 style={{ fontSize: 48, marginBottom: 20 }}>Welcome to TryMeDating</h1>
-      <p style={{ fontSize: 20, opacity: 0.8 }}>A warmer approach to meeting new people.</p>
-      <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 24 }}>
-        <button
-          onClick={() => nav('/profile')}
-          style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.teal, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
-        >
-          Go to your Profile
-        </button>
-        <button
-          onClick={() => nav('/auth')}
-          style={{ padding: '12px 20px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
-        >
-          Sign up / Log in
-        </button>
+    <div className="container" style={{ padding: '32px 0' }}>
+      <h1>TryMeDating</h1>
+      <p>Welcome! Use the nav to explore. Messaging dock is mounted globally.</p>
+      <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+        <Link className="btn btn-primary" to="/auth">Sign in</Link>
+        <Link className="btn btn-secondary" to="/profile">My Profile</Link>
+        <Link className="btn" to="/settings">Settings</Link>
       </div>
-    </div>
-  )
-}
-
-function NavBar() {
-  const nav = useNavigate()
-  const [user, setUser] = useState(null)
-  const [avatar, setAvatar] = useState('')
-  const [unreadCount, setUnreadCount] = useState(0) // 🔴 messages badge
-
-  useEffect(() => {
-    let alive = true
-    async function prime() {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!alive) return
-      setUser(session?.user || null)
-      if (session?.user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
-        if (!alive) return
-        setAvatar(data?.avatar_url || '')
-      }
-    }
-    prime()
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null)
-      if (!session?.user) setAvatar('')
-      else {
-        supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
-          .then(({ data }) => setAvatar(data?.avatar_url || ''))
-      }
-    })
-    return () => { alive = false; sub.subscription.unsubscribe() }
-  }, [])
-
-  // Listen for unread count from ChatDock
-  useEffect(() => {
-    function onUnread(e) {
-      const n = Number(e.detail?.count || 0)
-      setUnreadCount(isNaN(n) ? 0 : n)
-    }
-    window.addEventListener('chatdock:unread', onUnread)
-    return () => window.removeEventListener('chatdock:unread', onUnread)
-  }, [])
-
-  async function signOut() { await supabase.auth.signOut(); nav('/auth') }
-
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 32px', borderBottom: '1px solid #eee' }}>
-      <Link to="/" style={{ fontSize: 20, fontWeight: 700, color: C.ink, textDecoration: 'none' }}>TryMeDating</Link>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        <Link to="/explore" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Explore</Link>
-
-        {/* Messages link with red dot badge */}
-        <span style={{ position: 'relative', display: 'inline-flex' }}>
-          <Link to="/messages" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Messages</Link>
-          {unreadCount > 0 && (
-            <span
-              aria-label={`${unreadCount} unread`}
-              title={`${unreadCount} unread`}
-              style={{
-                position: 'absolute',
-                top: -4, right: -10,
-                minWidth: 8, height: 8,
-                background: '#E63946',
-                borderRadius: 999,
-                boxShadow: '0 0 0 2px #fff',
-                display: 'inline-block'
-              }}
-            />
-          )}
-        </span>
-
-        <Link to="/likes" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Likes</Link>
-        <Link to="/profile" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Profile</Link>
-        <Link to="/settings" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Settings</Link>
-        {!user ? (
-          <button
-            onClick={() => nav('/auth')}
-            style={{ padding: '10px 14px', borderRadius: 10, border: 'none', background: C.coral, color: '#fff', cursor: 'pointer', fontWeight: 700 }}
-          >
-            Sign up
-          </button>
-        ) : (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <img
-              src={avatar || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'}
-              alt="me"
-              style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #eee' }}
-            />
-            <button
-              onClick={signOut}
-              style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontWeight: 700 }}
-            >
-              Sign out
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function Footer() {
-  return (
-    <div style={{ textAlign: 'center', padding: 20, borderTop: '1px solid #eee', marginTop: 40 }}>
-      <Link to="/terms" style={{ marginRight: 16 }}>Terms</Link>
-      <Link to="/privacy" style={{ marginRight: 16 }}>Privacy</Link>
-      <Link to="/contact">Contact</Link>
     </div>
   )
 }
 
 export default function App() {
-  // Hide footer on messages routes or while chat pop-ups are open
-  const location = useLocation()
-  const inMessages = location.pathname.startsWith('/messages')
-  const [chatOpen, setChatOpen] = useState(false)
-
-  useEffect(() => {
-    function onStatus(e) { setChatOpen(!!e.detail?.open) }
-    window.addEventListener('chatdock:status', onStatus)
-    return () => window.removeEventListener('chatdock:status', onStatus)
-  }, [])
-
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <NavBar />
+    <BrowserRouter>
+      {/* Simple header */}
+      <header style={{
+        borderBottom: '1px solid #eee',
+        padding: '10px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <Link to="/" style={{ fontWeight: 800, textDecoration: 'none', color: '#2A2A2A' }}>
+            TryMeDating
+          </Link>
+          <nav style={{ display: 'flex', gap: 10 }}>
+            <Link to="/profile">Profile</Link>
+            <Link to="/settings">Settings</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/contact">Contact</Link>
+          </nav>
+        </div>
+      </header>
 
-      <main style={{ flex: 1 }}>
-        <Suspense fallback={<div style={{ padding: 40 }}>Loading…</div>}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/explore" element={<Explore />} />
-            <Route path="/likes" element={<Likes />} />
-            <Route path="/messages" element={<Messages />} />
-            <Route path="/messages/:handle" element={<Messages />} />
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/reset" element={<ResetPassword />} />
-            <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/u/:handle" element={<PublicProfile />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="*" element={<div style={{ padding: 40 }}>Page not found.</div>} />
-          </Routes>
-        </Suspense>
+      {/* Main routes */}
+      <main style={{ minHeight: 'calc(100vh - 140px)' }}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/u/:handle" element={<PublicProfile />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/contact" element={<Contact />} />
+          {/* 404 */}
+          <Route path="*" element={
+            <div className="container" style={{ padding: '32px 0' }}>
+              <h2>Page not found</h2>
+              <p><Link to="/">Go home</Link></p>
+            </div>
+          } />
+        </Routes>
       </main>
 
-      {/* Footer is hidden in messages contexts and while chat windows are open */}
-      {(!inMessages && !chatOpen) && <Footer />}
+      {/* Simple footer */}
+      <footer style={{ borderTop: '1px solid #eee', padding: '16px', textAlign: 'center' }}>
+        © {new Date().getFullYear()} TryMeDating
+      </footer>
 
-      {/* Floating chat dock (pop-ups) */}
+      {/* 🔽 Mount the messaging dock ONCE so it’s available everywhere */}
       <ChatDock />
-    </div>
+    </BrowserRouter>
   )
 }
 
