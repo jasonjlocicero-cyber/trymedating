@@ -17,6 +17,8 @@ import Messages from './pages/Messages'
 
 // Components
 import ChatDock from './components/ChatDock'
+// ...
+<ChatDock />
 
 const C = { ink: '#222', coral: '#E76F51', teal: '#2A9D8F' }
 
