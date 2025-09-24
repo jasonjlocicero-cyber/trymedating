@@ -1,3 +1,4 @@
+// src/App.jsx
 import React from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
@@ -12,7 +13,12 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
-// --- Home page with on-brand hero ---
+// New QR / Connection pages
+import InviteQR from './pages/InviteQR'
+import Connect from './pages/Connect'
+import Network from './pages/Network'
+
+// --- Home page with brand hero ---
 function Home() {
   return (
     <section style={{
@@ -73,6 +79,8 @@ export default function App() {
           <nav style={{ display: 'flex', gap: 10 }}>
             <Link to="/profile">Profile</Link>
             <Link to="/settings">Settings</Link>
+            <Link to="/invite">Invite</Link>
+            <Link to="/network">Network</Link>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
@@ -87,11 +95,14 @@ export default function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* Public profile route */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
+          {/* New QR + connection pages */}
+          <Route path="/invite" element={<InviteQR />} />
+          <Route path="/connect" element={<Connect />} />
+          <Route path="/network" element={<Network />} />
           {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
@@ -102,7 +113,7 @@ export default function App() {
         </Routes>
       </main>
 
-      {/* Footer with split-color brand and quick links */}
+      {/* Footer */}
       <footer style={{
         borderTop: '1px solid #eee',
         padding: '20px 16px'
@@ -126,12 +137,13 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Floating messages launcher + chat dock (available on all pages) */}
+      {/* Floating chat */}
       <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
 
 
