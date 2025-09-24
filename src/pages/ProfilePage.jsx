@@ -161,7 +161,8 @@ export default function ProfilePage() {
   return (
     <div className="container" style={{ padding: '32px 0' }}>
       <h1 style={{ marginBottom: 12 }}>
-        Edit <span style={{ color: 'var(--secondary)' }}>Profile</span>
+        <span style={{ color: 'var(--secondary)' }}>Edit</span>{' '}
+        <span style={{ color: 'var(--primary)' }}>Profile</span>
       </h1>
 
       {loading && <div className="card">Loading your profile…</div>}
