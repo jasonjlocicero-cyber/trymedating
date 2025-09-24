@@ -11,7 +11,7 @@ export default function PublicProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Load current user (viewer)
+  // Load current auth user
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -28,16 +28,18 @@ export default function PublicProfile() {
     }
   }, [])
 
-  // Load the public profile by handle
+  // Load the public profile (case-insensitive handle match)
   useEffect(() => {
     if (!handle) return
     ;(async () => {
       setLoading(true); setError('')
+      // Use ilike for case-insensitive match
       const { data, error } = await supabase
         .from('profiles')
         .select('user_id, handle, display_name, avatar_url, bio, mode')
-        .eq('handle', handle.toLowerCase())
+        .ilike('handle', handle) // <— case-insensitive
         .maybeSingle()
+
       if (error) setError(error.message)
       setProfile(data || null)
       setLoading(false)
@@ -46,13 +48,13 @@ export default function PublicProfile() {
 
   function openChat() {
     if (!profile?.handle) return
-    if (!me) {
-      // Not signed in — send to auth, then back here
-      navigate('/auth?next=' + encodeURIComponent(`/u/${profile.handle}`))
-      return
-    }
     if (!window.trymeChat) {
       alert('Messaging is not ready on this page yet. Try a hard refresh.')
+      return
+    }
+    // If not signed in, go to auth first, then come back
+    if (!me) {
+      navigate('/auth?next=' + encodeURIComponent(`/u/${profile.handle}`))
       return
     }
     window.trymeChat.open({ handle: profile.handle })
@@ -63,13 +65,20 @@ export default function PublicProfile() {
   return (
     <div className="container" style={{ padding: '32px 0' }}>
       {loading && <div className="card">Loading profile…</div>}
-      {error && <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>{error}</div>}
+
+      {error && (
+        <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>
+          {error}
+        </div>
+      )}
+
       {!loading && !profile && !error && (
         <div className="card">
           <h2>Profile not found</h2>
-          <p>We couldn’t find @{handle}. Check the handle and try again.</p>
+          <p>We couldn’t find <strong>@{handle}</strong>. Check the handle and try again.</p>
         </div>
       )}
+
       {profile && (
         <div className="card" style={{ display: 'grid', gap: 16 }}>
           {/* Header */}
@@ -86,15 +95,18 @@ export default function PublicProfile() {
               </div>
             </div>
 
-            {/* Message button (hidden if viewing your own profile) */}
-            {!isMe && (
-              <button className="btn btn-primary" onClick={openChat} title="Start a conversation">
-                Message
-              </button>
-            )}
+            {/* Message button — always visible; disabled if it's you */}
+            <button
+              className="btn btn-primary"
+              onClick={openChat}
+              disabled={isMe}
+              title={isMe ? 'You cannot message yourself' : 'Start a conversation'}
+            >
+              {isMe ? 'Message (disabled)' : 'Message'}
+            </button>
           </div>
 
-          {/* Bio / details */}
+          {/* Bio */}
           <div>
             <h3>About</h3>
             <p style={{ marginTop: 8 }}>
@@ -102,14 +114,16 @@ export default function PublicProfile() {
             </p>
           </div>
 
-          {/* Safety / visibility */}
+          {/* Meta */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <span className="badge">Mode: {profile.mode || 'standard'}</span>
+            {!me && <span className="badge">Sign in to send messages</span>}
           </div>
         </div>
       )}
     </div>
   )
 }
+
 
 
