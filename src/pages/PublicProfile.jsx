@@ -1,169 +1,113 @@
 import React, { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
   const { handle } = useParams()
-  const [viewer, setViewer] = useState(null)
-  const [data, setData] = useState(null)
-  const [state, setState] = useState('loading') // loading | ok | notfound | error
-  const [liked, setLiked] = useState(false)
-  const [mutual, setMutual] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const navigate = useNavigate()
 
-  if (!supabase) {
-    return (
-      <div style={{ padding: 40 }}>
-        <h2>Profile</h2>
-        <p>Supabase is not configured. Add env vars and redeploy.</p>
-      </div>
-    )
-  }
+  const [me, setMe] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
+  // Load current user (viewer)
   useEffect(() => {
+    let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      setViewer(user || null)
+      if (!alive) return
+      setMe(user || null)
     })()
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setMe(session?.user || null)
+    })
+    return () => {
+      alive = false
+      sub.subscription.unsubscribe()
+    }
   }, [])
 
-  // Fetch profile by handle
+  // Load the public profile by handle
   useEffect(() => {
-    let alive = true
+    if (!handle) return
     ;(async () => {
+      setLoading(true); setError('')
       const { data, error } = await supabase
         .from('profiles')
-        .select('user_id, handle, display_name, bio, mode, is_public, avatar_url')
-        .eq('handle', handle)
+        .select('user_id, handle, display_name, avatar_url, bio, mode')
+        .eq('handle', handle.toLowerCase())
         .maybeSingle()
-
-      if (!alive) return
-      if (error) { setState('error'); return }
-      if (!data || data.is_public === false) { setState('notfound'); return }
-
-      setData(data)
-      setState('ok')
+      if (error) setError(error.message)
+      setProfile(data || null)
+      setLoading(false)
     })()
-    return () => { alive = false }
   }, [handle])
 
-  // Check like/mutual
-  useEffect(() => {
-    if (!viewer || !data?.user_id) return
-    let alive = true
-    ;(async () => {
-      const { data: myLike } = await supabase
-        .from('likes').select('liker, likee')
-        .eq('liker', viewer.id).eq('likee', data.user_id).maybeSingle()
-      const { data: theirLike } = await supabase
-        .from('likes').select('liker, likee')
-        .eq('liker', data.user_id).eq('likee', viewer.id).maybeSingle()
-      if (!alive) return
-      setLiked(!!myLike)
-      setMutual(!!myLike && !!theirLike)
-    })()
-    return () => { alive = false }
-  }, [viewer, data?.user_id])
-
-  async function doLike() {
-    if (!viewer) { window.location.href = '/auth'; return }
-    if (!data?.user_id || viewer.id === data.user_id) return
-    setBusy(true); setErr('')
-    try {
-      const { error } = await supabase.from('likes').insert({ liker: viewer.id, likee: data.user_id })
-      if (error && !String(error.message || '').includes('duplicate key')) throw error
-      setLiked(true)
-      const { data: theirLike } = await supabase
-        .from('likes').select('liker, likee')
-        .eq('liker', data.user_id).eq('likee', viewer.id).maybeSingle()
-      setMutual(!!theirLike)
-    } catch (e) {
-      setErr(e.message || 'Could not like.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function doUnlike() {
-    if (!viewer || !data?.user_id) return
-    setBusy(true); setErr('')
-    try {
-      const { error } = await supabase
-        .from('likes').delete()
-        .eq('liker', viewer.id).eq('likee', data.user_id)
-      if (error) throw error
-      setLiked(false)
-      setMutual(false)
-    } catch (e) {
-      setErr(e.message || 'Could not unlike.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   function openChat() {
-    if (!viewer) { window.location.href = '/auth'; return }
-    if (window?.trymeChat?.open) {
-      window.trymeChat.open({ handle })
-    } else {
-      // fallback: go to Messages tab
-      window.location.href = `/messages/${encodeURIComponent(handle)}`
+    if (!profile?.handle) return
+    if (!me) {
+      // Not signed in — send to auth, then back here
+      navigate('/auth?next=' + encodeURIComponent(`/u/${profile.handle}`))
+      return
     }
+    if (!window.trymeChat) {
+      alert('Messaging is not ready on this page yet. Try a hard refresh.')
+      return
+    }
+    window.trymeChat.open({ handle: profile.handle })
   }
 
-  if (state === 'loading') return <div style={{ padding: 40 }}>Loading…</div>
-  if (state === 'notfound') return <div style={{ padding: 40 }}>This profile is private or does not exist.</div>
-  if (state === 'error') return <div style={{ padding: 40 }}>Something went wrong.</div>
+  const isMe = me?.id && profile?.user_id && me.id === profile.user_id
 
   return (
-    <div style={{ padding: 40, maxWidth: 720, margin: '0 auto', fontFamily: 'ui-sans-serif, system-ui' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
-        <img
-          src={data.avatar_url || 'https://via.placeholder.com/96?text=%F0%9F%98%8A'}
-          alt={`${data.display_name} avatar`}
-          style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid #eee' }}
-        />
-        <div>
-          <h2 style={{ margin: 0 }}>{data.display_name}</h2>
-          <div style={{ opacity: 0.8 }}>@{data.handle} · {data.mode}</div>
+    <div className="container" style={{ padding: '32px 0' }}>
+      {loading && <div className="card">Loading profile…</div>}
+      {error && <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>{error}</div>}
+      {!loading && !profile && !error && (
+        <div className="card">
+          <h2>Profile not found</h2>
+          <p>We couldn’t find @{handle}. Check the handle and try again.</p>
         </div>
-      </div>
+      )}
+      {profile && (
+        <div className="card" style={{ display: 'grid', gap: 16 }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <img
+                src={profile.avatar_url || 'https://via.placeholder.com/96?text=%F0%9F%91%A4'}
+                alt=""
+                style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid #e5e7eb' }}
+              />
+              <div>
+                <h1 style={{ margin: 0 }}>{profile.display_name || profile.handle}</h1>
+                <div className="badge">@{profile.handle}</div>
+              </div>
+            </div>
 
-      <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
-        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{data.bio}</p>
-      </div>
+            {/* Message button (hidden if viewing your own profile) */}
+            {!isMe && (
+              <button className="btn btn-primary" onClick={openChat} title="Start a conversation">
+                Message
+              </button>
+            )}
+          </div>
 
-      {/* Actions */}
-      <div style={{ marginTop: 16, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-        {viewer && viewer.id === data.user_id ? (
-          <div style={{ fontSize:13, opacity:.7 }}>This is your profile.</div>
-        ) : liked ? (
-          <button onClick={doUnlike} disabled={busy}
-            style={{ padding:'10px 14px', border:'1px solid #ddd', borderRadius:10, background:'#fff' }}>
-            {busy ? 'Working…' : 'Unlike'}
-          </button>
-        ) : (
-          <button onClick={doLike} disabled={busy}
-            style={{ padding:'10px 14px', border:'none', borderRadius:10, background:'#2A9D8F', color:'#fff', fontWeight:700 }}>
-            {busy ? 'Working…' : 'Like'}
-          </button>
-        )}
+          {/* Bio / details */}
+          <div>
+            <h3>About</h3>
+            <p style={{ marginTop: 8 }}>
+              {profile.bio || 'This user hasn’t written a bio yet.'}
+            </p>
+          </div>
 
-        <button
-          onClick={openChat}
-          style={{ padding:'10px 14px', borderRadius:10, border:'1px solid #ddd', background:'#fff' }}
-        >
-          Message
-        </button>
-
-        {mutual && <span style={{ fontSize:13, color:'#2A9D8F' }}>It’s a match! 🎉</span>}
-        {err && <span style={{ fontSize:13, color:'#C0392B' }}>{err}</span>}
-      </div>
-
-      <div style={{ marginTop: 16, fontSize: 13, opacity: 0.8 }}>
-        This is a public profile. To hide it, the owner can turn off “Public profile” in settings.
-      </div>
+          {/* Safety / visibility */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <span className="badge">Mode: {profile.mode || 'standard'}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
