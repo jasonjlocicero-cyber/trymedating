@@ -170,3 +170,18 @@ input:focus, select:focus, textarea:focus{
 .chatdock-attach-label{
   box-shadow: var(--shadow);
 }
+
+/* ===== MessageLauncher helpers ===== */
+@keyframes ml-pulse {
+  0% { box-shadow: 0 18px 40px rgba(42,157,143,.35); transform: translateZ(0) }
+  50% { box-shadow: 0 22px 48px rgba(79,70,229,.35); }
+  100% { box-shadow: 0 18px 40px rgba(42,157,143,.35); }
+}
+.ml-pulse {
+  animation: ml-pulse 2.4s ease-in-out infinite;
+}
+
+/* Hide the "Messages" pill label on small screens so the FAB stays compact */
+@media (max-width: 768px){
+  .ml-label { display: none; }
+}
