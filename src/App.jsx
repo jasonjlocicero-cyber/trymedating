@@ -1,6 +1,7 @@
 import React from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
+import MessageLauncher from './components/MessageLauncher'
 
 // --- Pages ---
 import AuthPage from './pages/AuthPage'
@@ -11,12 +12,11 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
-// --- Home page ---
 function Home() {
   return (
     <div className="container" style={{ padding: '32px 0' }}>
       <h1>TryMeDating</h1>
-      <p>Welcome! Messaging dock is mounted globally.</p>
+      <p>Welcome! Messaging is available on all pages via the 💬 button.</p>
       <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
         <Link className="btn btn-primary" to="/auth">Sign in</Link>
         <Link className="btn btn-secondary" to="/profile">My Profile</Link>
@@ -26,7 +26,6 @@ function Home() {
   )
 }
 
-// --- App Layout + Routes ---
 export default function App() {
   return (
     <>
@@ -34,10 +33,7 @@ export default function App() {
       <header style={{
         borderBottom: '1px solid #eee',
         padding: '10px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to="/" style={{ fontWeight: 800, textDecoration: 'none', color: '#2A2A2A' }}>
@@ -53,19 +49,17 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main routes */}
+      {/* Routes */}
       <main style={{ minHeight: 'calc(100vh - 140px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* 🔽 Public profile route with :handle param */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
-          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -80,9 +74,11 @@ export default function App() {
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* 🔽 Chat dock mounted globally so it's available everywhere */}
+      {/* Floating messages launcher + the chat dock */}
+      <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
