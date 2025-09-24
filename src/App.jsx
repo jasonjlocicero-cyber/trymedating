@@ -1,8 +1,8 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route, Link } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
 
-// --- Your pages (adjust paths if your filenames differ) ---
+// --- Pages ---
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
@@ -11,12 +11,12 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
-// Optional: a simple home screen (you can replace this with your real Home)
+// --- Home ---
 function Home() {
   return (
     <div className="container" style={{ padding: '32px 0' }}>
       <h1>TryMeDating</h1>
-      <p>Welcome! Use the nav to explore. Messaging dock is mounted globally.</p>
+      <p>Welcome! Messaging dock is mounted globally.</p>
       <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
         <Link className="btn btn-primary" to="/auth">Sign in</Link>
         <Link className="btn btn-secondary" to="/profile">My Profile</Link>
@@ -26,10 +26,11 @@ function Home() {
   )
 }
 
+// --- App Layout + Routes ---
 export default function App() {
   return (
-    <BrowserRouter>
-      {/* Simple header */}
+    <>
+      {/* Header */}
       <header style={{
         borderBottom: '1px solid #eee',
         padding: '10px 16px',
@@ -52,7 +53,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main routes */}
+      {/* Routes */}
       <main style={{ minHeight: 'calc(100vh - 140px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -63,7 +64,7 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
-          {/* 404 */}
+          {/* 404 Fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -73,13 +74,13 @@ export default function App() {
         </Routes>
       </main>
 
-      {/* Simple footer */}
+      {/* Footer */}
       <footer style={{ borderTop: '1px solid #eee', padding: '16px', textAlign: 'center' }}>
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* 🔽 Mount the messaging dock ONCE so it’s available everywhere */}
+      {/* 🔽 ChatDock mounted globally */}
       <ChatDock />
-    </BrowserRouter>
+    </>
   )
 }
