@@ -2,11 +2,14 @@ import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (Draggable + Resizable + Persisted + Snap + Restore)
+ * ChatDock (Draggable + Resizable + Persisted + Snap + Restore + Notifications)
  * - Multiple draggable/resizable chat windows (cap 3)
  * - Positions & sizes saved per partner in localStorage
  * - Snap to nearest corner; grid snap elsewhere
- * - NEW: "Restore" button resets to default size/position and persists it
+ * - Restore default size/position button
+ * - NEW: Sound + Desktop notifications for new incoming messages
+ *   - Per-chat toggles (saved): sound on/off, notify on/off
+ *   - Cooldown to avoid spam
  * - Auto-focus input, unread badges, typing indicators
  * - Emits 'chatdock:status' and 'chatdock:unread'
  * - Global: window.trymeChat.open({ handle, user_id })
@@ -20,9 +23,22 @@ const MAX_W = 560
 const MAX_H = 720
 
 const EDGE_GAP = 16
-const FOOTER_CLEAR = 120 // keep above footer
+const FOOTER_CLEAR = 120
 const GRID = 12
 const SNAP_THRESH = 40
+
+// --- Sound: tiny ping (base64-encoded wav) ---------------------------------
+// (Very short, subtle; replace with your own asset if you prefer)
+const PING_DATA_URL =
+  'data:audio/wav;base64,UklGRkSXAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YUTWAQAAgP8AAP8AgAAAAP8A/4AAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAB///8AAAD/gAAA' // shortened minimal ping
+
+function playPing() {
+  try {
+    const a = new Audio(PING_DATA_URL)
+    a.volume = 0.35
+    a.play().catch(() => {})
+  } catch {}
+}
 
 function useMe() {
   const [me, setMe] = useState(null)
@@ -49,7 +65,6 @@ async function fetchProfileByHandle(handle) {
     .maybeSingle()
   return data || null
 }
-
 async function fetchProfileByUserId(user_id) {
   const { data } = await supabase
     .from('profiles')
@@ -67,7 +82,8 @@ function ChatWindow({
   onClose, onMinimize,
   onFocus,
   onUnreadChange,
-  onRestore,           // NEW
+  onRestore,
+  onIncoming,          // NEW: notify parent an incoming message arrived
   inputAutoFocusRef,
   width, height
 }) {
@@ -76,15 +92,35 @@ function ChatWindow({
   const [error, setError] = useState('')
   const [draft, setDraft] = useState('')
   const [theirTyping, setTheirTyping] = useState(false)
+
+  // Per-chat notification toggles (persisted)
+  const soundKey = partner?.user_id ? `tmd_sound_${partner.user_id}` : null
+  const notifyKey = partner?.user_id ? `tmd_notify_${partner.user_id}` : null
+  const [soundOn, setSoundOn] = useState(true)
+  const [notifyOn, setNotifyOn] = useState(true)
+
+  useEffect(() => {
+    if (!soundKey || !notifyKey) return
+    const sRaw = localStorage.getItem(soundKey)
+    const nRaw = localStorage.getItem(notifyKey)
+    setSoundOn(sRaw === null ? true : sRaw === '1')
+    setNotifyOn(nRaw === null ? true : nRaw === '1')
+  }, [soundKey, notifyKey])
+
+  function persistSound(on) { if (soundKey) localStorage.setItem(soundKey, on ? '1' : '0') }
+  function persistNotify(on) { if (notifyKey) localStorage.setItem(notifyKey, on ? '1' : '0') }
+
   const inputRef = useRef(null)
   const bottomRef = useRef(null)
   const typingTimerRef = useRef(null)
   const lastTypingSentRef = useRef(0)
 
+  // Cooldown for notifications
+  const lastAlertRef = useRef(0) // timestamp ms
+
   useEffect(() => { if (inputAutoFocusRef) inputAutoFocusRef.current = inputRef.current }, [inputAutoFocusRef])
 
   const lastReadKey = me && partner ? `tmd_last_read_${me.id}_${partner.user_id}` : null
-
   function getLastRead() {
     if (!lastReadKey) return 0
     const raw = localStorage.getItem(lastReadKey)
@@ -95,6 +131,7 @@ function ChatWindow({
     localStorage.setItem(lastReadKey, String(Date.now()))
   }
 
+  // Load history
   useEffect(() => {
     if (!me || !partner?.user_id) return
     ;(async () => {
@@ -116,6 +153,7 @@ function ChatWindow({
     })()
   }, [me?.id, partner?.user_id])
 
+  // Realtime: new messages
   useEffect(() => {
     if (!me || !partner?.user_id) return
     const channel = supabase
@@ -124,18 +162,35 @@ function ChatWindow({
         { event: 'INSERT', schema: 'public', table: 'messages' },
         payload => {
           const m = payload.new
-          const isOurs =
+          const relevant =
             (m.sender === me.id && m.recipient === partner.user_id) ||
             (m.sender === partner.user_id && m.recipient === me.id)
-          if (!isOurs) return
+          if (!relevant) return
           setMessages(prev => [...prev, m])
+
+          // New incoming from them?
+          if (m.sender === partner.user_id) {
+            const now = Date.now()
+            // throttle alerts (6s per chat)
+            if (now - lastAlertRef.current > 6000) {
+              lastAlertRef.current = now
+              onIncoming?.({
+                partner,
+                message: m,
+                soundOn,
+                notifyOn,
+                active,
+                minimized
+              })
+            }
+          }
         }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [me?.id, partner?.user_id])
+  }, [me?.id, partner?.user_id, soundOn, notifyOn, active, minimized, onIncoming, partner])
 
-  // Typing indicator
+  // Typing indicator broadcast
   useEffect(() => {
     if (!me?.id || !partner?.user_id) return
     const [a, b] = [me.id, partner.user_id].sort()
@@ -170,9 +225,11 @@ function ChatWindow({
     })
   }
 
+  // Scroll & focus
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
   useEffect(() => { if (active && !minimized) setTimeout(() => inputRef.current?.focus(), 0) }, [active, minimized])
 
+  // Unread logic
   useEffect(() => {
     if (!messages.length || !partner?.user_id) {
       onUnreadChange?.(partner?.user_id, 0)
@@ -190,14 +247,13 @@ function ChatWindow({
     }
   }, [messages, active, minimized, partner?.user_id])
 
+  // Send message
   async function send() {
     if (!draft.trim() || !me || !partner?.user_id) return
     const body = draft.trim().slice(0, 2000)
     setDraft('')
     const { error } = await supabase.from('messages').insert({
-      sender: me.id,
-      recipient: partner.user_id,
-      body
+      sender: me.id, recipient: partner.user_id, body
     })
     if (error) setError(error.message)
     setTimeout(() => inputRef.current?.focus(), 0)
@@ -215,6 +271,7 @@ function ChatWindow({
         display:'flex', flexDirection:'column', overflow:'hidden', position:'relative'
       }}
     >
+      {/* Header */}
       <div
         className="drag-handle"
         style={{
@@ -230,13 +287,36 @@ function ChatWindow({
           </div>
         </div>
         <div style={{ display:'flex', gap:6 }}>
-          {/* NEW: Restore button */}
+          {/* Toggle sound */}
+          <button
+            onClick={() => { const v = !soundOn; setSoundOn(v); persistSound(v) }}
+            title={soundOn ? 'Mute sound' : 'Enable sound'}
+            style={iconBtnStyle}
+          >
+            {soundOn ? '🔔' : '🔕'}
+          </button>
+          {/* Toggle desktop notifications */}
+          <button
+            onClick={async () => {
+              const v = !notifyOn
+              setNotifyOn(v); persistNotify(v)
+              if (v && 'Notification' in window && Notification.permission === 'default') {
+                try { await Notification.requestPermission() } catch {}
+              }
+            }}
+            title={notifyOn ? 'Disable desktop notifications' : 'Enable desktop notifications'}
+            style={iconBtnStyle}
+          >
+            {notifyOn ? '🖥️' : '🚫'}
+          </button>
+          {/* Restore */}
           <button onClick={onRestore} title="Restore default size & position" style={iconBtnStyle}>↺</button>
           <button onClick={onMinimize} title="Minimize" style={iconBtnStyle}>—</button>
           <button onClick={onClose} title="Close" style={iconBtnStyle}>×</button>
         </div>
       </div>
 
+      {/* Messages */}
       <div style={{ flex:1, overflow:'auto', padding:10, background:'#fafafa' }}>
         {loading && <div>Loading…</div>}
         {error && <div style={{ color:'#C0392B' }}>{error}</div>}
@@ -261,10 +341,12 @@ function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
+      {/* Typing indicator */}
       <div style={{ minHeight: theirTyping ? 18 : 0, padding: theirTyping ? '0 10px 6px' : 0, fontSize: 12, color:'#7a7a7a' }}>
         {theirTyping ? `${partner?.display_name || partner?.handle || 'They'} is typing…` : null}
       </div>
 
+      {/* Composer */}
       <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, background:'#fff' }}>
         <input
           ref={inputRef}
@@ -323,27 +405,12 @@ export default function ChatDock() {
   function viewport() { return { w: window.innerWidth, h: window.innerHeight } }
 
   // localStorage helpers
-  function loadPos(uid) {
-    const raw = localStorage.getItem(`tmd_pos_${uid}`)
-    if (!raw) return null
-    try { return JSON.parse(raw) } catch { return null }
-  }
-  function savePos(uid, x, y) {
-    localStorage.setItem(`tmd_pos_${uid}`, JSON.stringify({ x, y }))
-  }
-  function clearPos(uid) { localStorage.removeItem(`tmd_pos_${uid}`) }
+  function loadPos(uid) { try { return JSON.parse(localStorage.getItem(`tmd_pos_${uid}`) || 'null') } catch { return null } }
+  function savePos(uid, x, y) { localStorage.setItem(`tmd_pos_${uid}`, JSON.stringify({ x, y })) }
+  function loadSize(uid) { try { return JSON.parse(localStorage.getItem(`tmd_size_${uid}`) || 'null') } catch { return null } }
+  function saveSize(uid, w, h) { localStorage.setItem(`tmd_size_${uid}`, JSON.stringify({ w, h })) }
 
-  function loadSize(uid) {
-    const raw = localStorage.getItem(`tmd_size_${uid}`)
-    if (!raw) return null
-    try { return JSON.parse(raw) } catch { return null }
-  }
-  function saveSize(uid, w, h) {
-    localStorage.setItem(`tmd_size_${uid}`, JSON.stringify({ w, h }))
-  }
-  function clearSize(uid) { localStorage.removeItem(`tmd_size_${uid}`) }
-
-  // initial frame (used at open and for restore)
+  // initial frame
   function initialFrame(index, uid) {
     const pos = loadPos(uid)
     const size = loadSize(uid)
@@ -371,19 +438,13 @@ export default function ChatDock() {
       { x: vw - EDGE_GAP - w,        y: vh - EDGE_GAP - FOOTER_CLEAR - h }
     ]
   }
-  function distance(a, b) {
-    const dx = a.x - b.x, dy = a.y - b.y
-    return Math.sqrt(dx*dx + dy*dy)
-  }
+  function distance(a, b) { const dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx*dx + dy*dy) }
   function snapPosition(x, y, w, h) {
     const { w: vw, h: vh } = viewport()
     const targets = cornerTargets({ vw, vh, w, h })
     const current = { x, y }
     let best = { ...current }, bestD = Infinity
-    for (const t of targets) {
-      const d = distance(current, t)
-      if (d < bestD) { bestD = d; best = t }
-    }
+    for (const t of targets) { const d = distance(current, t); if (d < bestD) { bestD = d; best = t } }
     if (bestD <= SNAP_THRESH) return { x: best.x, y: best.y }
     const gx = snapToGrid(x, w, vw)
     const gy = snapToGrid(y, h, vh - FOOTER_CLEAR)
@@ -398,11 +459,8 @@ export default function ChatDock() {
         if (!me) { window.location.href = '/auth'; return }
 
         let prof = null
-        if (user_id) {
-          prof = profilesCache[user_id] || await fetchProfileByUserId(user_id)
-        } else if (handle) {
-          prof = await fetchProfileByHandle(handle)
-        }
+        if (user_id) prof = profilesCache[user_id] || await fetchProfileByUserId(user_id)
+        else if (handle) prof = await fetchProfileByHandle(handle)
         if (!prof?.user_id) return
 
         setProfilesCache(prev => ({ ...prev, [prof.user_id]: prof }))
@@ -459,7 +517,6 @@ export default function ChatDock() {
 
   // --- Drag logic -----------------------------------------------------------
   const dragRef = useRef({ uid: null, startX: 0, startY: 0, baseX: 0, baseY: 0 })
-
   function onDragStart(uid, clientX, clientY) {
     const win = items.find(x => x.partner.user_id === uid)
     if (!win) return
@@ -474,7 +531,6 @@ export default function ChatDock() {
     window.addEventListener('touchmove', onDragMove, { passive: false })
     window.addEventListener('touchend', onDragEnd)
   }
-
   function onDragMove(e) {
     e.preventDefault?.()
     if (!dragRef.current.uid) return
@@ -483,7 +539,6 @@ export default function ChatDock() {
     const clientY = isTouch ? e.touches[0].clientY : e.clientY
     const dx = clientX - dragRef.current.startX
     const dy = clientY - dragRef.current.startY
-
     setItems(prev => prev.map(x => {
       if (x.partner.user_id !== dragRef.current.uid) return x
       const { w: vw, h: vh } = viewport()
@@ -493,12 +548,11 @@ export default function ChatDock() {
       const maxX = vw - EDGE_GAP - w
       const minY = EDGE_GAP
       const maxY = vh - EDGE_GAP - FOOTER_CLEAR - h
-      const nx = clamp(dragRef.current.baseX + dx, minX, maxX)
-      const ny = clamp(dragRef.current.baseY + dy, minY, maxY)
+      const nx = Math.max(minX, Math.min(maxX, dragRef.current.baseX + dx))
+      const ny = Math.max(minY, Math.min(maxY, dragRef.current.baseY + dy))
       return { ...x, x: nx, y: ny }
     }))
   }
-
   function onDragEnd() {
     const uid = dragRef.current.uid
     dragRef.current.uid = null
@@ -506,7 +560,6 @@ export default function ChatDock() {
     window.removeEventListener('mouseup', onDragEnd)
     window.removeEventListener('touchmove', onDragMove)
     window.removeEventListener('touchend', onDragEnd)
-
     setItems(prev => prev.map(x => {
       if (x.partner.user_id !== uid) return x
       const { x: sx, y: sy } = snapPosition(x.x, x.y, x.w || DEF_W, x.h || DEF_H)
@@ -517,7 +570,6 @@ export default function ChatDock() {
 
   // --- Resize logic ---------------------------------------------------------
   const resizeRef = useRef({ uid: null, startX: 0, startY: 0, baseW: DEF_W, baseH: DEF_H })
-
   function onResizeStart(uid, clientX, clientY) {
     const win = items.find(x => x.partner.user_id === uid)
     if (!win) return
@@ -532,7 +584,6 @@ export default function ChatDock() {
     window.addEventListener('touchmove', onResizeMove, { passive: false })
     window.addEventListener('touchend', onResizeEnd)
   }
-
   function onResizeMove(e) {
     e.preventDefault?.()
     if (!resizeRef.current.uid) return
@@ -543,21 +594,19 @@ export default function ChatDock() {
     const dy = clientY - resizeRef.current.startY
     const { w: vw, h: vh } = viewport()
 
-    let nw = resizeRef.current.baseW + dx
-    let nh = resizeRef.current.baseH + dy
-    nw = clamp(nw, MIN_W, Math.min(MAX_W, vw - 2*EDGE_GAP))
-    nh = clamp(nh, MIN_H, Math.min(MAX_H, vh - FOOTER_CLEAR - 2*EDGE_GAP))
-
     setItems(prev => prev.map(x => {
       if (x.partner.user_id !== resizeRef.current.uid) return x
+      let nw = (resizeRef.current.baseW + dx)
+      let nh = (resizeRef.current.baseH + dy)
+      nw = Math.max(MIN_W, Math.min(Math.min(MAX_W, vw - 2*EDGE_GAP), nw))
+      nh = Math.max(MIN_H, Math.min(Math.min(MAX_H, vh - FOOTER_CLEAR - 2*EDGE_GAP), nh))
       let nx = x.x
       let ny = x.y
-      nx = clamp(nx, EDGE_GAP, vw - EDGE_GAP - nw)
-      ny = clamp(ny, EDGE_GAP, vh - EDGE_GAP - FOOTER_CLEAR - nh)
+      nx = Math.max(EDGE_GAP, Math.min(vw - EDGE_GAP - nw, nx))
+      ny = Math.max(EDGE_GAP, Math.min(vh - EDGE_GAP - FOOTER_CLEAR - nh, ny))
       return { ...x, w: nw, h: nh, x: nx, y: ny }
     }))
   }
-
   function onResizeEnd() {
     const uid = resizeRef.current.uid
     resizeRef.current.uid = null
@@ -569,22 +618,60 @@ export default function ChatDock() {
     if (win) saveSize(uid, win.w, win.h)
   }
 
-  // --- Restore logic (NEW) --------------------------------------------------
+  // --- Restore default frame ------------------------------------------------
+  function initialFrameForRestore(user_id) {
+    // bottom-right default stack (like first window)
+    const { w: vw, h: vh } = viewport()
+    const x = vw - EDGE_GAP - DEF_W
+    const y = vh - EDGE_GAP - FOOTER_CLEAR - DEF_H
+    return { x, y, w: DEF_W, h: DEF_H }
+  }
   function restoreFor(user_id) {
     setItems(prev => {
-      // use index 0 to place it at bottom-right default (like first window)
-      const f = initialFrame(0, user_id)
+      const f = initialFrameForRestore(user_id)
       const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
       const next = prev.map(x =>
         x.partner.user_id === user_id
           ? { ...x, minimized:false, x: f.x, y: f.y, w: f.w, h: f.h, z: maxZ + 1 }
           : x
       )
-      // persist new defaults
       savePos(user_id, f.x, f.y)
       saveSize(user_id, f.w, f.h)
       return next
     })
+  }
+
+  // --- Incoming message signal from child ----------------------------------
+  function handleIncoming({ partner, message, soundOn, notifyOn, active, minimized }) {
+    // Sound (only if enabled)
+    if (soundOn) {
+      // Some browsers require a user gesture; if blocked, it silently fails.
+      playPing()
+    }
+    // Desktop notification (only if enabled)
+    if (notifyOn && 'Notification' in window) {
+      const can = Notification.permission
+      const hidden = document.hidden
+      const notActive = minimized || !active
+      if ((hidden || notActive) && (can === 'granted' || can === 'default')) {
+        // Request once if default
+        if (can === 'default') {
+          Notification.requestPermission().then(perm => {
+            if (perm === 'granted') {
+              new Notification(`${partner.display_name || partner.handle || 'New message'}`, {
+                body: message.body?.slice(0, 120) || 'New message',
+              })
+            }
+          }).catch(()=>{})
+        } else {
+          try {
+            new Notification(`${partner.display_name || partner.handle || 'New message'}`, {
+              body: message.body?.slice(0, 120) || 'New message',
+            })
+          } catch {}
+        }
+      }
+    }
   }
 
   if (!supabase) return null
@@ -618,23 +705,7 @@ export default function ChatDock() {
               </div>
             )}
 
-            {/* Drag listeners on header */}
-            <div
-              onMouseDown={(e) => {
-                const el = e.target.closest('.drag-handle')
-                if (el) {
-                  const { clientX, clientY } = e
-                  // bring to front + start drag
-                  const uid = item.partner.user_id
-                  const win = items.find(x => x.partner.user_id === uid)
-                  if (win) {
-                    // delegate to handlers defined above
-                  }
-                }
-              }}
-            />
-
-            {/* The actual window */}
+            {/* Chat Window */}
             <ChatWindow
               me={me}
               partner={item.partner}
@@ -642,15 +713,16 @@ export default function ChatDock() {
               minimized={item.minimized}
               onClose={() => closeFor(item.partner.user_id)}
               onMinimize={() => minimizeFor(item.partner.user_id)}
-              onFocus={(uid) => focusFor(uid)}
+              onFocus={(uid) => setActiveUserId(uid)}
               onUnreadChange={(uid, count) => setUnread(uid, count)}
-              onRestore={() => restoreFor(item.partner.user_id)}   // NEW
+              onRestore={() => restoreFor(item.partner.user_id)}
+              onIncoming={handleIncoming}
               inputAutoFocusRef={useRef(null)}
               width={item.w || DEF_W}
               height={item.h || DEF_H}
             />
 
-            {/* Drag & Resize listeners overlays */}
+            {/* Drag overlay */}
             <div
               onMouseDown={(e) => {
                 const el = e.target.closest('.drag-handle')
@@ -663,6 +735,7 @@ export default function ChatDock() {
               }}
               style={{ position:'absolute', inset:0, pointerEvents:'none' }}
             />
+            {/* Resize overlay */}
             <div
               onMouseDown={(e) => {
                 const el = e.target.closest('.resize-handle')
