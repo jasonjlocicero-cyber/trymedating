@@ -1,126 +1,190 @@
-/* === Base reset === */
-* {
-  box-sizing: border-box;
+/* ===== TryMeDating Base Styles ===== */
+:root{
+  --bg: #ffffff;
+  --bg-soft: #f7f7f9;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+
+  /* Brand palette from logo */
+  --primary: #e86f61;        /* coral (for Dating) */
+  --primary-600: #d65d50;    /* darker coral */
+  --secondary: #2a9d8f;      /* teal (for TryMe) */
+  --secondary-600: #238379;  /* darker teal */
+  --danger: #dc2626;         /* keep red for destructive actions */
+
+  --radius: 12px;
+  --shadow: 0 8px 24px rgba(0,0,0,.08);
+}
+
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg: #0b1020;
+    --bg-soft: #0f162e;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --border: #1f2a44;
+    --shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+
+/* Typography & layout */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body{
   margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: system-ui, sans-serif;
-  background: var(--bg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
   color: var(--text);
-  line-height: 1.5;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%);
 }
 
-/* === Brand variables === */
-:root {
-  --primary: #ff6f61;     /* coral */
-  --secondary: #2a9d8f;   /* teal */
-  --bg: #fafafa;
-  --bg-soft: #f5f5f5;
-  --text: #222;
-  --muted: #666;
-  --border: #ddd;
-}
-
-/* === Layout helpers === */
-.container {
-  max-width: 960px;
+.container{
+  width: 100%;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 0 16px;
 }
 
-.card {
-  background: #fff;
+h1,h2,h3{ margin: 0 0 .5rem; line-height: 1.15; }
+p{ margin: .5rem 0 1rem; color: var(--muted); }
+
+/* Header & footer */
+header{
+  position: sticky;
+  top: 0;
+  background: color-mix(in oklab, var(--bg), #fff 20%);
+  backdrop-filter: saturate(1.2) blur(6px);
+  z-index: 50;
+}
+header a{ color: var(--text); text-decoration: none; }
+header nav a{
+  padding: 6px 10px;
+  border-radius: 8px;
+  line-height: 1;
+}
+header nav a:hover{
+  background: var(--bg-soft);
+}
+
+footer{
+  color: var(--muted);
+  background: color-mix(in oklab, var(--bg), #000 2%);
+}
+
+/* Links */
+a{ color: var(--secondary); text-decoration: none; }
+a:hover{ text-decoration: underline; }
+
+/* Buttons */
+.btn{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-}
-
-/* === Forms === */
-input, textarea, select {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 14px;
-}
-
-textarea {
-  resize: vertical;
-}
-
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--secondary);
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--secondary) 30%, transparent);
-}
-
-/* === Buttons === */
-.btn {
-  display: inline-block;
-  font-size: 14px;
-  padding: 8px 14px;
-  border-radius: 6px;
-  text-decoration: none;
-  cursor: pointer;
-  border: 1px solid var(--border);
   background: #fff;
   color: var(--text);
-  transition: background 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform .04s ease, box-shadow .2s ease, background .2s ease;
+  box-shadow: var(--shadow);
 }
+.btn:hover{ transform: translateY(-1px); }
+.btn:active{ transform: translateY(0); }
+.btn:disabled{ opacity: .6; cursor: not-allowed; }
 
-.btn:hover {
-  background: var(--bg-soft);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-}
-
-/* Primary button (gradient brand) */
-.btn-primary {
-  background: linear-gradient(135deg, var(--secondary), var(--primary));
+.btn-primary{
+  background: var(--primary);
   color: #fff;
-  font-weight: 700;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  transition: transform 0.1s ease, box-shadow 0.2s ease;
+  border-color: color-mix(in oklab, var(--primary), #000 8%);
+}
+.btn-primary:hover{ background: var(--primary-600); }
+
+.btn-secondary{
+  background: var(--secondary);
+  color: #fff;
+  border-color: color-mix(in oklab, var(--secondary), #000 8%);
+}
+.btn-secondary:hover{ background: var(--secondary-600); }
+
+.btn-danger{
+  background: var(--danger);
+  color: #fff;
+  border-color: color-mix(in oklab, var(--danger), #000 8%);
 }
 
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Secondary button (teal outline) */
-.btn-secondary {
-  border: 1px solid var(--secondary);
-  color: var(--secondary);
+/* Forms */
+input, select, textarea{
+  font: inherit;
+  color: var(--text);
   background: #fff;
-  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+  width: 100%;
+}
+input::placeholder, textarea::placeholder{ color: color-mix(in oklab, var(--muted), #000 10%); }
+input:focus, select:focus, textarea:focus{
+  border-color: color-mix(in oklab, var(--primary), #000 10%);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary), #fff 80%);
 }
 
-.btn-secondary:hover {
-  background: color-mix(in oklab, var(--secondary) 10%, #fff);
+/* Cards & panels */
+.card{
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
 }
 
-/* === Badges === */
-.badge {
-  display: inline-block;
-  padding: 4px 10px;
+/* Badges */
+.badge{
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
   font-size: 12px;
-  font-weight: 600;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--secondary), var(--primary));
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
-  margin-right: 4px;
-  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--bg-soft);
 }
 
+/* Utilities */
+.flex{ display: flex; }
+.flex-col{ flex-direction: column; }
+.items-center{ align-items: center; }
+.justify-between{ justify-content: space-between; }
+.gap-8{ gap: 8px; }
+.gap-12{ gap: 12px; }
+.mt-12{ margin-top: 12px; }
+.mt-24{ margin-top: 24px; }
+.text-center{ text-align: center; }
+
+/* ChatDock small tweaks (your ChatDock uses inline styles; these just polish) */
+.chatdock-window img{
+  image-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  border-radius: 10px;
+}
+.chatdock-attach-label{
+  box-shadow: var(--shadow);
+}
+
+/* ===== MessageLauncher helpers ===== */
+@keyframes ml-pulse {
+  0% { box-shadow: 0 18px 40px rgba(42,157,143,.35); transform: translateZ(0) }
+  50% { box-shadow: 0 22px 48px rgba(79,70,229,.35); }
+  100% { box-shadow: 0 18px 40px rgba(42,157,143,.35); }
+}
+.ml-pulse {
+  animation: ml-pulse 2.4s ease-in-out infinite;
+}
+
+/* Hide the "Messages" pill label on small screens so the FAB stays compact */
+@media (max-width: 768px){
+  .ml-label { display: none; }
+}
