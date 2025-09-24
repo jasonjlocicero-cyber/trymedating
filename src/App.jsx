@@ -11,7 +11,7 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
-// --- Home ---
+// --- Home page ---
 function Home() {
   return (
     <div className="container" style={{ padding: '32px 0' }}>
@@ -44,27 +44,28 @@ export default function App() {
             TryMeDating
           </Link>
           <nav style={{ display: 'flex', gap: 10 }}>
-            <Link className="btn" to="/profile">Profile</Link>
-            <Link className="btn" to="/settings">Settings</Link>
-            <Link className="btn" to="/terms">Terms</Link>
-            <Link className="btn" to="/privacy">Privacy</Link>
-            <Link className="btn" to="/contact">Contact</Link>
+            <Link to="/profile">Profile</Link>
+            <Link to="/settings">Settings</Link>
+            <Link to="/terms">Terms</Link>
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/contact">Contact</Link>
           </nav>
         </div>
       </header>
 
-      {/* Routes */}
+      {/* Main routes */}
       <main style={{ minHeight: 'calc(100vh - 140px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* 🔽 Public profile route with :handle param */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
-          {/* 404 Fallback */}
+          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -79,8 +80,9 @@ export default function App() {
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* 🔽 ChatDock mounted globally */}
+      {/* 🔽 Chat dock mounted globally so it's available everywhere */}
       <ChatDock />
     </>
   )
 }
+
