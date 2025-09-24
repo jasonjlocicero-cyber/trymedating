@@ -23,14 +23,8 @@ function Home() {
       <div className="container" style={{ maxWidth: 720 }}>
         <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
           Welcome to{' '}
-          <span style={{
-            fontWeight: 800,
-            background: 'linear-gradient(90deg, var(--secondary), var(--primary))',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
-          }}>
-            TryMeDating
-          </span>
+          <span style={{ fontWeight: 800, color: 'var(--secondary)' }}>TryMe</span>
+          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>Dating</span>
         </h1>
 
         <p style={{ fontSize: '1.25rem', marginBottom: 32, color: 'var(--muted)' }}>
@@ -65,18 +59,14 @@ export default function App() {
         backdropFilter: 'saturate(1.2) blur(6px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Brand title with subtle gradient to match logo */}
+          {/* Brand title with split colors */}
           <Link to="/" style={{
             fontWeight: 800,
-            textDecoration: 'none'
+            textDecoration: 'none',
+            fontSize: '1.25rem'
           }}>
-            <span style={{
-              background: 'linear-gradient(90deg, var(--secondary), var(--primary))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              TryMeDating
-            </span>
+            <span style={{ color: 'var(--secondary)' }}>TryMe</span>
+            <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
 
           <nav style={{ display: 'flex', gap: 10 }}>
@@ -96,12 +86,10 @@ export default function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* Public profile route */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
-          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -116,12 +104,13 @@ export default function App() {
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* Floating messages launcher + chat dock (available on all pages) */}
+      {/* Floating messages launcher + chat dock */}
       <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
 
 
