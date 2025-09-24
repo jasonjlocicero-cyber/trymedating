@@ -1,15 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (Draggable + Resizable + Persisted + Snap + Restore + Notifications)
+ * ChatDock (Draggable + Resizable + Persisted + Snap + Restore + Notifications + Search)
  * - Multiple draggable/resizable chat windows (cap 3)
  * - Positions & sizes saved per partner in localStorage
  * - Snap to nearest corner; grid snap elsewhere
  * - Restore default size/position button
- * - NEW: Sound + Desktop notifications for new incoming messages
- *   - Per-chat toggles (saved): sound on/off, notify on/off
- *   - Cooldown to avoid spam
+ * - Sound + Desktop notifications for new incoming messages (per-chat toggles)
+ * - NEW: In-chat Search (🔎)
+ *   - Toggle search bar per chat
+ *   - Case-insensitive highlight with <mark>
+ *   - Match count + Prev/Next navigation
+ *   - Auto-scroll to current match
+ *   - Ctrl/⌘+F focuses search box for active chat
  * - Auto-focus input, unread badges, typing indicators
  * - Emits 'chatdock:status' and 'chatdock:unread'
  * - Global: window.trymeChat.open({ handle, user_id })
@@ -27,10 +31,9 @@ const FOOTER_CLEAR = 120
 const GRID = 12
 const SNAP_THRESH = 40
 
-// --- Sound: tiny ping (base64-encoded wav) ---------------------------------
-// (Very short, subtle; replace with your own asset if you prefer)
+// Very short ping sound; replace with your own if desired
 const PING_DATA_URL =
-  'data:audio/wav;base64,UklGRkSXAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YUTWAQAAgP8AAP8AgAAAAP8A/4AAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAB///8AAAD/gAAA' // shortened minimal ping
+  'data:audio/wav;base64,UklGRkSXAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YUTWAQAAgP8AAP8AgAAAAP8A/4AAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAB///8AAAD/gAAA'
 
 function playPing() {
   try {
@@ -74,6 +77,32 @@ async function fetchProfileByUserId(user_id) {
   return data || null
 }
 
+// ---------- Helpers ---------------------------------------------------------
+
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+
+function highlightText(text, query) {
+  if (!query) return text
+  const parts = []
+  try {
+    const re = new RegExp(escapeRegExp(query), 'ig')
+    let lastIndex = 0
+    let m
+    while ((m = re.exec(text)) !== null) {
+      const start = m.index
+      const end = re.lastIndex
+      if (start > lastIndex) parts.push(text.slice(lastIndex, start))
+      parts.push(<mark key={start}>{text.slice(start, end)}</mark>)
+      lastIndex = end
+      if (m.index === re.lastIndex) re.lastIndex++ // safety
+    }
+    if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+    return parts.length ? parts : text
+  } catch {
+    return text
+  }
+}
+
 // ---------- ChatWindow (UI) -------------------------------------------------
 
 function ChatWindow({
@@ -83,7 +112,7 @@ function ChatWindow({
   onFocus,
   onUnreadChange,
   onRestore,
-  onIncoming,          // NEW: notify parent an incoming message arrived
+  onIncoming,
   inputAutoFocusRef,
   width, height
 }) {
@@ -93,7 +122,13 @@ function ChatWindow({
   const [draft, setDraft] = useState('')
   const [theirTyping, setTheirTyping] = useState(false)
 
-  // Per-chat notification toggles (persisted)
+  // Search state (NEW)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [matchIndex, setMatchIndex] = useState(0) // 0-based index among matches
+  const searchInputRef = useRef(null)
+
+  // Per-chat notification toggles
   const soundKey = partner?.user_id ? `tmd_sound_${partner.user_id}` : null
   const notifyKey = partner?.user_id ? `tmd_notify_${partner.user_id}` : null
   const [soundOn, setSoundOn] = useState(true)
@@ -114,11 +149,7 @@ function ChatWindow({
   const bottomRef = useRef(null)
   const typingTimerRef = useRef(null)
   const lastTypingSentRef = useRef(0)
-
-  // Cooldown for notifications
-  const lastAlertRef = useRef(0) // timestamp ms
-
-  useEffect(() => { if (inputAutoFocusRef) inputAutoFocusRef.current = inputRef.current }, [inputAutoFocusRef])
+  const lastAlertRef = useRef(0) // notification cooldown
 
   const lastReadKey = me && partner ? `tmd_last_read_${me.id}_${partner.user_id}` : null
   function getLastRead() {
@@ -142,7 +173,7 @@ function ChatWindow({
           .select('id, sender, recipient, body, created_at')
           .or(`and(sender.eq.${me.id},recipient.eq.${partner.user_id}),and(sender.eq.${partner.user_id},recipient.eq.${me.id})`)
           .order('created_at', { ascending: false })
-          .limit(100)
+          .limit(200)
         if (error) throw error
         setMessages((data || []).reverse())
       } catch (e) {
@@ -171,17 +202,9 @@ function ChatWindow({
           // New incoming from them?
           if (m.sender === partner.user_id) {
             const now = Date.now()
-            // throttle alerts (6s per chat)
             if (now - lastAlertRef.current > 6000) {
               lastAlertRef.current = now
-              onIncoming?.({
-                partner,
-                message: m,
-                soundOn,
-                notifyOn,
-                active,
-                minimized
-              })
+              onIncoming?.({ partner, message: m, soundOn, notifyOn, active, minimized })
             }
           }
         }
@@ -190,7 +213,7 @@ function ChatWindow({
     return () => { supabase.removeChannel(channel) }
   }, [me?.id, partner?.user_id, soundOn, notifyOn, active, minimized, onIncoming, partner])
 
-  // Typing indicator broadcast
+  // Typing indicator
   useEffect(() => {
     if (!me?.id || !partner?.user_id) return
     const [a, b] = [me.id, partner.user_id].sort()
@@ -225,6 +248,20 @@ function ChatWindow({
     })
   }
 
+  // Keyboard shortcut: Ctrl/⌘+F to open/focus search (only for active + not minimized)
+  useEffect(() => {
+    function onKeydown(e) {
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod || e.key.toLowerCase() !== 'f') return
+      if (!active || minimized) return
+      e.preventDefault()
+      setSearchOpen(true)
+      setTimeout(() => searchInputRef.current?.focus(), 0)
+    }
+    window.addEventListener('keydown', onKeydown)
+    return () => window.removeEventListener('keydown', onKeydown)
+  }, [active, minimized])
+
   // Scroll & focus
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.length])
   useEffect(() => { if (active && !minimized) setTimeout(() => inputRef.current?.focus(), 0) }, [active, minimized])
@@ -247,7 +284,7 @@ function ChatWindow({
     }
   }, [messages, active, minimized, partner?.user_id])
 
-  // Send message
+  // Send
   async function send() {
     if (!draft.trim() || !me || !partner?.user_id) return
     const body = draft.trim().slice(0, 2000)
@@ -257,6 +294,58 @@ function ChatWindow({
     })
     if (error) setError(error.message)
     setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  // --- Search computations --------------------------------------------------
+
+  // Build a flat list of {id, text, mine, created_at} for easier matching
+  const normalized = useMemo(() => {
+    return messages.map(m => ({
+      id: m.id,
+      text: String(m.body || ''),
+      mine: m.sender === me?.id,
+      created_at: m.created_at
+    }))
+  }, [messages, me?.id])
+
+  // Compute match indexes [ { msgIdx } ... ] for current search query
+  const matches = useMemo(() => {
+    if (!searchQuery) return []
+    const q = searchQuery.trim()
+    if (!q) return []
+    const re = new RegExp(escapeRegExp(q), 'i')
+    const out = []
+    normalized.forEach((row, idx) => {
+      if (re.test(row.text)) out.push({ msgIdx: idx })
+    })
+    return out
+  }, [searchQuery, normalized])
+
+  // Keep matchIndex in bounds
+  useEffect(() => {
+    if (!matches.length) { setMatchIndex(0); return }
+    setMatchIndex(i => Math.max(0, Math.min(i, matches.length - 1)))
+  }, [matches.length])
+
+  // Refs to message DOM nodes for scrolling to current match
+  const msgRefs = useRef({})
+  useEffect(() => {
+    if (!matches.length) return
+    const target = matches[matchIndex]
+    const msg = normalized[target.msgIdx]
+    const el = msgRefs.current[msg.id]
+    if (el && el.scrollIntoView) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [matchIndex, matches, normalized])
+
+  function gotoPrev() {
+    if (!matches.length) return
+    setMatchIndex(i => (i - 1 + matches.length) % matches.length)
+  }
+  function gotoNext() {
+    if (!matches.length) return
+    setMatchIndex(i => (i + 1) % matches.length)
   }
 
   const avatar = partner?.avatar_url || 'https://via.placeholder.com/28?text=%F0%9F%98%8A'
@@ -287,6 +376,12 @@ function ChatWindow({
           </div>
         </div>
         <div style={{ display:'flex', gap:6 }}>
+          {/* Search toggle */}
+          <button
+            onClick={() => { setSearchOpen(v => !v); setTimeout(()=> searchOpen ? null : searchInputRef.current?.focus(), 0) }}
+            title="Search in conversation (Ctrl/⌘+F)"
+            style={iconBtnStyle}
+          >🔎</button>
           {/* Toggle sound */}
           <button
             onClick={() => { const v = !soundOn; setSoundOn(v); persistSound(v) }}
@@ -316,24 +411,53 @@ function ChatWindow({
         </div>
       </div>
 
+      {/* Search bar (NEW) */}
+      {searchOpen && (
+        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 8px', borderBottom:'1px solid #eee', background:'#fff' }}>
+          <input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search messages…"
+            style={{ flex:1, padding:'8px 10px', border:'1px solid #ddd', borderRadius:8 }}
+          />
+          <div style={{ fontSize:12, opacity:.7, minWidth:60, textAlign:'center' }}>
+            {matches.length ? `${matchIndex + 1} / ${matches.length}` : '0 / 0'}
+          </div>
+          <button onClick={gotoPrev} disabled={!matches.length} style={smallBtn}>‹</button>
+          <button onClick={gotoNext} disabled={!matches.length} style={smallBtn}>›</button>
+          <button onClick={() => setSearchOpen(false)} style={smallBtn}>✕</button>
+        </div>
+      )}
+
       {/* Messages */}
       <div style={{ flex:1, overflow:'auto', padding:10, background:'#fafafa' }}>
         {loading && <div>Loading…</div>}
         {error && <div style={{ color:'#C0392B' }}>{error}</div>}
         {!loading && messages.length === 0 && <div style={{ opacity:.7 }}>Say hi 👋</div>}
-        {messages.map(m => {
-          const mine = m.sender === me?.id
+        {normalized.map((row, idx) => {
+          const mine = row.mine
+          const isCurrent = matches.length && matches[matchIndex]?.msgIdx === idx
           return (
-            <div key={m.id} style={{ display:'flex', marginBottom:8, justifyContent: mine?'flex-end':'flex-start' }}>
+            <div
+              key={row.id}
+              ref={el => { msgRefs.current[row.id] = el }}
+              style={{ display:'flex', marginBottom:8, justifyContent: mine?'flex-end':'flex-start' }}
+            >
               <div style={{
                 maxWidth:'75%',
                 background: mine ? '#2A9D8F' : '#fff',
                 color: mine ? '#fff' : '#222',
                 border: mine ? 'none' : '1px solid #eee',
-                borderRadius:14, padding:'8px 12px'
+                borderRadius:14, padding:'8px 12px',
+                outline: isCurrent ? '2px solid #2A9D8F' : 'none'
               }}>
-                <div style={{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.body}</div>
-                <div style={{ fontSize:11, opacity:.7, marginTop:2 }}>{new Date(m.created_at).toLocaleTimeString()}</div>
+                <div style={{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+                  {highlightText(row.text, searchQuery)}
+                </div>
+                <div style={{ fontSize:11, opacity:.7, marginTop:2 }}>
+                  {new Date(row.created_at).toLocaleTimeString()}
+                </div>
               </div>
             </div>
           )
@@ -384,6 +508,13 @@ const iconBtnStyle = {
   border:'1px solid #ddd', borderRadius:8, background:'#fff',
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
+const smallBtn = {
+  padding:'6px 8px',
+  border:'1px solid #ddd',
+  borderRadius:6,
+  background:'#fff',
+  cursor:'pointer'
+}
 
 // ---------- ChatDock (logic) -----------------------------------------------
 
@@ -393,7 +524,7 @@ export default function ChatDock() {
   const [items, setItems] = useState([]) // [{ key, partner, minimized, unread, x, y, z, w, h }]
   const [profilesCache, setProfilesCache] = useState({})
 
-  // Events for footer hiding + navbar dot
+  // Footer hide + navbar dot
   function emitStatus(updated = items) {
     window.dispatchEvent(new CustomEvent('chatdock:status', { detail: { open: updated.length > 0 } }))
     const totalUnread = updated.reduce((sum, x) => sum + (x.unread || 0), 0)
@@ -618,9 +749,8 @@ export default function ChatDock() {
     if (win) saveSize(uid, win.w, win.h)
   }
 
-  // --- Restore default frame ------------------------------------------------
+  // Restore default frame
   function initialFrameForRestore(user_id) {
-    // bottom-right default stack (like first window)
     const { w: vw, h: vh } = viewport()
     const x = vw - EDGE_GAP - DEF_W
     const y = vh - EDGE_GAP - FOOTER_CLEAR - DEF_H
@@ -641,20 +771,14 @@ export default function ChatDock() {
     })
   }
 
-  // --- Incoming message signal from child ----------------------------------
+  // Incoming message signal
   function handleIncoming({ partner, message, soundOn, notifyOn, active, minimized }) {
-    // Sound (only if enabled)
-    if (soundOn) {
-      // Some browsers require a user gesture; if blocked, it silently fails.
-      playPing()
-    }
-    // Desktop notification (only if enabled)
+    if (soundOn) playPing()
     if (notifyOn && 'Notification' in window) {
       const can = Notification.permission
       const hidden = document.hidden
       const notActive = minimized || !active
       if ((hidden || notActive) && (can === 'granted' || can === 'default')) {
-        // Request once if default
         if (can === 'default') {
           Notification.requestPermission().then(perm => {
             if (perm === 'granted') {
