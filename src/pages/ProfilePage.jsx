@@ -1,363 +1,275 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
-import QRCode from 'qrcode'
 
-// Make any text a safe handle (slug)
-const slugify = (s) =>
-  (s || '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')        // spaces → dashes
-    .replace(/[^a-z0-9\-]/g, '') // strip non-url chars
-    .replace(/\-+/g, '-')        // collapse ---
-    .replace(/^\-+|\-+$/g, '')   // trim - -
+/**
+ * ProfilePage
+ * - Requires auth; redirects to /auth if not signed in
+ * - Loads current user's profile from public.profiles
+ * - Editable fields: display_name, handle, bio, age, location, interests (comma-separated)
+ * - Avatar upload to Supabase Storage bucket "avatars" (public)
+ * - Upserts back to public.profiles
+ */
+
+const MAX_AVATAR_MB = 4
+const ACCEPT_AVATAR = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
 
 export default function ProfilePage() {
-  const [user, setUser] = useState(null)
-  const [emailVerified, setEmailVerified] = useState(true)
-  const [form, setForm] = useState({
-    handle: '',
-    display_name: '',
-    bio: '',
-    mode: 'dating',
-    is_public: true,
-    avatar_url: ''
-  })
+  const navigate = useNavigate()
+  const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState('')
-  const [qr, setQr] = useState('')
-  const [handleStatus, setHandleStatus] = useState('idle') // idle | checking | ok | taken | invalid
-  const [avatarUploading, setAvatarUploading] = useState(false)
-  const [resendMsg, setResendMsg] = useState('')
-  const [resendBusy, setResendBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
-  // Guard for missing env
-  if (!supabase) {
-    return (
-      <div style={{ padding: 40 }}>
-        <h2>Your Profile</h2>
-        <p>
-          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in
-          Netlify → Site configuration → Environment, then redeploy.
-        </p>
-      </div>
-    )
-  }
+  const [displayName, setDisplayName] = useState('')
+  const [handle, setHandle] = useState('')
+  const [bio, setBio] = useState('')
+  const [age, setAge] = useState('')
+  const [location, setLocation] = useState('')
+  const [interests, setInterests] = useState('') // comma-separated
 
-  // 1) Get current user (redirect if not signed in)
+  const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState('')
+
+  const fileRef = useRef(null)
+
+  // Load auth user
   useEffect(() => {
+    let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
+      if (!alive) return
       if (!user) {
-        window.location.href = '/auth'
+        navigate('/auth?next=' + encodeURIComponent('/profile'))
         return
       }
-      setUser(user)
-      setEmailVerified(!!user.email_confirmed_at)
+      setMe(user)
     })()
-  }, [])
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session?.user) navigate('/auth?next=' + encodeURIComponent('/profile'))
+      setMe(session?.user || null)
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [navigate])
 
-  // 2) Load existing profile row
+  // Load existing profile
   useEffect(() => {
-    if (!user) return
+    if (!me?.id) return
     ;(async () => {
-      setLoading(true)
+      setLoading(true); setError(''); setNotice('')
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
+        .select('user_id, handle, display_name, avatar_url, bio, age, location, interests')
+        .eq('user_id', me.id)
         .maybeSingle()
-      if (!error && data) setForm(prev => ({ ...prev, ...data }))
+      if (error) setError(error.message)
+      if (data) {
+        setDisplayName(data.display_name || '')
+        setHandle(data.handle || '')
+        setBio(data.bio || '')
+        setAge(data.age?.toString?.() || '')
+        setLocation(data.location || '')
+        setInterests(Array.isArray(data.interests) ? data.interests.join(', ') : (data.interests || ''))
+        setAvatarUrl(data.avatar_url || '')
+      }
       setLoading(false)
     })()
-  }, [user])
+  }, [me?.id])
 
-  // 3) Build QR when handle changes
+  // Avatar preview cleanup
   useEffect(() => {
-    const build = async () => {
-      if (!form.handle) return setQr('')
-      const url = `${window.location.origin}/u/${encodeURIComponent(form.handle)}`
-      setQr(await QRCode.toDataURL(url))
-    }
-    build()
-  }, [form.handle])
+    return () => { if (avatarPreview) URL.revokeObjectURL(avatarPreview) }
+  }, [avatarPreview])
 
-  // 4) Debounced handle availability check
-  useEffect(() => {
-    if (!form.handle) { setHandleStatus('idle'); return }
-    const val = slugify(form.handle)
-    if (!val || val.length < 3) { setHandleStatus('invalid'); return }
+  const canSave = useMemo(() => {
+    if (!handle.trim()) return false
+    if (saving) return false
+    return true
+  }, [handle, saving])
 
-    let alive = true
-    setHandleStatus('checking')
-    const t = setTimeout(async () => {
-      // If it's already mine, it's OK
-      const { data: mine } = await supabase
-        .from('profiles')
-        .select('handle,user_id')
-        .eq('user_id', user?.id || '')
-        .maybeSingle()
-      if (mine && mine.handle === val) {
-        if (alive) setHandleStatus('ok')
-        return
-      }
+  async function uploadAvatarIfAny() {
+    if (!avatarFile || !me?.id) return avatarUrl || ''
+    // sanitize filename
+    const clean = avatarFile.name.replace(/[^\w.\-]+/g, '_')
+    const path = `user_${me.id}/${Date.now()}_${clean}`
+    const { error: upErr } = await supabase.storage
+      .from('avatars')
+      .upload(path, avatarFile, { cacheControl: '3600', upsert: false, contentType: avatarFile.type })
+    if (upErr) throw upErr
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    if (!data?.publicUrl) throw new Error('Could not get avatar public URL')
+    return data.publicUrl
+  }
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('handle')
-        .eq('handle', val)
-        .maybeSingle()
-      if (!alive) return
-      if (error) { setHandleStatus('invalid'); return }
-      setHandleStatus(data ? 'taken' : 'ok')
-    }, 350)
-
-    return () => { alive = false; clearTimeout(t) }
-  }, [form.handle, user])
-
-  // Helpers
-  const onChange = (patch) => setForm(prev => ({ ...prev, ...patch }))
-  const publicUrl = useMemo(
-    () => (form.handle ? `${window.location.origin}/u/${encodeURIComponent(slugify(form.handle))}` : ''),
-    [form.handle]
-  )
-
-  // 5) Avatar upload to Storage (bucket: avatars)
-  async function onAvatarChange(e) {
-    const file = e.target.files?.[0]
-    if (!file || !user) return
-    setAvatarUploading(true)
-    setMessage('')
+  async function onSave(e) {
+    e?.preventDefault?.()
+    if (!me?.id) return
+    setSaving(true); setError(''); setNotice('')
     try {
-      const maxSize = 2 * 1024 * 1024 // 2 MB
-      if (file.size > maxSize) throw new Error('Max file size is 2 MB')
-      if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) throw new Error('Use PNG/JPG/WEBP/GIF')
+      // 1) upload avatar if chosen
+      const newAvatarUrl = await uploadAvatarIfAny()
 
-      const ext = (file.name.split('.').pop() || 'png').toLowerCase()
-      const path = `users/${user.id}/${Date.now()}.${ext}`
+      // 2) normalize inputs
+      const cleanHandle = handle.trim().toLowerCase()
+      const cleanDisplay = displayName.trim()
+      const parsedAge = age ? parseInt(age, 10) : null
+      const interestArray = interests
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
 
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: false })
+      // 3) upsert profile
+      const { error: upErr } = await supabase.from('profiles').upsert({
+        user_id: me.id,
+        handle: cleanHandle,
+        display_name: cleanDisplay || cleanHandle,
+        avatar_url: newAvatarUrl || null,
+        bio: bio || null,
+        age: parsedAge,
+        location: location || null,
+        interests: interestArray.length ? interestArray : null,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' })
       if (upErr) throw upErr
 
-      const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = pub?.publicUrl
-      if (!url) throw new Error('Could not get public URL')
+      setAvatarUrl(newAvatarUrl || avatarUrl)
+      setAvatarFile(null)
+      if (avatarPreview) { URL.revokeObjectURL(avatarPreview); setAvatarPreview('') }
 
-      setForm(prev => ({ ...prev, avatar_url: url }))
-      setMessage('Avatar uploaded ✓ (click Save to persist)')
-    } catch (e2) {
-      setMessage(e2.message || 'Upload failed')
+      setNotice('Profile saved ✔')
+    } catch (err) {
+      setError(err.message || 'Failed to save profile.')
     } finally {
-      setAvatarUploading(false)
-      if (e?.target) e.target.value = ''
+      setSaving(false)
     }
   }
 
-  // 6) Save profile (upsert with explicit conflict target)
-  async function save() {
-    setMessage('')
-    if (!user) return
-    const handle = slugify(form.handle)
-    if (!handle || handleStatus !== 'ok') {
-      setMessage('Please choose an available handle (3+ letters/numbers).')
-      return
-    }
-    if (!form.display_name) {
-      setMessage('Display name is required.')
-      return
-    }
-    setSaving(true)
-    const payload = {
-      user_id: user.id,
-      handle,
-      display_name: form.display_name.trim(),
-      bio: (form.bio || '').trim(),
-      mode: form.mode,
-      is_public: !!form.is_public,
-      avatar_url: form.avatar_url || null
-    }
-
-    const { error } = await supabase
-      .from('profiles')
-      .upsert(payload, { onConflict: 'user_id' }) // ✅ key change here
-
-    setSaving(false)
-    if (error) setMessage(error.message)
-    else setMessage('Profile saved ✅')
+  function pickFile() { fileRef.current?.click() }
+  function onFile(e) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    if (!ACCEPT_AVATAR.includes(f.type)) { setError('Unsupported image type'); return }
+    if (f.size > MAX_AVATAR_MB * 1024 * 1024) { setError(`Avatar too large (max ${MAX_AVATAR_MB}MB)`); return }
+    setAvatarFile(f)
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+    setAvatarPreview(URL.createObjectURL(f))
   }
 
-  // Utilities
-  function copyLink() {
-    if (!publicUrl) return
-    navigator.clipboard.writeText(publicUrl)
-    setMessage('Link copied to clipboard ✅')
-  }
-  function downloadQR() {
-    if (!qr) return
-    const a = document.createElement('a')
-    a.href = qr
-    a.download = `trymedating-${form.handle}-qr.png`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-  }
-
-  // 7) Resend verification email
-  async function resendVerification() {
-    if (!user?.email) return
-    setResendMsg('Sending verification email…'); setResendBusy(true)
-    try {
-      const redirectTo = window.location.origin + '/profile'
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: user.email,
-        options: { emailRedirectTo: redirectTo }
-      })
-      if (error) setResendMsg(error.message)
-      else setResendMsg('Verification email sent ✅ Check your inbox.')
-    } catch (e) {
-      setResendMsg(e.message || 'Failed to send verification email.')
-    } finally {
-      setResendBusy(false)
-    }
-  }
-
-  useEffect(() => { document.title = 'Your Profile • TryMeDating' }, [])
-  if (loading) return <div style={{ padding: 40 }}>Loading…</div>
-
+  if (!me) return null
   return (
-    <div style={{ padding: 40, maxWidth: 720, fontFamily: 'ui-sans-serif, system-ui' }}>
-      <h2>Your Profile</h2>
+    <div className="container" style={{ padding: '32px 0' }}>
+      <h1 style={{ marginBottom: 12 }}>
+        Edit <span style={{ color: 'var(--secondary)' }}>Profile</span>
+      </h1>
 
-      {/* Email verification banner */}
-      {!emailVerified && (
-        <div style={{
-          background:'#FFF9E6', border:'1px solid #F2E2A4', padding:12, borderRadius:10,
-          display:'flex', flexWrap:'wrap', gap:12, alignItems:'center', margin:'12px 0'
-        }}>
+      {loading && <div className="card">Loading your profile…</div>}
+      {error && <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>{error}</div>}
+      {notice && <div className="card" style={{ borderColor: 'var(--secondary)', color: 'var(--secondary)' }}>{notice}</div>}
+
+      {!loading && (
+        <form className="card" onSubmit={onSave} style={{ display: 'grid', gap: 16 }}>
+          {/* Avatar + quick preview */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative' }}>
+              <img
+                src={avatarPreview || avatarUrl || 'https://via.placeholder.com/120?text=%F0%9F%91%A4'}
+                alt="avatar"
+                style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+              />
+              <button
+                type="button"
+                className="btn"
+                onClick={pickFile}
+                style={{
+                  position: 'absolute', bottom: -8, left: '50%', transform: 'translateX(-50%)',
+                  padding: '6px 10px', fontSize: 12
+                }}
+                title="Upload new avatar"
+              >
+                Change
+              </button>
+              <input ref={fileRef} type="file" accept={ACCEPT_AVATAR.join(',')} onChange={onFile} style={{ display: 'none' }} />
+            </div>
+
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Display name</label>
+              <input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="How others will see you" />
+
+              <div className="mt-12" />
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Handle (public URL)</label>
+              <input value={handle} onChange={e=>setHandle(e.target.value)} placeholder="yourhandle" />
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
+                Your public profile will be at <code>/u/{(handle||'yourhandle').toLowerCase()}</code>
+              </div>
+            </div>
+          </div>
+
+          {/* About */}
           <div>
-            <strong>Email not verified.</strong>{' '}
-            Please verify <code>{user?.email}</code> to protect your account and enable all features.
+            <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Bio</label>
+            <textarea rows={4} value={bio} onChange={e=>setBio(e.target.value)} placeholder="Tell people a bit about you…" />
           </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button
-              onClick={resendVerification}
-              disabled={resendBusy}
-              style={{ padding:'8px 10px', borderRadius:8, border:'1px solid #ddd', background:'#fff' }}
-            >
-              {resendBusy ? 'Sending…' : 'Resend verification email'}
+
+          {/* Details grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Age</label>
+              <input type="number" min="18" max="110" value={age} onChange={e=>setAge(e.target.value)} placeholder="e.g., 29" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Location</label>
+              <input value={location} onChange={e=>setLocation(e.target.value)} placeholder="City, Country" />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 700, marginBottom: 6 }}>Interests</label>
+              <input value={interests} onChange={e=>setInterests(e.target.value)} placeholder="e.g., hiking, sushi, live music" />
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Comma-separated — we’ll store these as a list.</div>
+            </div>
+          </div>
+
+          {/* Save */}
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <button type="submit" className="btn btn-primary" disabled={!canSave}>
+              {saving ? 'Saving…' : 'Save Profile'}
             </button>
-            {resendMsg && <div style={{ alignSelf:'center', fontSize:13 }}>{resendMsg}</div>}
           </div>
-        </div>
+        </form>
       )}
 
-      {/* Avatar */}
-      <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:12 }}>
-        <img
-          src={form.avatar_url || 'https://via.placeholder.com/96?text=%F0%9F%98%8A'}
-          alt="Avatar"
-          style={{ width:96, height:96, borderRadius:'50%', objectFit:'cover', border:'1px solid #eee' }}
-        />
-        <label style={{ display:'inline-block' }}>
-          <span style={{ display:'block', fontSize:13, marginBottom:6 }}>Avatar</span>
-          <input type="file" accept="image/*" onChange={onAvatarChange} disabled={avatarUploading} />
-          {avatarUploading && <div style={{ fontSize:12, opacity:.7 }}>Uploading…</div>}
-        </label>
-      </div>
-
-      <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
-        {/* Handle */}
-        <label>
-          Handle <span style={{ opacity:.6 }}>(public URL)</span>
-          <input
-            value={form.handle}
-            onChange={e => onChange({ handle: slugify(e.target.value) })}
-            style={{ padding: 10, border: '1px solid #ddd', borderRadius: 6, marginTop: 4 }}
-            placeholder="sarah-nc"
-          />
-          <div style={{ marginTop: 6, fontSize: 13 }}>
-            {handleStatus === 'idle' && <span style={{ opacity:.6 }}>3+ chars, letters/numbers/dashes</span>}
-            {handleStatus === 'checking' && <span>Checking availability…</span>}
-            {handleStatus === 'ok' && <span style={{ color: '#007A7A' }}>Available ✓</span>}
-            {handleStatus === 'taken' && <span style={{ color: '#E03A3A' }}>Already taken</span>}
-            {handleStatus === 'invalid' && <span style={{ color: '#E03A3A' }}>Invalid handle</span>}
-          </div>
-          {!!publicUrl && (
-            <div style={{ marginTop: 6, fontSize: 13, opacity:.8 }}>
-              Public link: <code>{publicUrl}</code>
-              <button onClick={copyLink} style={{ marginLeft: 8, padding:'4px 8px' }}>Copy</button>
+      {/* Public preview card (helps you see how others will see you) */}
+      {!loading && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <img
+              src={avatarPreview || avatarUrl || 'https://via.placeholder.com/96?text=%F0%9F%91%A4'}
+              alt=""
+              style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+            />
+            <div style={{ flex: 1 }}>
+              <h2 style={{ margin: 0 }}>{displayName || handle || 'Your Name'}</h2>
+              <div className="badge">@{(handle || 'yourhandle').toLowerCase()}</div>
+              <p style={{ marginTop: 8 }}>{bio || 'Your bio will appear here.'}</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                {age && <span className="badge">Age: {age}</span>}
+                {location && <span className="badge">Location: {location}</span>}
+                {interests && interests.split(',').map((t, i) => (
+                  <span key={i} className="badge">{t.trim()}</span>
+                ))}
+              </div>
             </div>
-          )}
-        </label>
-
-        {/* Display name */}
-        <label>
-          Display name
-          <input
-            value={form.display_name}
-            onChange={e => onChange({ display_name: e.target.value })}
-            style={{ padding: 10, border: '1px solid #ddd', borderRadius: 6, marginTop: 4 }}
-            placeholder="Sarah"
-          />
-        </label>
-
-        {/* Bio */}
-        <label>
-          Bio
-          <textarea
-            value={form.bio}
-            onChange={e => onChange({ bio: e.target.value })}
-            style={{ padding: 10, border: '1px solid #ddd', borderRadius: 6, marginTop: 4, minHeight: 100 }}
-            placeholder="Coffee shop enthusiast, weekend hiker."
-          />
-        </label>
-
-        {/* Mode */}
-        <label>
-          Mode
-          <select
-            value={form.mode}
-            onChange={e => onChange({ mode: e.target.value })}
-            style={{ padding: 10, border: '1px solid #ddd', borderRadius: 6, marginTop: 4 }}
-          >
-            <option value="dating">Dating</option>
-            <option value="friends">Friends</option>
-            <option value="browsing">Browsing</option>
-          </select>
-        </label>
-
-        {/* Public toggle */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={!!form.is_public}
-            onChange={e => onChange({ is_public: e.target.checked })}
-          />
-          Public profile
-        </label>
-
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={save} disabled={saving || handleStatus !== 'ok'} style={{ padding:'10px 14px' }}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          {!!qr && <button onClick={downloadQR} style={{ padding:'10px 14px' }}>Download QR</button>}
-        </div>
-
-        {message && <div style={{ marginTop: 6 }}>{message}</div>}
-      </div>
-
-      {!!qr && (
-        <div style={{ marginTop: 24 }}>
-          <h3>Your QR code</h3>
-          <img src={qr} alt="Profile QR" style={{ width: 160, height: 160 }} />
-          <div style={{ opacity: 0.8, marginTop: 6 }}>{publicUrl}</div>
+            <div>
+              <a className="btn" href={`/u/${(handle || 'yourhandle').toLowerCase()}`} target="_blank" rel="noreferrer">
+                View public profile
+              </a>
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
+
 
 
