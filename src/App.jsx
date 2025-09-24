@@ -12,7 +12,7 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
-// --- Home page with hero block ---
+// --- Home page with on-brand hero ---
 function Home() {
   return (
     <section style={{
@@ -22,15 +22,21 @@ function Home() {
     }}>
       <div className="container" style={{ maxWidth: 720 }}>
         <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
-          Welcome to <span style={{ color: 'var(--primary)' }}>TryMeDating</span>
+          Welcome to{' '}
+          <span style={{
+            fontWeight: 800,
+            background: 'linear-gradient(90deg, var(--secondary), var(--primary))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
+          }}>
+            TryMeDating
+          </span>
         </h1>
-        <p style={{
-          fontSize: '1.25rem',
-          marginBottom: 32,
-          color: 'var(--muted)'
-        }}>
+
+        <p style={{ fontSize: '1.25rem', marginBottom: 32, color: 'var(--muted)' }}>
           Meet new people, create real connections, and find the right match for you.
         </p>
+
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
           <Link className="btn btn-primary" style={{ minWidth: 140 }} to="/auth">
             Sign Up Free
@@ -51,12 +57,28 @@ export default function App() {
       <header style={{
         borderBottom: '1px solid #eee',
         padding: '10px 16px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        background: 'color-mix(in oklab, var(--bg), #fff 20%)',
+        backdropFilter: 'saturate(1.2) blur(6px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Link to="/" style={{ fontWeight: 800, textDecoration: 'none', color: '#2A2A2A' }}>
-            TryMeDating
+          {/* Brand title with subtle gradient to match logo */}
+          <Link to="/" style={{
+            fontWeight: 800,
+            textDecoration: 'none'
+          }}>
+            <span style={{
+              background: 'linear-gradient(90deg, var(--secondary), var(--primary))',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent'
+            }}>
+              TryMeDating
+            </span>
           </Link>
+
           <nav style={{ display: 'flex', gap: 10 }}>
             <Link to="/profile">Profile</Link>
             <Link to="/settings">Settings</Link>
@@ -74,10 +96,12 @@ export default function App() {
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* Public profile route */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
+          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -92,12 +116,13 @@ export default function App() {
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* Floating messages launcher + chat dock */}
+      {/* Floating messages launcher + chat dock (available on all pages) */}
       <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
 
 
