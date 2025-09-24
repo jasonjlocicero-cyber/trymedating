@@ -12,17 +12,35 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
 
+// --- Home page with hero block ---
 function Home() {
   return (
-    <div className="container" style={{ padding: '32px 0' }}>
-      <h1>TryMeDating</h1>
-      <p>Welcome! Messaging is available on all pages via the 💬 button.</p>
-      <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-        <Link className="btn btn-primary" to="/auth">Sign in</Link>
-        <Link className="btn btn-secondary" to="/profile">My Profile</Link>
-        <Link className="btn" to="/settings">Settings</Link>
+    <section style={{
+      padding: '80px 16px',
+      textAlign: 'center',
+      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)'
+    }}>
+      <div className="container" style={{ maxWidth: 720 }}>
+        <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
+          Welcome to <span style={{ color: 'var(--primary)' }}>TryMeDating</span>
+        </h1>
+        <p style={{
+          fontSize: '1.25rem',
+          marginBottom: 32,
+          color: 'var(--muted)'
+        }}>
+          Meet new people, create real connections, and find the right match for you.
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <Link className="btn btn-primary" style={{ minWidth: 140 }} to="/auth">
+            Sign Up Free
+          </Link>
+          <Link className="btn btn-secondary" style={{ minWidth: 140 }} to="/auth">
+            Sign In
+          </Link>
+        </div>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -74,11 +92,12 @@ export default function App() {
         © {new Date().getFullYear()} TryMeDating
       </footer>
 
-      {/* Floating messages launcher + the chat dock */}
+      {/* Floating messages launcher + chat dock */}
       <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
 
