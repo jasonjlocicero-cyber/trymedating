@@ -63,7 +63,8 @@ export default function App() {
           <Link to="/" style={{
             fontWeight: 800,
             textDecoration: 'none',
-            fontSize: '1.25rem'
+            fontSize: '1.25rem',
+            lineHeight: 1
           }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
@@ -80,16 +81,18 @@ export default function App() {
       </header>
 
       {/* Routes */}
-      <main style={{ minHeight: 'calc(100vh - 140px)' }}>
+      <main style={{ minHeight: 'calc(100vh - 160px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* Public profile route */}
           <Route path="/u/:handle" element={<PublicProfile />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
+          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -99,17 +102,37 @@ export default function App() {
         </Routes>
       </main>
 
-      {/* Footer */}
-      <footer style={{ borderTop: '1px solid #eee', padding: '16px', textAlign: 'center' }}>
-        © {new Date().getFullYear()} TryMeDating
+      {/* Footer with split-color brand and quick links */}
+      <footer style={{
+        borderTop: '1px solid #eee',
+        padding: '20px 16px'
+      }}>
+        <div className="container" style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap'
+        }}>
+          <div style={{ fontWeight: 800 }}>
+            <span style={{ color: 'var(--secondary)' }}>TryMe</span>
+            <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
+          </div>
+          <nav style={{ display: 'flex', gap: 12 }}>
+            <Link to="/terms">Terms</Link>
+            <Link to="/privacy">Privacy</Link>
+            <Link to="/contact">Contact</Link>
+          </nav>
+        </div>
       </footer>
 
-      {/* Floating messages launcher + chat dock */}
+      {/* Floating messages launcher + chat dock (available on all pages) */}
       <MessageLauncher />
       <ChatDock />
     </>
   )
 }
+
 
 
 
