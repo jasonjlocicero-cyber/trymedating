@@ -44,11 +44,11 @@ export default function App() {
             TryMeDating
           </Link>
           <nav style={{ display: 'flex', gap: 10 }}>
-            <Link to="/profile">Profile</Link>
-            <Link to="/settings">Settings</Link>
-            <Link to="/terms">Terms</Link>
-            <Link to="/privacy">Privacy</Link>
-            <Link to="/contact">Contact</Link>
+            <Link className="btn" to="/profile">Profile</Link>
+            <Link className="btn" to="/settings">Settings</Link>
+            <Link className="btn" to="/terms">Terms</Link>
+            <Link className="btn" to="/privacy">Privacy</Link>
+            <Link className="btn" to="/contact">Contact</Link>
           </nav>
         </div>
       </header>
