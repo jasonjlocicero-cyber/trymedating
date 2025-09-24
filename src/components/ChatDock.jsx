@@ -2,18 +2,26 @@ import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (Draggable + Persisted positions)
- * - Multiple draggable chat windows (up to 3)
- * - Positions saved/restored per partner in localStorage
+ * ChatDock (Draggable + Resizable + Persisted + Snap-to-corners + Grid)
+ * - Multiple draggable/resizable chat windows (cap 3)
+ * - Positions & sizes saved per partner in localStorage
+ * - Snap to nearest corner if released within threshold; otherwise snap to a 12px grid
  * - Auto-focus input, unread badges, typing indicators
  * - Emits 'chatdock:status' and 'chatdock:unread'
  * - Global: window.trymeChat.open({ handle, user_id })
  */
 
-const WIN_W = 320
-const WIN_H = 420
+const DEF_W = 320
+const DEF_H = 420
+const MIN_W = 280
+const MIN_H = 320
+const MAX_W = 560
+const MAX_H = 720
+
 const EDGE_GAP = 16
 const FOOTER_CLEAR = 120 // keep above footer
+const GRID = 12          // grid size for alignment
+const SNAP_THRESH = 40   // px distance to corner to trigger snap
 
 function useMe() {
   const [me, setMe] = useState(null)
@@ -58,7 +66,8 @@ function ChatWindow({
   onClose, onMinimize,
   onFocus,
   onUnreadChange,
-  inputAutoFocusRef
+  inputAutoFocusRef,
+  width, height
 }) {
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -199,7 +208,7 @@ function ChatWindow({
     <div
       onMouseDown={() => onFocus?.(partner.user_id)}
       style={{
-        width: WIN_W, height: WIN_H, background:'#fff',
+        width, height, background:'#fff',
         border:'1px solid #ddd', borderRadius:12, boxShadow:'0 8px 24px rgba(0,0,0,0.08)',
         display:'flex', flexDirection:'column', overflow:'hidden'
       }}
@@ -269,6 +278,17 @@ function ChatWindow({
           Send
         </button>
       </div>
+
+      {/* Resize handle */}
+      <div
+        className="resize-handle"
+        title="Drag to resize"
+        style={{
+          position:'absolute', right:6, bottom:6, width:14, height:14,
+          borderRight:'2px solid #bbb', borderBottom:'2px solid #bbb',
+          cursor:'nwse-resize', opacity:.8
+        }}
+      />
     </div>
   )
 }
@@ -279,12 +299,12 @@ const iconBtnStyle = {
   cursor:'pointer', lineHeight:'24px', textAlign:'center'
 }
 
-// ---------- ChatDock (with persisted positions) -----------------------------
+// ---------- ChatDock (with persisted positions & size + snap) ---------------
 
 export default function ChatDock() {
   const me = useMe()
   const [activeUserId, setActiveUserId] = useState(null)
-  const [items, setItems] = useState([])
+  const [items, setItems] = useState([]) // [{ key, partner, minimized, unread, x, y, z, w, h }]
   const [profilesCache, setProfilesCache] = useState({})
 
   function emitStatus(updated = items) {
@@ -294,25 +314,85 @@ export default function ChatDock() {
   }
   useEffect(() => { emitStatus() }, [items])
 
-  function clamp(val, min, max) { return Math.max(min, Math.min(max, val)) }
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)) }
   function viewport() { return { w: window.innerWidth, h: window.innerHeight } }
-  function initialPos(index, uid) {
-    // try restore from localStorage
-    const raw = localStorage.getItem(`tmd_pos_${uid}`)
-    if (raw) {
-      try { return JSON.parse(raw) } catch {}
-    }
-    const { w, h } = viewport()
-    const x = w - EDGE_GAP - WIN_W - index * (WIN_W + 12)
-    const y = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
-    return { x: Math.max(EDGE_GAP, x), y: Math.max(EDGE_GAP, y) }
-  }
 
-  // Save position
+  function loadPos(uid) {
+    const raw = localStorage.getItem(`tmd_pos_${uid}`)
+    if (!raw) return null
+    try { return JSON.parse(raw) } catch { return null }
+  }
   function savePos(uid, x, y) {
     localStorage.setItem(`tmd_pos_${uid}`, JSON.stringify({ x, y }))
   }
 
+  function loadSize(uid) {
+    const raw = localStorage.getItem(`tmd_size_${uid}`)
+    if (!raw) return null
+    try { return JSON.parse(raw) } catch { return null }
+  }
+  function saveSize(uid, w, h) {
+    localStorage.setItem(`tmd_size_${uid}`, JSON.stringify({ w, h }))
+  }
+
+  function initialFrame(index, uid) {
+    const pos = loadPos(uid)
+    const size = loadSize(uid)
+    const { w: vw, h: vh } = viewport()
+    const xDefault = vw - EDGE_GAP - DEF_W - index * (DEF_W + 12)
+    const yDefault = vh - EDGE_GAP - FOOTER_CLEAR - DEF_H
+    const x = pos?.x ?? Math.max(EDGE_GAP, xDefault)
+    const y = pos?.y ?? Math.max(EDGE_GAP, yDefault)
+    const w = clamp(size?.w ?? DEF_W, MIN_W, Math.min(MAX_W, vw - 2*EDGE_GAP))
+    const h = clamp(size?.h ?? DEF_H, MIN_H, Math.min(MAX_H, vh - FOOTER_CLEAR - 2*EDGE_GAP))
+    return { x, y, w, h }
+  }
+
+  // ------- SNAP HELPERS -----------------------------------------------------
+
+  function snapToGrid(val, size, max) {
+    // clamp, then round to nearest GRID
+    const clamped = clamp(val, EDGE_GAP, max - EDGE_GAP - size)
+    const snapped = Math.round(clamped / GRID) * GRID
+    return clamp(snapped, EDGE_GAP, max - EDGE_GAP - size)
+  }
+
+  function cornerTargets({ vw, vh, w, h }) {
+    return [
+      { x: EDGE_GAP,                 y: EDGE_GAP },                                           // TL
+      { x: vw - EDGE_GAP - w,        y: EDGE_GAP },                                           // TR
+      { x: EDGE_GAP,                 y: vh - EDGE_GAP - FOOTER_CLEAR - h },                   // BL
+      { x: vw - EDGE_GAP - w,        y: vh - EDGE_GAP - FOOTER_CLEAR - h }                    // BR
+    ]
+  }
+
+  function distance(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y
+    return Math.sqrt(dx*dx + dy*dy)
+  }
+
+  function snapPosition(x, y, w, h) {
+    const { w: vw, h: vh } = viewport()
+    const targets = cornerTargets({ vw, vh, w, h })
+    const current = { x, y }
+    let best = { ...current }, bestD = Infinity
+
+    for (const t of targets) {
+      const d = distance(current, t)
+      if (d < bestD) { bestD = d; best = t }
+    }
+
+    if (bestD <= SNAP_THRESH) {
+      // Snap to the closest corner
+      return { x: best.x, y: best.y }
+    }
+    // Otherwise snap to grid
+    const gx = snapToGrid(x, w, vw)
+    const gy = snapToGrid(y, h, vh - FOOTER_CLEAR) // use reduced vertical max
+    return { x: gx, y: gy }
+  }
+
+  // Global open()
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle, user_id } = {}) => {
@@ -340,14 +420,15 @@ export default function ChatDock() {
             emitStatus(updated)
             return updated
           }
-          const pos = initialPos(prev.length, prof.user_id)
+
+          const f = initialFrame(prev.length, prof.user_id)
           const maxZ = prev.reduce((m, it) => Math.max(m, it.z || 1), 1)
           const next = [...prev, {
             key: `w-${prof.user_id}`,
             partner: prof,
             minimized:false,
             unread:0,
-            x: pos.x, y: pos.y,
+            x: f.x, y: f.y, w: f.w, h: f.h,
             z: maxZ + 1
           }]
           setActiveUserId(prof.user_id)
@@ -405,16 +486,20 @@ export default function ChatDock() {
     const clientY = isTouch ? e.touches[0].clientY : e.clientY
     const dx = clientX - dragRef.current.startX
     const dy = clientY - dragRef.current.startY
-    const { w, h } = viewport()
-    const minX = EDGE_GAP
-    const maxX = w - EDGE_GAP - WIN_W
-    const minY = EDGE_GAP
-    const maxY = h - EDGE_GAP - FOOTER_CLEAR - WIN_H
-    const nx = clamp(dragRef.current.baseX + dx, minX, maxX)
-    const ny = clamp(dragRef.current.baseY + dy, minY, maxY)
-    setItems(prev => prev.map(x =>
-      x.partner.user_id === dragRef.current.uid ? { ...x, x: nx, y: ny } : x
-    ))
+
+    setItems(prev => prev.map(x => {
+      if (x.partner.user_id !== dragRef.current.uid) return x
+      const { w: vw, h: vh } = viewport()
+      const w = x.w || DEF_W
+      const h = x.h || DEF_H
+      const minX = EDGE_GAP
+      const maxX = vw - EDGE_GAP - w
+      const minY = EDGE_GAP
+      const maxY = vh - EDGE_GAP - FOOTER_CLEAR - h
+      const nx = clamp(dragRef.current.baseX + dx, minX, maxX)
+      const ny = clamp(dragRef.current.baseY + dy, minY, maxY)
+      return { ...x, x: nx, y: ny }
+    }))
   }
 
   function onDragEnd() {
@@ -424,9 +509,68 @@ export default function ChatDock() {
     window.removeEventListener('mouseup', onDragEnd)
     window.removeEventListener('touchmove', onDragMove)
     window.removeEventListener('touchend', onDragEnd)
-    // persist final position
+
+    // apply snap + persist
+    setItems(prev => prev.map(x => {
+      if (x.partner.user_id !== uid) return x
+      const { x: sx, y: sy } = snapPosition(x.x, x.y, x.w || DEF_W, x.h || DEF_H)
+      savePos(uid, sx, sy)
+      return { ...x, x: sx, y: sy }
+    }))
+  }
+
+  // --- Resize logic (mouse + touch) ----------------------------------------
+  const resizeRef = useRef({ uid: null, startX: 0, startY: 0, baseW: DEF_W, baseH: DEF_H })
+
+  function onResizeStart(uid, clientX, clientY) {
     const win = items.find(x => x.partner.user_id === uid)
-    if (win) savePos(uid, win.x, win.y)
+    if (!win) return
+    focusFor(uid)
+    resizeRef.current.uid = uid
+    resizeRef.current.startX = clientX
+    resizeRef.current.startY = clientY
+    resizeRef.current.baseW = win.w || DEF_W
+    resizeRef.current.baseH = win.h || DEF_H
+    window.addEventListener('mousemove', onResizeMove)
+    window.addEventListener('mouseup', onResizeEnd)
+    window.addEventListener('touchmove', onResizeMove, { passive: false })
+    window.addEventListener('touchend', onResizeEnd)
+  }
+
+  function onResizeMove(e) {
+    e.preventDefault?.()
+    if (!resizeRef.current.uid) return
+    const isTouch = e.touches && e.touches.length
+    const clientX = isTouch ? e.touches[0].clientX : e.clientX
+    const clientY = isTouch ? e.touches[0].clientY : e.clientY
+    const dx = clientX - resizeRef.current.startX
+    const dy = clientY - resizeRef.current.startY
+    const { w: vw, h: vh } = viewport()
+
+    let nw = resizeRef.current.baseW + dx
+    let nh = resizeRef.current.baseH + dy
+    nw = clamp(nw, MIN_W, Math.min(MAX_W, vw - 2*EDGE_GAP))
+    nh = clamp(nh, MIN_H, Math.min(MAX_H, vh - FOOTER_CLEAR - 2*EDGE_GAP))
+
+    setItems(prev => prev.map(x => {
+      if (x.partner.user_id !== resizeRef.current.uid) return x
+      let nx = x.x
+      let ny = x.y
+      nx = clamp(nx, EDGE_GAP, vw - EDGE_GAP - nw)
+      ny = clamp(ny, EDGE_GAP, vh - EDGE_GAP - FOOTER_CLEAR - nh)
+      return { ...x, w: nw, h: nh, x: nx, y: ny }
+    }))
+  }
+
+  function onResizeEnd() {
+    const uid = resizeRef.current.uid
+    resizeRef.current.uid = null
+    window.removeEventListener('mousemove', onResizeMove)
+    window.removeEventListener('mouseup', onResizeEnd)
+    window.removeEventListener('touchmove', onResizeMove)
+    window.removeEventListener('touchend', onResizeEnd)
+    const win = items.find(x => x.partner.user_id === uid)
+    if (win) saveSize(uid, win.w, win.h)
   }
 
   if (!supabase) return null
@@ -439,8 +583,8 @@ export default function ChatDock() {
           position:'fixed',
           left: item.x,
           top: item.y,
-          width: WIN_W,
-          height: item.minimized ? 60 : WIN_H,
+          width: item.w || DEF_W,
+          height: item.minimized ? 60 : (item.h || DEF_H),
           transform: item.minimized ? 'translateY(360px)' : 'none',
           transition: 'transform .18s ease',
           pointerEvents:'auto',
@@ -460,6 +604,7 @@ export default function ChatDock() {
               </div>
             )}
 
+            {/* Drag listeners on header */}
             <div
               onMouseDown={(e) => {
                 const el = e.target.closest('.drag-handle')
@@ -481,8 +626,24 @@ export default function ChatDock() {
                 onFocus={(uid) => focusFor(uid)}
                 onUnreadChange={(uid, count) => setUnread(uid, count)}
                 inputAutoFocusRef={useRef(null)}
+                width={item.w || DEF_W}
+                height={item.h || DEF_H}
               />
             </div>
+
+            {/* Resize listeners on corner handle */}
+            <div
+              onMouseDown={(e) => {
+                const el = e.target.closest('.resize-handle')
+                if (el) onResizeStart(item.partner.user_id, e.clientX, e.clientY)
+              }}
+              onTouchStart={(e) => {
+                const t = e.touches[0]
+                const el = e.target.closest('.resize-handle')
+                if (el && t) onResizeStart(item.partner.user_id, t.clientX, t.clientY)
+              }}
+              style={{ position:'absolute', inset:0, pointerEvents:'none' }}
+            />
           </div>
         )
       })}
