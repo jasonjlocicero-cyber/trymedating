@@ -220,44 +220,86 @@ function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
-      {/* Composer */}
-      <div style={{ borderTop:'1px solid #eee', padding:8, display:'flex', gap:6, alignItems:'center', background:'#fff' }}>
-        {/* Attach */}
-        <label style={{ ...iconBtnStyle, width:36, height:36, display:'inline-flex', alignItems:'center', justifyContent:'center' }}>
-          📎
-          <input type="file" accept={ACCEPT_TYPES.join(',')}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              if (!ACCEPT_TYPES.includes(file.type)) { setError('Unsupported type'); return }
-              if (file.size > MAX_BYTES) { setError('Too large'); return }
-              setAttachFile(file)
-              setAttachPreview(URL.createObjectURL(file))
-            }}
-            style={{ display:'none' }}
-          />
-        </label>
-        {attachPreview && (
-          <div style={{ display:'flex', gap:6 }}>
-            <img src={attachPreview} alt="preview" style={{ width:40, height:40, objectFit:'cover', border:'1px solid #ccc', borderRadius:6 }} />
-            <button onClick={resetAttachment} style={smallBtn}>Remove</button>
-          </div>
-        )}
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={e=>setDraft(e.target.value)}
-          onKeyDown={e=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
-          placeholder="Type or attach…"
-          style={{ flex:1, padding:10, borderRadius:10, border:'1px solid #ddd' }}
-        />
-        <button onClick={send} disabled={!draft.trim() && !attachFile} style={{ padding:'8px 12px', border:'none', borderRadius:10, background:'#2A9D8F', color:'#fff' }}>
-          Send
-        </button>
-      </div>
+{/* Composer */}
+<div style={{
+  borderTop:'1px solid #eee',
+  padding:8,
+  display:'flex',
+  gap:8,
+  alignItems:'center',
+  background:'#fff'
+}}>
+  {/* Attach (paperclip + text for visibility) */}
+  <label
+    title="Attach image (PNG/JPG/GIF/WebP)"
+    style={{
+      display:'inline-flex',
+      alignItems:'center',
+      gap:6,
+      border:'1px solid #ddd',
+      borderRadius:10,
+      padding:'8px 10px',
+      cursor:'pointer',
+      userSelect:'none'
+    }}
+  >
+    <span style={{ fontWeight:700 }}>Attach</span> <span aria-hidden>📎</span>
+    <input
+      type="file"
+      accept={ACCEPT_TYPES.join(',')}
+      onChange={(e) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        if (!ACCEPT_TYPES.includes(file.type)) { setError('Unsupported file type'); return }
+        if (file.size > MAX_BYTES) { setError('File too large (max 5MB)'); return }
+        setAttachFile(file)
+        setAttachPreview(URL.createObjectURL(file))
+      }}
+      style={{ display:'none' }}
+    />
+  </label>
+
+  {/* Preview of chosen file */}
+  {attachPreview && (
+    <div style={{
+      display:'flex', alignItems:'center', gap:8,
+      background:'#f8f8f8', border:'1px solid #eee', borderRadius:8, padding:'4px 6px'
+    }}>
+      <img src={attachPreview} alt="preview"
+        style={{ width:40, height:40, objectFit:'cover', borderRadius:6, border:'1px solid #ddd' }} />
+      <button onClick={resetAttachment} style={{
+        padding:'6px 8px', border:'1px solid #ddd', borderRadius:6, background:'#fff', cursor:'pointer'
+      }}>Remove</button>
+      {isUploading && <span style={{ fontSize:12, opacity:.7 }}>Uploading…</span>}
     </div>
-  )
-}
+  )}
+
+  {/* Message input */}
+  <input
+    ref={inputRef}
+    value={draft}
+    onChange={e=>setDraft(e.target.value)}
+    onKeyDown={e=>{ if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
+    placeholder={attachFile ? 'Add a caption…' : 'Type a message…'}
+    style={{ flex:1, padding:10, borderRadius:10, border:'1px solid #ddd' }}
+  />
+
+  {/* Send */}
+  <button
+    onClick={send}
+    disabled={(!draft.trim() && !attachFile) || isUploading}
+    style={{
+      padding:'8px 12px',
+      border:'none',
+      borderRadius:10,
+      background:'#2A9D8F',
+      color:'#fff',
+      fontWeight:700
+    }}
+  >
+    Send
+  </button>
+</div>
 
 // ---------- ChatDock Manager ------------------------------------------------
 
