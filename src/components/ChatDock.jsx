@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-const CHATDOCK_VERSION = 'attachments-lean-1';
+const CHATDOCK_VERSION = 'attachments-lean-2-bubbles';
 if (typeof window !== 'undefined') window.trymeChatVersion = CHATDOCK_VERSION;
 
 /**
- * ChatDock (lean)
+ * ChatDock (lean) + brand bubbles
  * - Multiple chat windows (open/close/minimize)
  * - Text + image/GIF attachments (📎 + preview)
  * - Uploads to Supabase Storage bucket "attachments" (Public)
+ * - Brand styling: my bubbles use a teal→coral gradient; theirs are neutral
  */
 
 const DEF_W = 340
@@ -18,6 +19,7 @@ const FOOTER_CLEAR = 120
 const MAX_BYTES = 5 * 1024 * 1024
 const ACCEPT_TYPES = ['image/png','image/jpeg','image/jpg','image/gif','image/webp']
 
+// tiny ping sound (optional)
 const PING_DATA_URL = 'data:audio/wav;base64,UklGRkSXAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YUTWAQAAgP8AAP8AgAAAAP8A/4AAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAB///8AAAD/gAAA'
 function ping(){ try{ const a=new Audio(PING_DATA_URL); a.volume=0.35; a.play().catch(()=>{}) }catch{} }
 
@@ -138,6 +140,20 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
     setTimeout(()=>inputRef.current?.focus(),0)
   }
 
+  // Styles that use your CSS variables
+  const myBubbleStyle = {
+    background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
+    color: '#fff',
+    border: 'none',
+    boxShadow: '0 8px 20px rgba(42,157,143,.20)',
+  }
+  const theirBubbleStyle = {
+    background: '#fff',
+    color: 'var(--text)',
+    border: '1px solid color-mix(in oklab, var(--secondary), #000 6%)',
+    boxShadow: '0 4px 12px rgba(0,0,0,.04)'
+  }
+
   return (
     <div style={{
       width, height: minimized?56:height,
@@ -145,14 +161,17 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
       boxShadow:'0 8px 24px rgba(0,0,0,0.08)', display:'flex', flexDirection:'column', overflow:'hidden'
     }}>
       {/* Header */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',background:'#f9fafb',borderBottom:'1px solid #eee'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <img src={avatar} alt="" style={{width:28,height:28,borderRadius:'50%',objectFit:'cover',border:'1px solid #eee'}}/>
-          <div style={{fontWeight:700,fontSize:14}}>
-            {name} <span style={{opacity:.7,fontWeight:400}}>@{partner?.handle}</span>
+      <div style={{
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        padding:'8px 10px', background:'var(--bg-soft)', borderBottom:'1px solid var(--border)'
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <img src={avatar} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', border:'1px solid #eee' }} />
+          <div style={{ fontWeight:700, fontSize:14 }}>
+            {name} <span style={{ opacity:.7, fontWeight:400 }}>@{partner?.handle}</span>
           </div>
         </div>
-        <div style={{display:'flex',gap:6}}>
+        <div style={{ display:'flex', gap:6 }}>
           <button onClick={onMinimize} title={minimized?'Restore':'Minimize'} style={iconBtn}>—</button>
           <button onClick={onClose} title="Close" style={iconBtn}>×</button>
         </div>
@@ -160,32 +179,32 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
 
       {/* Minimized */}
       {minimized ? (
-        <div style={{padding:8,fontSize:12,color:'#777'}}>Conversation minimized</div>
+        <div style={{ padding:8, fontSize:12, color:'#777' }}>Conversation minimized</div>
       ) : (
         <>
           {/* Messages */}
-          <div style={{flex:1,overflowY:'auto',padding:10,background:'#fafafa'}}>
+          <div style={{ flex:1, overflowY:'auto', padding:10, background:'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)' }}>
             {loading && <div>Loading…</div>}
-            {error && <div style={{color:'#C0392B'}}>{error}</div>}
-            {!loading && messages.length===0 && <div style={{opacity:.7}}>Say hi 👋 (Tip: use the 📎 to attach an image)</div>}
+            {error && <div style={{ color:'#C0392B' }}>{error}</div>}
+            {!loading && messages.length===0 && <div style={{ opacity:.7 }}>Say hi 👋 (Tip: use the 📎 to attach an image)</div>}
             {messages.map(m=>{
               const mine=m.sender===me?.id
               return (
-                <div key={m.id} style={{display:'flex',marginBottom:8,justifyContent:mine?'flex-end':'flex-start'}}>
+                <div key={m.id} style={{ display:'flex', marginBottom:8, justifyContent:mine?'flex-end':'flex-start' }}>
                   <div style={{
                     maxWidth:'75%',
-                    background: mine?'#2A9D8F':'#fff',
-                    color: mine?'#fff':'#222',
-                    border: mine?'none':'1px solid #eee',
-                    borderRadius:14, padding:'8px 12px'
+                    borderRadius:14, padding:'8px 12px',
+                    ...(mine ? myBubbleStyle : theirBubbleStyle)
                   }}>
                     {m.attachment_url && m.attachment_type==='image' && (
-                      <a href={m.attachment_url} target="_blank" rel="noreferrer" style={{display:'block',marginBottom:m.body?8:0}}>
-                        <img src={m.attachment_url} alt="attachment" style={{maxWidth:'100%',borderRadius:10,display:'block'}} loading="lazy"/>
+                      <a href={m.attachment_url} target="_blank" rel="noreferrer" style={{ display:'block', marginBottom:m.body?8:0 }}>
+                        <img src={m.attachment_url} alt="attachment" style={{ maxWidth:'100%', borderRadius:10, display:'block' }} loading="lazy"/>
                       </a>
                     )}
-                    {m.body && <div style={{whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{m.body}</div>}
-                    <div style={{fontSize:11,opacity:.7,marginTop:6}}>{new Date(m.created_at).toLocaleTimeString()}</div>
+                    {m.body && <div style={{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.body}</div>}
+                    <div style={{ fontSize:11, opacity:.8, marginTop:6, color: mine?'#fff':'var(--muted)' }}>
+                      {new Date(m.created_at).toLocaleTimeString()}
+                    </div>
                   </div>
                 </div>
               )
@@ -194,14 +213,14 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
           </div>
 
           {/* Composer */}
-          <div style={{borderTop:'1px solid #eee',padding:8,display:'flex',gap:8,alignItems:'center',background:'#fff'}}>
+          <div style={{ borderTop:'1px solid var(--border)', padding:8, display:'flex', gap:8, alignItems:'center', background:'#fff' }}>
             {/* Attach */}
             <label title="Attach image (PNG/JPG/GIF/WebP)" style={{
               display:'inline-flex',alignItems:'center',gap:6,
-              border:'1px solid #ddd',borderRadius:10,padding:'8px 10px',
-              cursor:'pointer',userSelect:'none'
+              border:'1px solid var(--border)',borderRadius:10,padding:'8px 10px',
+              cursor:'pointer',userSelect:'none', background:'#fff'
             }}>
-              <span style={{fontWeight:700}}>Attach</span> <span aria-hidden>📎</span>
+              <span style={{ fontWeight:700, color:'var(--text)' }}>Attach</span> <span aria-hidden>📎</span>
               <input type="file" accept={ACCEPT_TYPES.join(',')}
                 onChange={(e)=>{
                   const file=e.target.files?.[0]
@@ -211,16 +230,16 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
                   setAttachFile(file)
                   setAttachPreview(URL.createObjectURL(file))
                 }}
-                style={{display:'none'}}
+                style={{ display:'none' }}
               />
             </label>
 
             {/* Preview */}
             {attachPreview && (
-              <div style={{display:'flex',alignItems:'center',gap:8,background:'#f8f8f8',border:'1px solid #eee',borderRadius:8,padding:'4px 6px'}}>
-                <img src={attachPreview} alt="preview" style={{width:40,height:40,objectFit:'cover',borderRadius:6,border:'1px solid #ddd'}}/>
+              <div style={{ display:'flex', alignItems:'center', gap:8, background:'var(--bg-soft)', border:'1px solid var(--border)', borderRadius:8, padding:'4px 6px' }}>
+                <img src={attachPreview} alt="preview" style={{ width:40, height:40, objectFit:'cover', borderRadius:6, border:'1px solid #ddd' }}/>
                 <button onClick={resetAttachment} style={chipBtn}>Remove</button>
-                {isUploading && <span style={{fontSize:12,opacity:.7}}>Uploading…</span>}
+                {isUploading && <span style={{ fontSize:12, opacity:.7 }}>Uploading…</span>}
               </div>
             )}
 
@@ -231,7 +250,7 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
               onChange={e=>setDraft(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send() } }}
               placeholder={attachFile?'Add a caption…':'Type a message…'}
-              style={{flex:1,padding:10,borderRadius:10,border:'1px solid #ddd'}}
+              style={{ flex:1, padding:10, borderRadius:10, border:'1px solid var(--border)' }}
             />
             <button onClick={send} disabled={(!draft.trim()&&!attachFile)||isUploading} style={sendBtn}>Send</button>
           </div>
@@ -241,9 +260,9 @@ function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, 
   )
 }
 
-const iconBtn={ width:28,height:28,border:'1px solid #ddd',borderRadius:8,background:'#fff',cursor:'pointer',lineHeight:'24px',textAlign:'center' }
-const chipBtn={ padding:'6px 8px',border:'1px solid #ddd',borderRadius:6,background:'#fff',cursor:'pointer' }
-const sendBtn={ padding:'8px 12px',border:'none',borderRadius:10,background:'#2A9D8F',color:'#fff',fontWeight:700,cursor:'pointer' }
+const iconBtn={ width:28,height:28,border:'1px solid var(--border)',borderRadius:8,background:'#fff',cursor:'pointer',lineHeight:'24px',textAlign:'center' }
+const chipBtn={ padding:'6px 8px',border:'1px solid var(--border)',borderRadius:6,background:'#fff',cursor:'pointer' }
+const sendBtn={ padding:'8px 12px',border:'none',borderRadius:10,background:'var(--primary)',color:'#fff',fontWeight:700,cursor:'pointer' }
 
 export default function ChatDock(){
   const me=useMe()
@@ -293,5 +312,6 @@ export default function ChatDock(){
     </div>
   )
 }
+
 
 
