@@ -10,7 +10,7 @@ export default function PublicProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // load auth user (only to enable "Message" if signed in)
+  // Load auth user (so we can enable "Message" if signed in)
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -24,7 +24,7 @@ export default function PublicProfile() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // load profile by handle
+  // Load profile by handle
   useEffect(() => {
     if (!handle) return
     let alive = true
@@ -44,23 +44,19 @@ export default function PublicProfile() {
   }, [handle])
 
   function message() {
+    if (!prof?.handle) return
+    // if not signed in, go sign in and come back here
     if (!me) {
       window.location.href = '/auth?next=' + encodeURIComponent(window.location.pathname)
       return
     }
-    if (!prof?.handle) return
+    // open chat (ChatDock provides window.trymeChat)
     if (!window.trymeChat) {
       alert('Messaging not ready on this page. Try a hard refresh.')
       return
     }
     window.trymeChat.open({ handle: prof.handle })
   }
-
-  // QR: encode this public profile URL (no libraries required)
-  const profileUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}/u/${handle}`
-    : `/u/${handle}`
-  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(profileUrl)}`
 
   if (loading) {
     return (
@@ -115,24 +111,10 @@ export default function PublicProfile() {
           ))}
         </div>
       </div>
-
-      {/* QR block */}
-      <div className="card" style={{ marginTop: 16, display: 'grid', justifyItems: 'center', gap: 12 }}>
-        <div style={{ fontWeight: 800 }}>Scan to open this profile</div>
-        <img
-          src={qrSrc}
-          alt="QR to this profile"
-          width={220}
-          height={220}
-          style={{ borderRadius: 12, border: '1px solid var(--border)' }}
-        />
-        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-          {profileUrl}
-        </div>
-      </div>
     </div>
   )
 }
+
 
 
 
