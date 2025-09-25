@@ -9,6 +9,15 @@ export default function PublicProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Add <meta name="robots" content="noindex,nofollow"> to discourage indexing
+  useEffect(() => {
+    const meta = document.createElement('meta')
+    meta.name = 'robots'
+    meta.content = 'noindex,nofollow'
+    document.head.appendChild(meta)
+    return () => { document.head.removeChild(meta) }
+  }, [])
+
   // Load profile by handle
   useEffect(() => {
     if (!handle) return
@@ -17,7 +26,7 @@ export default function PublicProfile() {
       setLoading(true); setError('')
       const { data, error } = await supabase
         .from('profiles')
-        .select('handle, display_name, avatar_url, bio, age, location, interests')
+        .select('display_name, avatar_url, bio, age, location, interests')
         .eq('handle', handle.toLowerCase())
         .maybeSingle()
       if (!alive) return
@@ -56,16 +65,13 @@ export default function PublicProfile() {
             style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
           />
           <div style={{ flex: 1, minWidth: 240 }}>
-            <h1 style={{ margin: 0 }}>{prof.display_name || prof.handle}</h1>
-            <div className="badge">@{prof.handle}</div>
+            <h1 style={{ margin: 0 }}>{prof.display_name || 'Member'}</h1>
             {prof.location && <div style={{ color: 'var(--muted)', marginTop: 6 }}>{prof.location}</div>}
           </div>
         </div>
 
         {/* Bio */}
-        {prof.bio && (
-          <p style={{ marginTop: 4 }}>{prof.bio}</p>
-        )}
+        {prof.bio && <p style={{ marginTop: 4 }}>{prof.bio}</p>}
 
         {/* Details */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
