@@ -2,15 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
-/**
- * ProfilePage
- * - Requires auth; redirects to /auth if not signed in
- * - Loads current user's profile from public.profiles
- * - Editable fields: display_name, handle, bio, age, location, interests (comma-separated)
- * - Avatar upload to Supabase Storage bucket "avatars" (public)
- * - Upserts back to public.profiles
- */
-
 const MAX_AVATAR_MB = 4
 const ACCEPT_AVATAR = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
 
@@ -32,6 +23,11 @@ export default function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState('')
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState('')
+
+  // Invite QR (private on Profile only)
+  const [inviteCode, setInviteCode] = useState('')
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteError, setInviteError] = useState('')
 
   const fileRef = useRef(null)
 
@@ -83,6 +79,41 @@ export default function ProfilePage() {
     return () => { if (avatarPreview) URL.revokeObjectURL(avatarPreview) }
   }, [avatarPreview])
 
+  // Load or create an active invite code (private)
+  useEffect(() => {
+    if (!me?.id) return
+    ;(async () => {
+      try {
+        setInviteLoading(true); setInviteError('')
+        // Try to reuse an active code
+        const { data: existing, error: selErr } = await supabase
+          .from('invite_codes')
+          .select('code')
+          .eq('owner', me.id)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle()
+        if (selErr) throw selErr
+        if (existing?.code) {
+          setInviteCode(existing.code)
+        } else {
+          // Create a new code
+          const { data: created, error: insErr } = await supabase
+            .from('invite_codes')
+            .insert({ owner: me.id })
+            .select('code')
+            .single()
+          if (insErr) throw insErr
+          setInviteCode(created?.code || '')
+        }
+      } catch (e) {
+        setInviteError(e.message || 'Could not prepare invite')
+      } finally {
+        setInviteLoading(false)
+      }
+    })()
+  }, [me?.id])
+
   const canSave = useMemo(() => {
     if (!handle.trim()) return false
     if (saving) return false
@@ -91,7 +122,6 @@ export default function ProfilePage() {
 
   async function uploadAvatarIfAny() {
     if (!avatarFile || !me?.id) return avatarUrl || ''
-    // sanitize filename
     const clean = avatarFile.name.replace(/[^\w.\-]+/g, '_')
     const path = `user_${me.id}/${Date.now()}_${clean}`
     const { error: upErr } = await supabase.storage
@@ -108,10 +138,8 @@ export default function ProfilePage() {
     if (!me?.id) return
     setSaving(true); setError(''); setNotice('')
     try {
-      // 1) upload avatar if chosen
       const newAvatarUrl = await uploadAvatarIfAny()
 
-      // 2) normalize inputs
       const cleanHandle = handle.trim().toLowerCase()
       const cleanDisplay = displayName.trim()
       const parsedAge = age ? parseInt(age, 10) : null
@@ -120,7 +148,6 @@ export default function ProfilePage() {
         .map(s => s.trim())
         .filter(Boolean)
 
-      // 3) upsert profile
       const { error: upErr } = await supabase.from('profiles').upsert({
         user_id: me.id,
         handle: cleanHandle,
@@ -158,6 +185,13 @@ export default function ProfilePage() {
   }
 
   if (!me) return null
+
+  // Private invite QR values
+  const inviteLink = inviteCode ? `${window.location.origin}/connect?code=${inviteCode}` : ''
+  const qrSrc = inviteLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(inviteLink)}`
+    : ''
+
   return (
     <div className="container" style={{ padding: '32px 0' }}>
       <h1 style={{ marginBottom: 12 }}>
@@ -239,7 +273,7 @@ export default function ProfilePage() {
         </form>
       )}
 
-      {/* Public preview card (helps you see how others will see you) */}
+      {/* Public preview card */}
       {!loading && (
         <div className="card" style={{ marginTop: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -266,6 +300,33 @@ export default function ProfilePage() {
               </a>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* PRIVATE: Invite via QR (only visible to you here) */}
+      {!loading && (
+        <div className="card" style={{ marginTop: 16, display:'grid', justifyItems:'center', gap: 12 }}>
+          <div style={{ fontWeight: 800 }}>Invite someone to connect</div>
+          {inviteLoading && <div>Preparing your invite…</div>}
+          {inviteError && <div style={{ color:'#e11d48' }}>{inviteError}</div>}
+          {!inviteLoading && !inviteError && inviteCode && (
+            <>
+              <img
+                src={qrSrc}
+                alt="Invite QR"
+                width={220}
+                height={220}
+                style={{ borderRadius: 12, border: '1px solid var(--border)' }}
+              />
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{inviteLink}</div>
+              <div style={{ display:'flex', gap: 12 }}>
+                <a className="btn" href={inviteLink} target="_blank" rel="noreferrer">Open link</a>
+                <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(inviteLink)}>
+                  Copy link
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
