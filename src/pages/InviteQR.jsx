@@ -1,6 +1,6 @@
+// src/pages/InviteQR.jsx
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { QRCodeCanvas } from 'qrcode.react'
 import { useNavigate } from 'react-router-dom'
 
 export default function InviteQR() {
@@ -56,6 +56,9 @@ export default function InviteQR() {
   }, [me?.id])
 
   const link = code ? `${window.location.origin}/connect?code=${code}` : ''
+  const qrSrc = link
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(link)}`
+    : ''
 
   return (
     <div className="container" style={{ padding: '32px 0' }}>
@@ -69,7 +72,7 @@ export default function InviteQR() {
 
       {!loading && !error && code && (
         <div className="card" style={{ display:'grid', justifyItems:'center', gap: 16 }}>
-          <QRCodeCanvas value={link} size={220} includeMargin />
+          <img src={qrSrc} alt="QR for invite" width={220} height={220} style={{ borderRadius: 12, border: '1px solid var(--border)' }} />
           <div style={{ textAlign:'center' }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>Let them scan this to connect</div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>{link}</div>
@@ -88,3 +91,4 @@ export default function InviteQR() {
     </div>
   )
 }
+
