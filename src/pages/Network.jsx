@@ -1,3 +1,4 @@
+// src/pages/Network.jsx
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
@@ -6,37 +7,72 @@ export default function Network() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setMe(user || null)
-      if (!user) return
-      // fetch connection rows where current user is involved
-      const { data, error } = await supabase
-        .from('connections')
-        .select('user_1, user_2, created_at')
-        .or(`user_1.eq.${user.id},user_2.eq.${user.id}`)
-        .order('created_at', { ascending: false })
-      if (error) setError(error.message)
-      const partnerIds = (data || []).map(r => r.user_1 === user.id ? r.user_2 : r.user_1)
-      // pull partner profiles
-      let partners = []
-      if (partnerIds.length) {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('user_id, handle, display_name, avatar_url, location, bio')
-          .in('user_id', partnerIds)
-        partners = profs || []
-      }
-      setRows(partners)
-      setLoading(false)
+      if (!user) { setLoading(false); return }
+      await loadConnections(user.id)
     })()
-    return () => { alive = false }
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setMe(session?.user || null)
+      if (!session?.user) { setRows([]); setLoading(false) }
+      else loadConnections(session.user.id)
+    })
+    return () => sub.subscription.unsubscribe()
   }, [])
 
+  async function loadConnections(myId) {
+    setLoading(true); setError('')
+    // fetch connection rows where current user is involved
+    const { data, error } = await supabase
+      .from('connections')
+      .select('user_1, user_2, created_at')
+      .or(`user_1.eq.${myId},user_2.eq.${myId}`)
+      .order('created_at', { ascending: false })
+    if (error) { setError(error.message); setLoading(false); return }
+
+    const partnerIds = (data || []).map(r => r.user_1 === myId ? r.user_2 : r.user_1)
+
+    // pull partner profiles
+    let partners = []
+    if (partnerIds.length) {
+      const { data: profs, error: pErr } = await supabase
+        .from('profiles')
+        .select('user_id, handle, display_name, avatar_url, location, bio')
+        .in('user_id', partnerIds)
+      if (pErr) { setError(pErr.message) }
+      partners = profs || []
+    }
+    setRows(partners)
+    setLoading(false)
+  }
+
+  async function onRemove(partnerId) {
+    if (!me?.id) return
+    if (!confirm('Remove this connection?')) return
+    setBusy(true)
+    const { error } = await supabase.rpc('remove_connection', { p_other: partnerId })
+    if (error) alert(error.message || 'Could not remove connection')
+    await loadConnections(me.id)
+    setBusy(false)
+  }
+
+  async function onBlock(partnerId) {
+    if (!me?.id) return
+    if (!confirm('Block this user? They will not be able to connect or message you.')) return
+    setBusy(true)
+    const { error } = await supabase.rpc('block_user', { p_other: partnerId })
+    if (error) alert(error.message || 'Could not block user')
+    await loadConnections(me.id)
+    setBusy(false)
+  }
+
   function message(handle) {
+    // you’ve decided to keep messaging out of public browsing; still allowed inside your network
     if (!window.trymeChat) return alert('Messaging not ready on this page.')
     window.trymeChat.open({ handle })
   }
@@ -71,15 +107,18 @@ export default function Network() {
                 alt=""
                 style={{ width: 64, height: 64, borderRadius:'50%', objectFit:'cover', border:'1px solid var(--border)' }}
               />
-              <div>
+              <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 800 }}>{p.display_name || p.handle}</div>
                 <div className="badge">@{p.handle}</div>
+                {p.location && <div style={{ fontSize:12, color:'var(--muted)' }}>{p.location}</div>}
               </div>
             </div>
             {p.bio && <div style={{ color:'var(--muted)' }}>{p.bio}</div>}
-            <div style={{ display:'flex', gap: 8 }}>
-              <a className="btn" href={`/u/${p.handle}`}>View profile</a>
-              <button className="btn btn-primary" onClick={() => message(p.handle)}>Message</button>
+            <div style={{ display:'flex', gap: 8, flexWrap:'wrap' }}>
+              <a className="btn" href={`/u/${p.handle}`} target="_blank" rel="noreferrer">View profile</a>
+              <button className="btn btn-primary" onClick={() => message(p.handle)} disabled={busy}>Message</button>
+              <button className="btn" onClick={() => onRemove(p.user_id)} disabled={busy}>Remove</button>
+              <button className="btn" onClick={() => onBlock(p.user_id)} disabled={busy}>Block</button>
             </div>
           </div>
         ))}
