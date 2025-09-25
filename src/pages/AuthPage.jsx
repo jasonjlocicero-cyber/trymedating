@@ -1,192 +1,223 @@
+// src/pages/AuthPage.jsx
 import React, { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
+/**
+ * AuthPage
+ * Modes:
+ *  - signIn: email + password
+ *  - signUp: email + password (creates account)
+ *  - reset: request reset email; if session is in "recovery" state, let user set a new password
+ *
+ * Notes:
+ *  - Make sure Supabase Auth > Email provider is enabled in your dashboard.
+ *  - Settings > Auth > URL configuration: set "Site URL" to your Netlify domain so password reset links return here.
+ */
+
 export default function AuthPage() {
-  const [mode, setMode] = useState('signin') // 'signin' | 'signup' | 'magic'
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+
+  const next = params.get('next') || '/profile'
+  const urlMode = params.get('mode') // when returning from a password reset link, Supabase may open a recovery session
+
+  const [mode, setMode] = useState(urlMode === 'reset' ? 'reset' : 'signIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [sent, setSent] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [isRecovery, setIsRecovery] = useState(false) // true when user arrived via password recovery link
 
-  // Where to land after normal auth
-  const redirectToProfile = typeof window !== 'undefined' ? window.location.origin + '/profile' : undefined
-  // Where to land after password reset (recovery flow)
-  const redirectToReset = typeof window !== 'undefined' ? window.location.origin + '/reset' : undefined
+  // If already signed in, go to next
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!alive) return
+      if (session?.user) {
+        navigate(next, { replace: true })
+      }
+    })()
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) navigate(next, { replace: true })
+      // Supabase sets event === 'PASSWORD_RECOVERY' when coming from reset link
+      if (event === 'PASSWORD_RECOVERY') {
+        setMode('reset')
+        setIsRecovery(true)
+        setNotice('Enter a new password for your account.')
+      }
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [navigate, next])
 
-  if (!supabase) {
+  async function onSignIn(e) {
+    e.preventDefault()
+    setError(''); setNotice(''); setBusy(true)
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    setBusy(false)
+    if (error) setError(error.message)
+  }
+
+  async function onSignUp(e) {
+    e.preventDefault()
+    setError(''); setNotice(''); setBusy(true)
+    if (password.length < 6) {
+      setBusy(false)
+      setError('Password must be at least 6 characters.')
+      return
+    }
+    const { error } = await supabase.auth.signUp({ email: email.trim(), password })
+    setBusy(false)
+    if (error) setError(error.message)
+    else setNotice('Account created. Please check your email to confirm (if required), then sign in.')
+  }
+
+  async function onSendReset(e) {
+    e.preventDefault()
+    setError(''); setNotice(''); setBusy(true)
+    try {
+      const redirectTo = `${window.location.origin}/auth?mode=reset`
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
+      setBusy(false)
+      if (error) setError(error.message)
+      else setNotice('Reset email sent. Check your inbox for the link.')
+    } catch (err) {
+      setBusy(false)
+      setError(err.message || 'Could not send reset email.')
+    }
+  }
+
+  async function onUpdatePassword(e) {
+    e.preventDefault()
+    setError(''); setNotice(''); setBusy(true)
+    if (password.length < 6) {
+      setBusy(false)
+      setError('Password must be at least 6 characters.')
+      return
+    }
+    if (password !== password2) {
+      setBusy(false)
+      setError('Passwords do not match.')
+      return
+    }
+    const { error } = await supabase.auth.updateUser({ password })
+    setBusy(false)
+    if (error) setError(error.message)
+    else {
+      setNotice('Password updated. You are signed in.')
+      // small delay, then go to next
+      setTimeout(() => navigate(next, { replace: true }), 800)
+    }
+  }
+
+  function HeaderTitle() {
     return (
-      <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui' }}>
-        <h2>Sign in / Sign up</h2>
-        <p>
-          Supabase is not configured. Add <code>VITE_SUPABASE_URL</code> and{' '}
-          <code>VITE_SUPABASE_ANON_KEY</code> to Netlify Environment variables and redeploy.
-        </p>
-      </div>
+      <h1 style={{ marginBottom: 12, textAlign: 'center' }}>
+        <span style={{ color: 'var(--secondary)' }}>Account</span>{' '}
+        <span style={{ color: 'var(--primary)' }}>Access</span>
+      </h1>
     )
   }
 
-  // If already signed in, go to /profile
-  useEffect(() => {
-    let alive = true
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!alive) return
-      if (session) window.location.href = '/profile'
-    })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) window.location.href = '/profile'
-    })
-    return () => { alive = false; sub.subscription.unsubscribe() }
-  }, [])
-
-  async function handleSignIn(e) {
-    e.preventDefault()
-    setMsg(''); setBusy(true)
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) setMsg(error.message)
-      // success will redirect via onAuthStateChange
-    } catch (err) {
-      setMsg(err.message || 'Sign-in failed.')
-    } finally { setBusy(false) }
-  }
-
-  async function handleSignUp(e) {
-    e.preventDefault()
-    setMsg(''); setBusy(true)
-    try {
-      const { error } = await supabase.auth.signUp({
-        email, password,
-        options: { emailRedirectTo: redirectToProfile }
-      })
-      if (error) setMsg(error.message)
-      else setMsg('Account created. Check your email if confirmations are on, then sign in.')
-    } catch (err) {
-      setMsg(err.message || 'Sign-up failed.')
-    } finally { setBusy(false) }
-  }
-
-  async function sendMagic(e) {
-    e.preventDefault()
-    setMsg(''); setBusy(true)
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: redirectToProfile }
-      })
-      if (error) setMsg(error.message)
-      else setSent(true)
-    } catch (err) {
-      setMsg(err.message || 'Something went wrong.')
-    } finally { setBusy(false) }
-  }
-
-  async function sendReset(e) {
-    e.preventDefault()
-    if (!email) { setMsg('Enter your email first.'); return }
-    setMsg('Sending reset email…'); setBusy(true)
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirectToReset })
-      setMsg(error ? error.message : 'Check your email for the reset link.')
-    } catch (err) {
-      setMsg(err.message || 'Could not send reset email.')
-    } finally { setBusy(false) }
-  }
-
-  const Tab = ({ id, children }) => (
-    <button
-      onClick={() => { setMode(id); setMsg(''); setSent(false) }}
-      style={{
-        padding: '8px 12px',
-        border: '1px solid #ddd',
-        background: mode === id ? '#f6f6f6' : '#fff',
-        borderRadius: 8,
-        cursor: 'pointer'
-      }}
-    >
-      {children}
-    </button>
-  )
-
   return (
-    <div style={{ padding: 40, fontFamily: 'ui-sans-serif, system-ui', maxWidth: 520 }}>
-      <h2>Welcome back</h2>
-      <p style={{ opacity: .8, marginTop: 6 }}>Choose how you want to sign in.</p>
+    <div className="container" style={{ padding: '32px 0', maxWidth: 520 }}>
+      <HeaderTitle />
 
-      <div style={{ display: 'flex', gap: 8, margin: '12px 0 16px' }}>
-        <Tab id="signin">Sign in</Tab>
-        <Tab id="signup">Sign up</Tab>
-        <Tab id="magic">Magic link</Tab>
-      </div>
+      {(notice || error) && (
+        <div className="card" style={{ borderColor: notice ? 'var(--secondary)' : '#e11d48', color: notice ? 'var(--secondary)' : '#e11d48' }}>
+          {notice || error}
+        </div>
+      )}
 
-      {mode === 'signin' && (
-        <form onSubmit={handleSignIn} style={{ display: 'grid', gap: 12 }}>
-          <label>
-            Email
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-              style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #ddd' }} />
-          </label>
-          <label>
-            Password
-            <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-              style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #ddd' }} />
-          </label>
-          <button type="submit" disabled={busy || !email || !password}
-            style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#2A9D8F', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}>
-            {busy ? 'Signing in…' : 'Sign in'}
+      {/* SIGN IN */}
+      {mode === 'signIn' && (
+        <form className="card" onSubmit={onSignIn} style={{ display:'grid', gap: 12 }}>
+          <label style={{ fontWeight: 700 }}>Email</label>
+          <input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+
+          <label style={{ fontWeight: 700 }}>Password</label>
+          <input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required />
+
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign In'}
           </button>
-          <small style={{ opacity:.7, display:'block', marginTop:8 }}>
-            Forgot your password?{' '}
-            <a href="#" onClick={sendReset}>Send reset link</a>
-          </small>
+
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize: 14 }}>
+            <button type="button" className="btn" onClick={()=>{ setMode('signUp'); setError(''); setNotice('') }}>
+              Create account
+            </button>
+            <button type="button" className="btn" onClick={()=>{ setMode('reset'); setError(''); setNotice('') }}>
+              Forgot password?
+            </button>
+          </div>
         </form>
       )}
 
-      {mode === 'signup' && (
-        <form onSubmit={handleSignUp} style={{ display: 'grid', gap: 12 }}>
-          <label>
-            Email
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-              style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #ddd' }} />
-          </label>
-          <label>
-            Password
-            <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-              style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #ddd' }} />
-          </label>
-          <button type="submit" disabled={busy || !email || !password}
-            style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#2A9D8F', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}>
+      {/* SIGN UP */}
+      {mode === 'signUp' && (
+        <form className="card" onSubmit={onSignUp} style={{ display:'grid', gap: 12 }}>
+          <label style={{ fontWeight: 700 }}>Email</label>
+          <input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+
+          <label style={{ fontWeight: 700 }}>Password</label>
+          <input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required />
+
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? 'Creating…' : 'Create account'}
           </button>
-          <small style={{ opacity:.7 }}>
-            Depending on settings, you may need to confirm your email once before first sign-in.
-          </small>
+
+          <div style={{ textAlign:'center', fontSize: 14 }}>
+            Already have an account?{' '}
+            <button type="button" className="btn" onClick={()=>{ setMode('signIn'); setError(''); setNotice('') }}>
+              Sign in
+            </button>
+          </div>
         </form>
       )}
 
-      {mode === 'magic' && (
-        sent ? (
-          <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 10, padding: 16 }}>
-            Check your inbox for the magic link. Open it in the same browser for best results.
-          </div>
-        ) : (
-          <form onSubmit={sendMagic} style={{ display: 'grid', gap: 12 }}>
-            <label>
-              Email
-              <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #ddd' }} />
-            </label>
-            <button type="submit" disabled={busy || !email}
-              style={{ padding:'10px 14px', borderRadius:10, border:'none', background:'#E76F51', color:'#fff', fontWeight:700, cursor: busy?'not-allowed':'pointer' }}>
-              {busy ? 'Sending…' : 'Send magic link'}
-            </button>
-          </form>
-        )
-      )}
+      {/* RESET (request or complete) */}
+      {mode === 'reset' && (
+        <>
+          {!isRecovery ? (
+            // Phase 1: request reset email
+            <form className="card" onSubmit={onSendReset} style={{ display:'grid', gap: 12 }}>
+              <div style={{ fontWeight:700, marginBottom:4 }}>Reset your password</div>
+              <label style={{ fontWeight: 700 }}>Email</label>
+              <input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required />
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Sending…' : 'Send reset email'}
+              </button>
 
-      {msg && <div style={{ color: msg.includes('✅') ? '#2A9D8F' : '#C0392B', marginTop: 10 }}>{msg}</div>}
+              <div style={{ textAlign:'center', fontSize: 14 }}>
+                <button type="button" className="btn" onClick={()=>{ setMode('signIn'); setError(''); setNotice('') }}>
+                  Back to sign in
+                </button>
+              </div>
+            </form>
+          ) : (
+            // Phase 2: user came from reset link -> set new password
+            <form className="card" onSubmit={onUpdatePassword} style={{ display:'grid', gap: 12 }}>
+              <div style={{ fontWeight:700, marginBottom:4 }}>Set a new password</div>
+              <label style={{ fontWeight: 700 }}>New password</label>
+              <input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required />
+              <label style={{ fontWeight: 700 }}>Confirm new password</label>
+              <input type="password" autoComplete="new-password" value={password2} onChange={e=>setPassword2(e.target.value)} required />
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Updating…' : 'Update password'}
+              </button>
+              <div style={{ textAlign:'center', fontSize: 14 }}>
+                <Link to="/">Go home</Link>
+              </div>
+            </form>
+          )}
+        </>
+      )}
     </div>
   )
 }
+
 
 
