@@ -5,24 +5,9 @@ import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
   const { handle } = useParams()
-  const [me, setMe] = useState(null)
   const [prof, setProf] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  // Load auth user (so we can enable "Message" if signed in)
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!alive) return
-      setMe(user || null)
-    })()
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setMe(session?.user || null)
-    })
-    return () => sub.subscription.unsubscribe()
-  }, [])
 
   // Load profile by handle
   useEffect(() => {
@@ -32,7 +17,7 @@ export default function PublicProfile() {
       setLoading(true); setError('')
       const { data, error } = await supabase
         .from('profiles')
-        .select('user_id, handle, display_name, avatar_url, bio, age, location, interests')
+        .select('handle, display_name, avatar_url, bio, age, location, interests')
         .eq('handle', handle.toLowerCase())
         .maybeSingle()
       if (!alive) return
@@ -42,21 +27,6 @@ export default function PublicProfile() {
     })()
     return () => { alive = false }
   }, [handle])
-
-  function message() {
-    if (!prof?.handle) return
-    // if not signed in, go sign in and come back here
-    if (!me) {
-      window.location.href = '/auth?next=' + encodeURIComponent(window.location.pathname)
-      return
-    }
-    // open chat (ChatDock provides window.trymeChat)
-    if (!window.trymeChat) {
-      alert('Messaging not ready on this page. Try a hard refresh.')
-      return
-    }
-    window.trymeChat.open({ handle: prof.handle })
-  }
 
   if (loading) {
     return (
@@ -78,7 +48,6 @@ export default function PublicProfile() {
 
   return (
     <div className="container" style={{ padding: '32px 0' }}>
-      {/* Header / identity */}
       <div className="card" style={{ display: 'grid', gap: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
           <img
@@ -90,11 +59,6 @@ export default function PublicProfile() {
             <h1 style={{ margin: 0 }}>{prof.display_name || prof.handle}</h1>
             <div className="badge">@{prof.handle}</div>
             {prof.location && <div style={{ color: 'var(--muted)', marginTop: 6 }}>{prof.location}</div>}
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={message}>Message</button>
           </div>
         </div>
 
