@@ -184,13 +184,38 @@ export default function ProfilePage() {
     setAvatarPreview(URL.createObjectURL(f))
   }
 
-  if (!me) return null
-
-  // Private invite QR values
+  // Invite helpers
   const inviteLink = inviteCode ? `${window.location.origin}/connect?code=${inviteCode}` : ''
   const qrSrc = inviteLink
     ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(inviteLink)}`
     : ''
+
+  async function rotateInvite() {
+    // Call RPC to revoke current and return a new code
+    const { data, error } = await supabase.rpc('rotate_invite')
+    if (error) {
+      alert(error.message || 'Could not rotate invite')
+      return
+    }
+    setInviteCode(data || '')
+  }
+
+  async function revokeInvite() {
+    if (!me?.id) return
+    // Just revoke any active code; leave none active
+    const { error } = await supabase
+      .from('invite_codes')
+      .update({ status: 'revoked' })
+      .eq('owner', me.id)
+      .eq('status', 'active')
+    if (error) {
+      alert(error.message || 'Could not revoke invite')
+      return
+    }
+    setInviteCode('')
+  }
+
+  if (!me) return null
 
   return (
     <div className="container" style={{ padding: '32px 0' }}>
@@ -280,7 +305,7 @@ export default function ProfilePage() {
             <img
               src={avatarPreview || avatarUrl || 'https://via.placeholder.com/96?text=%F0%9F%91%A4'}
               alt=""
-              style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+              style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border:'1px solid var(--border)' }}
             />
             <div style={{ flex: 1 }}>
               <h2 style={{ margin: 0 }}>{displayName || handle || 'Your Name'}</h2>
@@ -309,22 +334,39 @@ export default function ProfilePage() {
           <div style={{ fontWeight: 800 }}>Invite someone to connect</div>
           {inviteLoading && <div>Preparing your invite…</div>}
           {inviteError && <div style={{ color:'#e11d48' }}>{inviteError}</div>}
-          {!inviteLoading && !inviteError && inviteCode && (
+          {!inviteLoading && !inviteError && (
             <>
-              <img
-                src={qrSrc}
-                alt="Invite QR"
-                width={220}
-                height={220}
-                style={{ borderRadius: 12, border: '1px solid var(--border)' }}
-              />
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{inviteLink}</div>
-              <div style={{ display:'flex', gap: 12 }}>
-                <a className="btn" href={inviteLink} target="_blank" rel="noreferrer">Open link</a>
-                <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(inviteLink)}>
-                  Copy link
-                </button>
-              </div>
+              {inviteCode ? (
+                <>
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(inviteLink)}`}
+                    alt="Invite QR"
+                    width={220}
+                    height={220}
+                    style={{ borderRadius: 12, border: '1px solid var(--border)' }}
+                  />
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>{inviteLink}</div>
+                  <div style={{ display:'flex', gap: 12, flexWrap:'wrap', justifyContent:'center' }}>
+                    <a className="btn" href={inviteLink} target="_blank" rel="noreferrer">Open link</a>
+                    <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(inviteLink)}>
+                      Copy link
+                    </button>
+                    <button className="btn" onClick={rotateInvite}>
+                      Generate new invite
+                    </button>
+                    <button className="btn" onClick={revokeInvite}>
+                      Revoke invite
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ color:'var(--muted)' }}>No active invite</div>
+                  <button className="btn btn-primary" onClick={rotateInvite}>
+                    Generate new invite
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -332,6 +374,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
