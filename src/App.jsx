@@ -1,6 +1,6 @@
 // src/App.jsx
 import React from 'react'
-import { Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
 import MessageLauncher from './components/MessageLauncher'
 
@@ -12,8 +12,6 @@ import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
-
-// New QR / Connection pages
 import InviteQR from './pages/InviteQR'
 import Connect from './pages/Connect'
 import Network from './pages/Network'
@@ -51,6 +49,9 @@ function Home() {
 }
 
 export default function App() {
+  const { pathname } = useLocation()
+  const isPublicProfile = pathname.startsWith('/u/')
+
   return (
     <>
       {/* Header */}
@@ -99,11 +100,9 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
-          {/* New QR + connection pages */}
           <Route path="/invite" element={<InviteQR />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/network" element={<Network />} />
-          {/* 404 fallback */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -137,12 +136,17 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Floating chat */}
-      <MessageLauncher />
-      <ChatDock />
+      {/* Hide chat affordances on public profiles */}
+      {!isPublicProfile && (
+        <>
+          <MessageLauncher />
+          <ChatDock />
+        </>
+      )}
     </>
   )
 }
+
 
 
 
