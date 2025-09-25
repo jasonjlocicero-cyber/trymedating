@@ -1,9 +1,9 @@
 // src/App.jsx
 import React from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import ChatDock from './components/ChatDock' // keep this
+import ChatDock from './components/ChatDock'
 
-// --- Pages ---
+// Pages
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
@@ -11,11 +11,11 @@ import PublicProfile from './pages/PublicProfile'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import Contact from './pages/Contact'
+import Safety from './pages/Safety'
 import InviteQR from './pages/InviteQR'
 import Connect from './pages/Connect'
 import Network from './pages/Network'
 
-// --- Home page with brand hero ---
 function Home() {
   return (
     <section style={{
@@ -29,18 +29,12 @@ function Home() {
           <span style={{ fontWeight: 800, color: 'var(--secondary)' }}>TryMe</span>
           <span style={{ fontWeight: 800, color: 'var(--primary)' }}>Dating</span>
         </h1>
-
         <p style={{ fontSize: '1.25rem', marginBottom: 32, color: 'var(--muted)' }}>
           Meet new people, create real connections, and find the right match for you.
         </p>
-
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <Link className="btn btn-primary" style={{ minWidth: 140 }} to="/auth">
-            Sign Up Free
-          </Link>
-          <Link className="btn btn-secondary" style={{ minWidth: 140 }} to="/auth">
-            Sign In
-          </Link>
+          <Link className="btn btn-primary" style={{ minWidth: 140 }} to="/auth">Sign Up Free</Link>
+          <Link className="btn btn-secondary" style={{ minWidth: 140 }} to="/auth">Sign In</Link>
         </div>
       </div>
     </section>
@@ -53,7 +47,6 @@ export default function App() {
 
   return (
     <>
-      {/* Header */}
       <header style={{
         borderBottom: '1px solid #eee',
         padding: '10px 16px',
@@ -65,13 +58,10 @@ export default function App() {
         backdropFilter: 'saturate(1.2) blur(6px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Link to="/" style={{
-            fontWeight: 800, textDecoration: 'none', fontSize: '1.25rem', lineHeight: 1
-          }}>
+          <Link to="/" style={{ fontWeight: 800, textDecoration: 'none', fontSize: '1.25rem', lineHeight: 1 }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
-
           <nav style={{ display: 'flex', gap: 10 }}>
             <Link to="/profile">Profile</Link>
             <Link to="/settings">Settings</Link>
@@ -80,11 +70,11 @@ export default function App() {
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
+            <Link to="/safety">Safety</Link>
           </nav>
         </div>
       </header>
 
-      {/* Routes */}
       <main style={{ minHeight: 'calc(100vh - 160px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -95,6 +85,7 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/safety" element={<Safety />} />
           <Route path="/invite" element={<InviteQR />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/network" element={<Network />} />
@@ -107,7 +98,6 @@ export default function App() {
         </Routes>
       </main>
 
-      {/* Footer */}
       <footer style={{ borderTop: '1px solid #eee', padding: '20px 16px' }}>
         <div className="container" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap'
@@ -120,15 +110,16 @@ export default function App() {
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
+            <Link to="/safety">Safety</Link>
           </nav>
         </div>
       </footer>
 
-      {/* Only show chat (with its built-in launcher) when not on public profile */}
       {!isPublicProfile && <ChatDock />}
     </>
   )
 }
+
 
 
 
