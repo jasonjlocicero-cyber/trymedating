@@ -1,8 +1,7 @@
 // src/App.jsx
 import React from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import ChatDock from './components/ChatDock'
-import MessageLauncher from './components/MessageLauncher'
+import ChatDock from './components/ChatDock' // keep this
 
 // --- Pages ---
 import AuthPage from './pages/AuthPage'
@@ -66,12 +65,8 @@ export default function App() {
         backdropFilter: 'saturate(1.2) blur(6px)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* Brand title with split colors */}
           <Link to="/" style={{
-            fontWeight: 800,
-            textDecoration: 'none',
-            fontSize: '1.25rem',
-            lineHeight: 1
+            fontWeight: 800, textDecoration: 'none', fontSize: '1.25rem', lineHeight: 1
           }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
@@ -113,16 +108,9 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer style={{
-        borderTop: '1px solid #eee',
-        padding: '20px 16px'
-      }}>
+      <footer style={{ borderTop: '1px solid #eee', padding: '20px 16px' }}>
         <div className="container" style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-          flexWrap: 'wrap'
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap'
         }}>
           <div style={{ fontWeight: 800 }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
@@ -136,16 +124,12 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Hide chat affordances on public profiles */}
-      {!isPublicProfile && (
-        <>
-          <MessageLauncher />
-          <ChatDock />
-        </>
-      )}
+      {/* Only show chat (with its built-in launcher) when not on public profile */}
+      {!isPublicProfile && <ChatDock />}
     </>
   )
 }
+
 
 
 
