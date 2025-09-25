@@ -1,19 +1,19 @@
 // src/components/ChatDock.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 /**
  * ChatDock
- * Floating chat window(s) with guardrails:
- * - Only allow sending if users are connected and not blocked (either way).
- * - Shows clear banners explaining why sending is disabled.
- *
- * Exposes: window.trymeChat.open({ handle })
+ * - Floating launcher opens a dock.
+ * - If no chats are open, we now show an EMPTY STATE card with guidance + Close button.
+ * - Only allows sending when connected and not blocked (server RLS also enforces).
+ * - Exposes window.trymeChat.open({ handle }) for deep links from elsewhere.
  */
 
 export default function ChatDock() {
   const [me, setMe] = useState(null)
-  const [windows, setWindows] = useState([]) // [{handle, userId, messages:[], input:'', canSend:true, banner:null}]
+  const [windows, setWindows] = useState([]) // [{key,userId,handle,display_name,avatar_url,messages,input,canSend,banner}]
   const [open, setOpen] = useState(false)
 
   // auth
@@ -29,24 +29,21 @@ export default function ChatDock() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // API: window.trymeChat.open({ handle })
+  // Public API for opening a conversation by handle
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle }) => {
         if (!handle) return
         setOpen(true)
 
-        // Resolve partner by handle
+        // Resolve partner
         const { data: prof, error: pErr } = await supabase
           .from('profiles')
           .select('user_id, handle, display_name, avatar_url')
           .eq('handle', handle.toLowerCase())
           .maybeSingle()
-        if (pErr || !prof?.user_id) {
-          alert('User not found'); return
-        }
+        if (pErr || !prof?.user_id) { alert('User not found'); return }
 
-        // Prepare window model
         const next = {
           key: `u:${prof.user_id}`,
           userId: prof.user_id,
@@ -60,19 +57,14 @@ export default function ChatDock() {
         }
 
         setWindows(wins => {
-          // de-duplicate by userId
           if (wins.some(w => w.userId === next.userId)) return wins
-          return [next, ...wins].slice(0, 4) // keep up to 4 windows
+          return [next, ...wins].slice(0, 4)
         })
 
-        // Load perms + history
         await refreshWindowPerms(prof.user_id)
         await loadHistory(prof.user_id)
       },
-      // optional: expose close-by-handle
-      close: ({ handle }) => {
-        setWindows(wins => wins.filter(w => w.handle !== handle))
-      }
+      closeAll: () => { setWindows([]); setOpen(false) }
     }
     return () => { delete window.trymeChat }
   }, [me])
@@ -80,28 +72,21 @@ export default function ChatDock() {
   async function refreshWindowPerms(partnerId) {
     if (!me?.id || !partnerId) return
 
-    // 1) Are we connected?
+    // 1) check connection
     const { data: conns } = await supabase
       .from('connections')
       .select('user_1, user_2')
       .or(`user_1.eq.${me.id},user_2.eq.${me.id}`)
-
     const connected = (conns || []).some(
       r => (r.user_1 === me.id && r.user_2 === partnerId) || (r.user_2 === me.id && r.user_1 === partnerId)
     )
 
-    // 2) Is there any block either direction?
-    const { data: blocks } = await supabase
+    // 2) check if I blocked them (RLS lets me see my own blocks)
+    const { data: myBlocks } = await supabase
       .from('blocks')
       .select('blocker, blocked')
-      .or(`blocker.eq.${me.id},blocker.eq.${partnerId}`) // fetch both user's block lists (RLS shows only my blocks; that's fine)
-      // Note: due to RLS we only see my own "blocker" rows. That's enough to warn "You blocked this user".
-      // Server-side policy already prevents sends if either party blocked, so we still show a generic send failure banner if needed.
-
-    // Determine local flags
-    const iBlockedThem = (blocks || []).some(b => b.blocked === partnerId && b.blocker === me.id)
-    // We cannot see if THEY blocked US via select (RLS), but the server will reject sends;
-    // So we proactively warn if not connected; for block-by-them we catch error on send and set banner.
+      .eq('blocker', me.id)
+    const iBlockedThem = (myBlocks || []).some(b => b.blocked === partnerId)
 
     setWindows(wins => wins.map(w => {
       if (w.userId !== partnerId) return w
@@ -138,11 +123,11 @@ export default function ChatDock() {
     if (!me?.id) { alert('Please sign in.'); return }
     const w = windows.find(x => x.userId === partnerId)
     if (!w) return
-    if (!w.canSend) return // guarded by UI
+    if (!w.canSend) return
 
     const text = (w.input || '').trim()
     if (!text) return
-    // optimistic add
+
     const temp = {
       id: `temp_${Date.now()}`,
       sender: me.id,
@@ -155,37 +140,36 @@ export default function ChatDock() {
       : x
     ))
 
-    // server insert (will fail if blocked by them; RLS denies insert)
     const { error } = await supabase
       .from('messages')
       .insert({ sender: me.id, recipient: partnerId, body: text })
 
     if (error) {
-      // Roll back optimistic append and show banner
+      // remove temp + show banner
       setWindows(wins => wins.map(x => {
         if (x.userId !== partnerId) return x
-        const msgs = x.messages.filter(m => m !== temp) // remove temp
-        let banner = x.banner
-        // If server says permission denied -> likely blocked by them (or not connected, but we check that earlier)
-        banner = { tone: 'danger', text: 'Message blocked. You may be blocked or not connected.' }
-        return { ...x, messages: msgs, canSend: false, banner }
+        const msgs = x.messages.filter(m => m !== temp)
+        return {
+          ...x,
+          messages: msgs,
+          canSend: false,
+          banner: { tone: 'danger', text: 'Message blocked. You may be blocked or not connected.' }
+        }
       }))
     } else {
-      // success: reload to get real row (optional)
       loadHistory(partnerId)
     }
   }
 
   function closeWindow(partnerId) {
     setWindows(wins => wins.filter(w => w.userId !== partnerId))
-    if (windows.length <= 1) setOpen(false)
   }
 
-  // Basic styles
+  // styles
   const dockStyle = useMemo(() => ({
     position: 'fixed',
     right: 16,
-    bottom: 16,
+    bottom: 16 + 56, // leave room for launcher/close fab
     zIndex: 40,
     display: open ? 'grid' : 'none',
     gap: 12
@@ -193,12 +177,12 @@ export default function ChatDock() {
 
   return (
     <>
-      {/* Minimal launcher (kept simple; elsewhere you may show a badge) */}
-      {!open && (
+      {/* Launcher / Close FAB */}
+      {!open ? (
         <button
           onClick={() => setOpen(true)}
           style={{
-            position: 'fixed', right: 16, bottom: 16, zIndex: 30,
+            position: 'fixed', right: 16, bottom: 16, zIndex: 41,
             background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
             color: '#fff', border: 'none', borderRadius: 9999, padding: '12px 16px',
             boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 800, cursor: 'pointer'
@@ -207,9 +191,40 @@ export default function ChatDock() {
         >
           Messages
         </button>
+      ) : (
+        <button
+          onClick={() => { setOpen(false) }}
+          style={{
+            position: 'fixed', right: 16, bottom: 16, zIndex: 41,
+            background: '#111827', color: '#fff',
+            border: 'none', borderRadius: 9999, padding: '10px 14px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700, cursor: 'pointer'
+          }}
+          aria-label="Close messages"
+          title="Close"
+        >
+          Close
+        </button>
       )}
 
       <div style={dockStyle}>
+        {/* EMPTY STATE when dock is open but no chats yet */}
+        {open && windows.length === 0 && (
+          <div className="card" style={{ width: 320 }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Messages</div>
+            {!me ? (
+              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+                Please <Link to="/auth">sign in</Link> to start chatting.
+              </div>
+            ) : (
+              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+                No conversations yet. Open a profile from your <Link to="/network">Network</Link> to start a chat.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Open chat windows */}
         {windows.map(w => (
           <div key={w.key} className="card" style={{ width: 320, padding: 0, overflow: 'hidden' }}>
             {/* Header */}
@@ -285,6 +300,7 @@ export default function ChatDock() {
     </>
   )
 }
+
 
 
 
