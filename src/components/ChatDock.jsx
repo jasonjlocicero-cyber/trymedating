@@ -1,338 +1,291 @@
-import React, { useEffect, useRef, useState } from 'react'
+// src/components/ChatDock.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-const CHATDOCK_VERSION = 'attachments-lean-3-brand-empty-bubble';
-if (typeof window !== 'undefined') window.trymeChatVersion = CHATDOCK_VERSION;
-
 /**
- * ChatDock (lean) + brand bubbles
- * - Multiple chat windows (open/close/minimize)
- * - Text + image/GIF attachments (📎 + preview)
- * - Uploads to Supabase Storage bucket "attachments" (Public)
- * - Brand styling:
- *    • My bubbles: teal→coral gradient
- *    • Their bubbles: neutral white with subtle brand-tinted border
- *    • Empty-state tip bubble: teal→coral gradient (white text)
+ * ChatDock
+ * Floating chat window(s) with guardrails:
+ * - Only allow sending if users are connected and not blocked (either way).
+ * - Shows clear banners explaining why sending is disabled.
+ *
+ * Exposes: window.trymeChat.open({ handle })
  */
 
-const DEF_W = 340
-const DEF_H = 440
-const EDGE_GAP = 16
-const FOOTER_CLEAR = 120
-const MAX_BYTES = 5 * 1024 * 1024
-const ACCEPT_TYPES = ['image/png','image/jpeg','image/jpg','image/gif','image/webp']
+export default function ChatDock() {
+  const [me, setMe] = useState(null)
+  const [windows, setWindows] = useState([]) // [{handle, userId, messages:[], input:'', canSend:true, banner:null}]
+  const [open, setOpen] = useState(false)
 
-// tiny ping sound (optional)
-const PING_DATA_URL = 'data:audio/wav;base64,UklGRkSXAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YUTWAQAAgP8AAP8AgAAAAP8A/4AAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAAf/8AAP8A/4AAAP8AAAD/AAAA/wD/gAB///8AAAD/gAAA'
-function ping(){ try{ const a=new Audio(PING_DATA_URL); a.volume=0.35; a.play().catch(()=>{}) }catch{} }
-
-function useMe(){
-  const [me,setMe]=useState(null)
-  useEffect(()=>{
-    let alive=true
-    ;(async()=>{
-      const {data:{user}}=await supabase.auth.getUser()
-      if(!alive) return
-      setMe(user||null)
+  // auth
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (mounted) setMe(user || null)
     })()
-    const {data:sub}=supabase.auth.onAuthStateChange((_e,session)=>setMe(session?.user||null))
-    return ()=>{ alive=false; sub.subscription.unsubscribe() }
-  },[])
-  return me
-}
-
-async function fetchProfileByHandle(handle){
-  if(!handle) return null
-  const {data}=await supabase.from('profiles')
-    .select('user_id,handle,display_name,avatar_url')
-    .eq('handle',handle.toLowerCase()).maybeSingle()
-  return data||null
-}
-async function fetchProfileByUserId(user_id){
-  if(!user_id) return null
-  const {data}=await supabase.from('profiles')
-    .select('user_id,handle,display_name,avatar_url')
-    .eq('user_id',user_id).maybeSingle()
-  return data||null
-}
-
-function ChatWindow({ me, partner, minimized, onClose, onMinimize, width=DEF_W, height=DEF_H }){
-  const [messages,setMessages]=useState([])
-  const [loading,setLoading]=useState(true)
-  const [error,setError]=useState('')
-  const [draft,setDraft]=useState('')
-  const [attachFile,setAttachFile]=useState(null)
-  const [attachPreview,setAttachPreview]=useState('')
-  const [isUploading,setIsUploading]=useState(false)
-  const inputRef=useRef(null)
-  const bottomRef=useRef(null)
-
-  const avatar=partner?.avatar_url||'https://via.placeholder.com/28?text=%F0%9F%98%8A'
-  const name=partner?.display_name||partner?.handle||'Unknown'
-
-  function resetAttachment(){
-    setAttachFile(null)
-    if(attachPreview) URL.revokeObjectURL(attachPreview)
-    setAttachPreview('')
-  }
-
-  useEffect(()=>{
-    if(!me?.id||!partner?.user_id) return
-    ;(async()=>{
-      setLoading(true); setError('')
-      const {data,error}=await supabase.from('messages')
-        .select('id,sender,recipient,body,attachment_url,attachment_type,created_at')
-        .or(`and(sender.eq.${me.id},recipient.eq.${partner.user_id}),and(sender.eq.${partner.user_id},recipient.eq.${me.id})`)
-        .order('created_at',{ascending:true})
-      if(error) setError(error.message||'Failed to load messages.')
-      setMessages(data||[])
-      setLoading(false)
-      setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:'auto'}),0)
-    })()
-  },[me?.id,partner?.user_id])
-
-  useEffect(()=>{
-    if(!me?.id||!partner?.user_id) return
-    const channel = supabase
-      .channel(`dm:${[me.id,partner.user_id].sort().join(':')}`)
-      .on('postgres_changes',
-        {event:'INSERT',schema:'public',table:'messages'},
-        payload=>{
-          const m = payload.new
-          const relevant=(m.sender===me.id&&m.recipient===partner.user_id)||(m.sender===partner.user_id&&m.recipient===me.id)
-          if(!relevant) return
-          setMessages(prev=>[...prev,m])
-          if(m.sender===partner.user_id) ping()
-          setTimeout(()=>bottomRef.current?.scrollIntoView({behavior:'smooth'}),0)
-        })
-      .subscribe()
-    return ()=>{ supabase.removeChannel(channel) }
-  },[me?.id,partner?.user_id])
-
-  async function uploadAttachmentIfAny(){
-    if(!attachFile||!me?.id) return {url:null,type:null}
-    setIsUploading(true)
-    try{
-      const clean=attachFile.name.replace(/[^\w.\-]+/g,'_')
-      const path=`user_${me.id}/${Date.now()}_${clean}`
-      const {error:upErr}=await supabase.storage.from('attachments')
-        .upload(path,attachFile,{cacheControl:'3600',upsert:false,contentType:attachFile.type})
-      if(upErr) throw upErr
-      const {data}=supabase.storage.from('attachments').getPublicUrl(path)
-      if(!data?.publicUrl) throw new Error('Could not get public URL')
-      return {url:data.publicUrl,type:'image'}
-    } finally {
-      setIsUploading(false)
-      resetAttachment()
-    }
-  }
-
-  async function send(){
-    if((!draft.trim())&&!attachFile) return
-    if(!me?.id||!partner?.user_id) return
-    let body=draft.trim().slice(0,2000)
-    setDraft('')
-    let attachment_url=null, attachment_type=null
-    try{
-      if(attachFile){ const a=await uploadAttachmentIfAny(); attachment_url=a.url; attachment_type=a.type }
-    }catch(e){ setError(e.message||'Upload failed'); return }
-    const {error}=await supabase.from('messages').insert({
-      sender:me.id, recipient:partner.user_id, body: body||null, attachment_url, attachment_type
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setMe(session?.user || null)
     })
-    if(error) setError(error.message)
-    setTimeout(()=>inputRef.current?.focus(),0)
-  }
+    return () => sub.subscription.unsubscribe()
+  }, [])
 
-  // Brand styles
-  const myBubbleStyle = {
-    background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
-    color: '#fff',
-    border: 'none',
-    boxShadow: '0 8px 20px rgba(42,157,143,.20)',
-  }
-  const theirBubbleStyle = {
-    background: '#fff',
-    color: 'var(--text)',
-    border: '1px solid color-mix(in oklab, var(--secondary), #000 6%)',
-    boxShadow: '0 4px 12px rgba(0,0,0,.04)'
-  }
+  // API: window.trymeChat.open({ handle })
+  useEffect(() => {
+    window.trymeChat = {
+      open: async ({ handle }) => {
+        if (!handle) return
+        setOpen(true)
 
-  return (
-    <div style={{
-      width, height: minimized?56:height,
-      background:'#fff', border:'1px solid #ddd', borderRadius:12,
-      boxShadow:'0 8px 24px rgba(0,0,0,0.08)', display:'flex', flexDirection:'column', overflow:'hidden'
-    }}>
-      {/* Header */}
-      <div style={{
-        display:'flex', alignItems:'center', justifyContent:'space-between',
-        padding:'8px 10px', background:'var(--bg-soft)', borderBottom:'1px solid var(--border)'
-      }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <img src={avatar} alt="" style={{ width:28, height:28, borderRadius:'50%', objectFit:'cover', border:'1px solid #eee' }} />
-          <div style={{ fontWeight:700, fontSize:14 }}>
-            {name} <span style={{ opacity:.7, fontWeight:400 }}>@{partner?.handle}</span>
-          </div>
-        </div>
-        <div style={{ display:'flex', gap:6 }}>
-          <button onClick={onMinimize} title={minimized?'Restore':'Minimize'} style={iconBtn}>—</button>
-          <button onClick={onClose} title="Close" style={iconBtn}>×</button>
-        </div>
-      </div>
+        // Resolve partner by handle
+        const { data: prof, error: pErr } = await supabase
+          .from('profiles')
+          .select('user_id, handle, display_name, avatar_url')
+          .eq('handle', handle.toLowerCase())
+          .maybeSingle()
+        if (pErr || !prof?.user_id) {
+          alert('User not found'); return
+        }
 
-      {/* Minimized */}
-      {minimized ? (
-        <div style={{ padding:8, fontSize:12, color:'#777' }}>Conversation minimized</div>
-      ) : (
-        <>
-          {/* Messages */}
-          <div style={{ flex:1, overflowY:'auto', padding:10, background:'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)' }}>
-            {loading && <div>Loading…</div>}
-            {error && <div style={{ color:'#C0392B' }}>{error}</div>}
+        // Prepare window model
+        const next = {
+          key: `u:${prof.user_id}`,
+          userId: prof.user_id,
+          handle: prof.handle,
+          display_name: prof.display_name || prof.handle,
+          avatar_url: prof.avatar_url || '',
+          messages: [],
+          input: '',
+          canSend: false,
+          banner: { tone: 'info', text: 'Checking permissions…' },
+        }
 
-            {/* Empty-state gradient bubble */}
-            {!loading && messages.length===0 && (
-              <div style={{ display:'flex', justifyContent:'center', marginTop: 12 }}>
-                <div style={{
-                  maxWidth:'85%',
-                  background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
-                  color: '#fff',
-                  borderRadius: 14,
-                  padding: '10px 14px',
-                  boxShadow: '0 8px 20px rgba(42,157,143,.20)',
-                  textAlign: 'center',
-                  fontWeight: 600
-                }}>
-                  Say hi 👋 — you can also attach an image with the 📎
-                </div>
-              </div>
-            )}
-
-            {messages.map(m=>{
-              const mine=m.sender===me?.id
-              return (
-                <div key={m.id} style={{ display:'flex', marginBottom:8, justifyContent:mine?'flex-end':'flex-start' }}>
-                  <div style={{
-                    maxWidth:'75%',
-                    borderRadius:14, padding:'8px 12px',
-                    ...(mine ? myBubbleStyle : theirBubbleStyle)
-                  }}>
-                    {m.attachment_url && m.attachment_type==='image' && (
-                      <a href={m.attachment_url} target="_blank" rel="noreferrer" style={{ display:'block', marginBottom:m.body?8:0 }}>
-                        <img src={m.attachment_url} alt="attachment" style={{ maxWidth:'100%', borderRadius:10, display:'block' }} loading="lazy"/>
-                      </a>
-                    )}
-                    {m.body && <div style={{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.body}</div>}
-                    <div style={{ fontSize:11, opacity:.8, marginTop:6, color: mine?'#fff':'var(--muted)' }}>
-                      {new Date(m.created_at).toLocaleTimeString()}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-            <div ref={bottomRef}/>
-          </div>
-
-          {/* Composer */}
-          <div style={{ borderTop:'1px solid var(--border)', padding:8, display:'flex', gap:8, alignItems:'center', background:'#fff' }}>
-            {/* Attach */}
-            <label title="Attach image (PNG/JPG/GIF/WebP)" style={{
-              display:'inline-flex',alignItems:'center',gap:6,
-              border:'1px solid var(--border)',borderRadius:10,padding:'8px 10px',
-              cursor:'pointer',userSelect:'none', background:'#fff'
-            }}>
-              <span style={{ fontWeight:700, color:'var(--text)' }}>Attach</span> <span aria-hidden>📎</span>
-              <input type="file" accept={ACCEPT_TYPES.join(',')}
-                onChange={(e)=>{
-                  const file=e.target.files?.[0]
-                  if(!file) return
-                  if(!ACCEPT_TYPES.includes(file.type)){ setError('Unsupported file type'); return }
-                  if(file.size>MAX_BYTES){ setError('File too large (max 5MB)'); return }
-                  setAttachFile(file)
-                  setAttachPreview(URL.createObjectURL(file))
-                }}
-                style={{ display:'none' }}
-              />
-            </label>
-
-            {/* Preview */}
-            {attachPreview && (
-              <div style={{ display:'flex', alignItems:'center', gap:8, background:'var(--bg-soft)', border:'1px solid var(--border)', borderRadius:8, padding:'4px 6px' }}>
-                <img src={attachPreview} alt="preview" style={{ width:40, height:40, objectFit:'cover', borderRadius:6, border:'1px solid #ddd' }}/>
-                <button onClick={resetAttachment} style={chipBtn}>Remove</button>
-                {isUploading && <span style={{ fontSize:12, opacity:.7 }}>Uploading…</span>}
-              </div>
-            )}
-
-            {/* Input */}
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={e=>setDraft(e.target.value)}
-              onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send() } }}
-              placeholder={attachFile?'Add a caption…':'Type a message…'}
-              style={{ flex:1, padding:10, borderRadius:10, border:'1px solid var(--border)' }}
-            />
-            <button onClick={send} disabled={(!draft.trim()&&!attachFile)||isUploading} style={sendBtn}>Send</button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-const iconBtn={ width:28,height:28,border:'1px solid var(--border)',borderRadius:8,background:'#fff',cursor:'pointer',lineHeight:'24px',textAlign:'center' }
-const chipBtn={ padding:'6px 8px',border:'1px solid var(--border)',borderRadius:6,background:'#fff',cursor:'pointer' }
-const sendBtn={ padding:'8px 12px',border:'none',borderRadius:10,background:'var(--primary)',color:'#fff',fontWeight:700,cursor:'pointer' }
-
-export default function ChatDock(){
-  const me=useMe()
-  const [windows,setWindows]=useState([]) // {key,partner,minimized}
-
-  useEffect(()=>{
-    window.trymeChat={
-      open: async ({handle,user_id}={})=>{
-        if(!me){ window.location.href='/auth'; return }
-        let prof=null
-        if(user_id) prof=await fetchProfileByUserId(user_id)
-        else if(handle) prof=await fetchProfileByHandle(handle)
-        if(!prof?.user_id) return
-        setWindows(prev=>{
-          if(prev.find(w=>w.partner.user_id===prof.user_id)) return prev
-          return [...prev,{ key:`w-${prof.user_id}`, partner:prof, minimized:false }]
+        setWindows(wins => {
+          // de-duplicate by userId
+          if (wins.some(w => w.userId === next.userId)) return wins
+          return [next, ...wins].slice(0, 4) // keep up to 4 windows
         })
+
+        // Load perms + history
+        await refreshWindowPerms(prof.user_id)
+        await loadHistory(prof.user_id)
+      },
+      // optional: expose close-by-handle
+      close: ({ handle }) => {
+        setWindows(wins => wins.filter(w => w.handle !== handle))
       }
     }
-    return ()=>{ delete window.trymeChat }
-  },[me])
+    return () => { delete window.trymeChat }
+  }, [me])
 
-  function closeWindow(uid){ setWindows(prev=>prev.filter(w=>w.partner.user_id!==uid)) }
-  function toggleMinimize(uid){ setWindows(prev=>prev.map(w=>w.partner.user_id===uid?{...w,minimized:!w.minimized}:w)) }
+  async function refreshWindowPerms(partnerId) {
+    if (!me?.id || !partnerId) return
 
-  const vw = typeof window!=='undefined'?window.innerWidth:1200
-  const vh = typeof window!=='undefined'?window.innerHeight:800
+    // 1) Are we connected?
+    const { data: conns } = await supabase
+      .from('connections')
+      .select('user_1, user_2')
+      .or(`user_1.eq.${me.id},user_2.eq.${me.id}`)
+
+    const connected = (conns || []).some(
+      r => (r.user_1 === me.id && r.user_2 === partnerId) || (r.user_2 === me.id && r.user_1 === partnerId)
+    )
+
+    // 2) Is there any block either direction?
+    const { data: blocks } = await supabase
+      .from('blocks')
+      .select('blocker, blocked')
+      .or(`blocker.eq.${me.id},blocker.eq.${partnerId}`) // fetch both user's block lists (RLS shows only my blocks; that's fine)
+      // Note: due to RLS we only see my own "blocker" rows. That's enough to warn "You blocked this user".
+      // Server-side policy already prevents sends if either party blocked, so we still show a generic send failure banner if needed.
+
+    // Determine local flags
+    const iBlockedThem = (blocks || []).some(b => b.blocked === partnerId && b.blocker === me.id)
+    // We cannot see if THEY blocked US via select (RLS), but the server will reject sends;
+    // So we proactively warn if not connected; for block-by-them we catch error on send and set banner.
+
+    setWindows(wins => wins.map(w => {
+      if (w.userId !== partnerId) return w
+      if (iBlockedThem) {
+        return {
+          ...w,
+          canSend: false,
+          banner: { tone: 'danger', text: 'You have blocked this user. Unblock them from your Network to resume chatting.' }
+        }
+      }
+      if (!connected) {
+        return {
+          ...w,
+          canSend: false,
+          banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR to connect before chatting.' }
+        }
+      }
+      return { ...w, canSend: true, banner: null }
+    }))
+  }
+
+  async function loadHistory(partnerId) {
+    if (!me?.id || !partnerId) return
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, sender, recipient, body, created_at')
+      .or(`and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`)
+      .order('created_at', { ascending: true })
+    if (error) return
+    setWindows(wins => wins.map(w => w.userId === partnerId ? { ...w, messages: data || [] } : w))
+  }
+
+  async function sendMessage(partnerId) {
+    if (!me?.id) { alert('Please sign in.'); return }
+    const w = windows.find(x => x.userId === partnerId)
+    if (!w) return
+    if (!w.canSend) return // guarded by UI
+
+    const text = (w.input || '').trim()
+    if (!text) return
+    // optimistic add
+    const temp = {
+      id: `temp_${Date.now()}`,
+      sender: me.id,
+      recipient: partnerId,
+      body: text,
+      created_at: new Date().toISOString()
+    }
+    setWindows(wins => wins.map(x => x.userId === partnerId
+      ? { ...x, input: '', messages: [...x.messages, temp] }
+      : x
+    ))
+
+    // server insert (will fail if blocked by them; RLS denies insert)
+    const { error } = await supabase
+      .from('messages')
+      .insert({ sender: me.id, recipient: partnerId, body: text })
+
+    if (error) {
+      // Roll back optimistic append and show banner
+      setWindows(wins => wins.map(x => {
+        if (x.userId !== partnerId) return x
+        const msgs = x.messages.filter(m => m !== temp) // remove temp
+        let banner = x.banner
+        // If server says permission denied -> likely blocked by them (or not connected, but we check that earlier)
+        banner = { tone: 'danger', text: 'Message blocked. You may be blocked or not connected.' }
+        return { ...x, messages: msgs, canSend: false, banner }
+      }))
+    } else {
+      // success: reload to get real row (optional)
+      loadHistory(partnerId)
+    }
+  }
+
+  function closeWindow(partnerId) {
+    setWindows(wins => wins.filter(w => w.userId !== partnerId))
+    if (windows.length <= 1) setOpen(false)
+  }
+
+  // Basic styles
+  const dockStyle = useMemo(() => ({
+    position: 'fixed',
+    right: 16,
+    bottom: 16,
+    zIndex: 40,
+    display: open ? 'grid' : 'none',
+    gap: 12
+  }), [open])
+
   return (
-    <div style={{position:'fixed',inset:0,pointerEvents:'none',zIndex:9999}}>
-      {windows.map((win,idx)=>{
-        const left = Math.max(EDGE_GAP, vw - (DEF_W + EDGE_GAP) * (idx + 1))
-        const top  = Math.max(EDGE_GAP, vh - (DEF_H + EDGE_GAP + FOOTER_CLEAR))
-        return (
-          <div key={win.key} style={{position:'fixed',left,top,pointerEvents:'auto'}}>
-            <ChatWindow
-              me={me}
-              partner={win.partner}
-              minimized={win.minimized}
-              onClose={()=>closeWindow(win.partner.user_id)}
-              onMinimize={()=>toggleMinimize(win.partner.user_id)}
-              width={DEF_W}
-              height={DEF_H}
-            />
+    <>
+      {/* Minimal launcher (kept simple; elsewhere you may show a badge) */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            position: 'fixed', right: 16, bottom: 16, zIndex: 30,
+            background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
+            color: '#fff', border: 'none', borderRadius: 9999, padding: '12px 16px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 800, cursor: 'pointer'
+          }}
+          aria-label="Open messages"
+        >
+          Messages
+        </button>
+      )}
+
+      <div style={dockStyle}>
+        {windows.map(w => (
+          <div key={w.key} className="card" style={{ width: 320, padding: 0, overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px', borderBottom: '1px solid var(--border)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img
+                  src={w.avatar_url || 'https://via.placeholder.com/28?text=%F0%9F%91%A4'}
+                  alt=""
+                  style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+                />
+                <div style={{ fontWeight: 700 }}>{w.display_name}</div>
+              </div>
+              <button className="btn" onClick={() => closeWindow(w.userId)}>×</button>
+            </div>
+
+            {/* Banner */}
+            {w.banner && (
+              <div style={{
+                padding: '8px 12px',
+                fontSize: 12,
+                color: w.banner.tone === 'danger' ? '#b91c1c' : '#374151',
+                background: w.banner.tone === 'danger'
+                  ? 'color-mix(in oklab, #fee2e2, white 50%)'
+                  : 'color-mix(in oklab, var(--bg-soft), white 40%)',
+                borderBottom: '1px solid var(--border)'
+              }}>
+                {w.banner.text}
+              </div>
+            )}
+
+            {/* Messages */}
+            <div style={{ maxHeight: 260, overflowY: 'auto', padding: 12, display: 'grid', gap: 8 }}>
+              {w.messages.map(m => {
+                const mine = m.sender === me?.id
+                return (
+                  <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{
+                      background: mine ? 'var(--primary)' : '#f3f4f6',
+                      color: mine ? '#fff' : '#111827',
+                      borderRadius: 12,
+                      padding: '8px 10px',
+                      maxWidth: 220,
+                      wordBreak: 'break-word'
+                    }}>
+                      {m.body}
+                    </div>
+                  </div>
+                )
+              })}
+              {w.messages.length === 0 && (
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>No messages yet.</div>
+              )}
+            </div>
+
+            {/* Composer */}
+            <div style={{ borderTop: '1px solid var(--border)', padding: 8 }}>
+              <form onSubmit={(e)=>{ e.preventDefault(); sendMessage(w.userId) }} style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={w.input}
+                  onChange={e => setWindows(ws => ws.map(x => x.userId === w.userId ? { ...x, input: e.target.value } : x))}
+                  placeholder={w.canSend ? 'Type a message…' : 'Messaging disabled'}
+                  disabled={!w.canSend}
+                />
+                <button className="btn btn-primary" type="submit" disabled={!w.canSend}>Send</button>
+              </form>
+            </div>
           </div>
-        )
-      })}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
+
 
 
 
