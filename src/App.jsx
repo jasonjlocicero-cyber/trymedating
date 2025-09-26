@@ -3,6 +3,7 @@ import React from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
 import AppGuard from './components/AppGuard'
+import UserBadge from './components/UserBadge'
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -72,13 +73,13 @@ export default function App() {
             <Link to="/settings">Settings</Link>
             <Link to="/invite">Invite</Link>
             <Link to="/network">Network</Link>
-            {/* You can remove Onboarding from the nav now if you want */}
             <Link to="/onboarding">Onboarding</Link>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
             <Link to="/safety">Safety</Link>
           </nav>
+          <UserBadge />
         </div>
       </header>
 
