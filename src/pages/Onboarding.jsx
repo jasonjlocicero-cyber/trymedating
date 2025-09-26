@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
+import InterestsPicker from '../components/InterestsPicker'
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -15,30 +16,26 @@ export default function Onboarding() {
   const [bio, setBio] = useState('')
   const [publicProfile, setPublicProfile] = useState(true)
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [interests, setInterests] = useState([])
 
-  // ui state
+  // ui
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
-  // handle availability check
+  // handle availability
   const [checkingHandle, setCheckingHandle] = useState(false)
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
-  // normalize handle
   const normalizedHandle = useMemo(() =>
-    (handle || '')
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9_]/g, '')
-      .slice(0, 24)
+    (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, 24)
   , [handle])
 
-  // derived validity
   const handleTooShort = normalizedHandle.length > 0 && normalizedHandle.length < 3
-  const canSave = !!me?.id && !saving && !checkingHandle && !handleTaken && normalizedHandle.length >= 3
+  const interestsValid = Array.isArray(interests) && interests.length >= 1
+  const canSave = !!me?.id && !saving && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && interestsValid
 
   useEffect(() => {
     let alive = true
@@ -48,10 +45,9 @@ export default function Onboarding() {
       if (!user) { setError('Please sign in to continue.'); setLoading(false); return }
       setMe(user)
 
-      // Load existing profile, if any
       const { data: prof } = await supabase
         .from('profiles')
-        .select('user_id, handle, display_name, location, bio, public_profile, avatar_url')
+        .select('user_id, handle, display_name, location, bio, public_profile, avatar_url, interests')
         .eq('user_id', user.id)
         .maybeSingle()
 
@@ -62,9 +58,10 @@ export default function Onboarding() {
         setBio(prof.bio || '')
         setPublicProfile(!!prof.public_profile)
         setAvatarUrl(prof.avatar_url || '')
+        setInterests(Array.isArray(prof.interests) ? prof.interests : [])
       } else {
-        // New user: suggest handle from email
         setHandle(guessHandleFromEmail(user.email))
+        setInterests([])
       }
       setLoading(false)
     })()
@@ -80,7 +77,6 @@ export default function Onboarding() {
     setError(''); setNotice('')
 
     const h = normalizedHandle
-    // no handle, or too short → don't check
     if (!h || h.length < 3) {
       setHandleTaken(false)
       setCheckingHandle(false)
@@ -101,23 +97,22 @@ export default function Onboarding() {
         setCheckingHandle(false)
         return
       }
-      // Taken if any row exists with a different user_id
       setHandleTaken((data || []).some(r => r.user_id !== me.id))
       setCheckingHandle(false)
-    }, 400) // debounce 400ms
+    }, 400)
 
     return () => { if (checkTimer.current) clearTimeout(checkTimer.current) }
   }, [normalizedHandle, me])
 
   async function handleSubmit(e) {
     e.preventDefault()
-    setError('')
-    setNotice('')
+    setError(''); setNotice('')
 
     if (!me?.id) { setError('Please sign in first.'); return }
     if (normalizedHandle.length < 3) { setError('Handle must be at least 3 characters.'); return }
     if (checkingHandle) { setError('Checking handle availability…'); return }
-    if (handleTaken) { setError('That handle is taken. Please choose another.'); return }
+    if (handleTaken) { setError('That handle is taken.'); return }
+    if (!interestsValid) { setError('Please add at least one interest.'); return }
 
     setSaving(true)
 
@@ -128,7 +123,8 @@ export default function Onboarding() {
       location: location?.trim() || null,
       bio: bio?.trim() || null,
       public_profile: publicProfile,
-      avatar_url: avatarUrl || null
+      avatar_url: avatarUrl || null,
+      interests: interests
     }
 
     const { error: upErr } = await supabase
@@ -158,17 +154,16 @@ export default function Onboarding() {
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
-      {/* Tiny step header */}
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Step 1 of 1</div>
       <h1 style={{ marginTop: 0, marginBottom: 8 }}>
         <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Finish</span>{' '}
         <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Setting Up</span>
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-        Add a photo and your details. You can change these anytime in Settings.
+        Add a photo, choose a handle, and pick a few interests.
       </p>
 
-      {/* Avatar uploader */}
+      {/* Avatar */}
       <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
 
       {error && (
@@ -219,57 +214,40 @@ export default function Onboarding() {
         {/* Display name */}
         <div>
           <label style={{ fontWeight: 700 }}>Display name</label>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="How you want to appear"
-          />
+          <input value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="How you want to appear" />
         </div>
 
         {/* Location */}
         <div>
           <label style={{ fontWeight: 700 }}>Location</label>
-          <input
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            placeholder="City, State (optional)"
-          />
+          <input value={location} onChange={(e)=>setLocation(e.target.value)} placeholder="City, State (optional)" />
         </div>
 
         {/* Bio */}
         <div>
           <label style={{ fontWeight: 700 }}>Short bio</label>
-          <textarea
-            rows={3}
-            maxLength={300}
-            value={bio}
-            onChange={(e) => setBio(e.target.value)}
-            placeholder="A sentence or two about you (optional)"
-            style={{ resize: 'vertical' }}
-          />
+          <textarea rows={3} maxLength={300} value={bio} onChange={(e)=>setBio(e.target.value)} placeholder="A sentence or two (optional)" style={{ resize:'vertical' }} />
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
             {bio.length > 240 ? `${bio.length}/300` : 'Up to 300 characters.'}
           </div>
         </div>
 
-        {/* Public profile toggle */}
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input
-            id="publicProfile"
-            type="checkbox"
-            checked={publicProfile}
-            onChange={(e) => setPublicProfile(e.target.checked)}
-          />
-          <label htmlFor="publicProfile" style={{ userSelect: 'none' }}>
+        {/* Interests */}
+        <InterestsPicker value={interests} onChange={setInterests} max={8} />
+
+        {/* Public toggle */}
+        <div className="card" style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <input id="publicProfile" type="checkbox" checked={publicProfile} onChange={(e)=>setPublicProfile(e.target.checked)} />
+          <label htmlFor="publicProfile" style={{ userSelect:'none' }}>
             Make my profile public (anyone with my link can view)
           </label>
         </div>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
           <button className="btn btn-primary" type="submit" disabled={!canSave}>
             {saving ? 'Saving…' : 'Save & Continue'}
           </button>
-          <button className="btn" type="button" onClick={() => nav('/profile')} disabled={saving}>
+          <button className="btn" type="button" onClick={()=>nav('/profile')} disabled={saving}>
             Skip for now
           </button>
         </div>
@@ -278,9 +256,10 @@ export default function Onboarding() {
   )
 }
 
-// helpers
 function guessHandleFromEmail(email) {
   if (!email) return ''
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
+
+
