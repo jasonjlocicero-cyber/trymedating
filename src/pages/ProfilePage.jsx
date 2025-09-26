@@ -1,7 +1,7 @@
 // src/pages/ProfilePage.jsx
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 export default function ProfilePage() {
   const [me, setMe] = useState(null)
@@ -58,7 +58,10 @@ export default function ProfilePage() {
         <h1 style={{ margin: 0 }}>
           <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Profile</span>
         </h1>
-        <button className="btn" onClick={handleSignOut}>Sign Out</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Link className="btn" to="/settings">Settings</Link>
+          <button className="btn" onClick={handleSignOut}>Sign Out</button>
+        </div>
       </div>
 
       <div className="card" style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
@@ -81,6 +84,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
