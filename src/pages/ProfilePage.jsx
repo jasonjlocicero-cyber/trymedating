@@ -50,7 +50,6 @@ export default function ProfilePage() {
   }
 
   const inviteUrl = `${window.location.origin}/connect?handle=${profile.handle}`
-  // zero-dependency QR image (hosted generator)
   const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(inviteUrl)}`
 
   return (
@@ -77,17 +76,30 @@ export default function ProfilePage() {
           style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover' }}
         />
         <div>
-          <h2 style={{ margin: '0 0 8px' }}>{profile.display_name || 'Unnamed user'}</h2>
-          <div style={{ color: 'var(--muted)', marginBottom: 8 }}>@{profile.handle}</div>
-          {profile.location && <div style={{ marginBottom: 8 }}>{profile.location}</div>}
-          {profile.bio && <p style={{ margin: 0 }}>{profile.bio}</p>}
+          {/* Stronger readable text */}
+          <h2 style={{ margin: '0 0 8px', color: 'var(--text)' }}>
+            {profile.display_name || 'Unnamed user'}
+          </h2>
+          <div style={{ marginBottom: 8, color: 'var(--text)' }}>
+            @{profile.handle}
+          </div>
+          {profile.location && (
+            <div style={{ marginBottom: 8, color: 'var(--text)' }}>
+              {profile.location}
+            </div>
+          )}
+          {profile.bio && (
+            <p style={{ margin: 0, color: 'var(--text)' }}>
+              {profile.bio}
+            </p>
+          )}
         </div>
       </div>
 
-      {/* QR Invite Code (always visible for the owner) */}
+      {/* QR Invite Code */}
       <div className="card" style={{ marginTop: 16, textAlign: 'center' }}>
-        <h3 style={{ marginTop: 0 }}>Your Invite QR Code</h3>
-        <p style={{ color: 'var(--muted)', marginBottom: 12 }}>
+        <h3 style={{ marginTop: 0, color: 'var(--text)' }}>Your Invite QR Code</h3>
+        <p style={{ marginBottom: 12, color: 'var(--text)' }}>
           Share this QR code with people you want to connect with.
         </p>
         <div style={{ background: '#fff', display: 'inline-block', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
@@ -114,11 +126,14 @@ export default function ProfilePage() {
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
-        <div><strong>Public profile:</strong> {profile.public_profile ? 'Yes' : 'No'}</div>
+        <div style={{ color: 'var(--text)' }}>
+          <strong>Public profile:</strong> {profile.public_profile ? 'Yes' : 'No'}
+        </div>
       </div>
     </div>
   )
 }
+
 
 
 
