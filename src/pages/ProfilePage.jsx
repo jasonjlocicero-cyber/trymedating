@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { Link, useNavigate } from 'react-router-dom'
-import QRCode from 'react-qr-code'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState(null)
@@ -51,6 +50,8 @@ export default function ProfilePage() {
   }
 
   const inviteUrl = `${window.location.origin}/connect?handle=${profile.handle}`
+  // zero-dependency QR image (hosted generator)
+  const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(inviteUrl)}`
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 720 }}>
@@ -90,9 +91,15 @@ export default function ProfilePage() {
           Share this QR code with people you want to connect with.
         </p>
         <div style={{ background: '#fff', display: 'inline-block', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
-          <QRCode value={inviteUrl} size={160} />
+          <img
+            src={qrImg}
+            alt="Invite QR"
+            width={200}
+            height={200}
+            style={{ display: 'block' }}
+          />
         </div>
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button
             className="btn"
             onClick={() => { navigator.clipboard.writeText(inviteUrl) }}
@@ -100,6 +107,9 @@ export default function ProfilePage() {
           >
             Copy Invite Link
           </button>
+          <a className="btn" href={qrImg} download={`TryMeDating-QR-${profile.handle}.png`}>
+            Download QR PNG
+          </a>
         </div>
       </div>
 
@@ -109,6 +119,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
