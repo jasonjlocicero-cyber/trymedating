@@ -9,7 +9,8 @@ import { supabase } from '../lib/supabaseClient'
  * - Empty state when open with no chats.
  * - Guardrails: only send if connected and not blocked (server RLS also enforces).
  * - Report User: inline form (submit_report RPC).
- * - NEW: If you blocked the user, show Unblock button and re-check permissions after unblocking.
+ * - Unblock button if you blocked them.
+ * - NEW: 2s cooldown per conversation to prevent rapid-fire sends.
  * - Public API: window.trymeChat.open({ handle }), window.trymeChat.closeAll()
  */
 
@@ -56,7 +57,10 @@ export default function ChatDock() {
           input: '',
           canSend: false,
           banner: { tone: 'info', text: 'Checking permissions…' },
-          iBlockedThem: false, // NEW
+          iBlockedThem: false,
+          // Rate limit fields
+          lastSentAt: 0,
+          cooldownMs: 2000,
           // report UI
           reportOpen: false,
           reportReason: '',
@@ -91,7 +95,7 @@ export default function ChatDock() {
       r => (r.user_1 === me.id && r.user_2 === partnerId) || (r.user_2 === me.id && r.user_1 === partnerId)
     )
 
-    // 2) check if I blocked them (RLS: I can only see my own blocks)
+    // 2) check if I blocked them
     const { data: myBlocks } = await supabase
       .from('blocks')
       .select('blocked')
@@ -139,15 +143,35 @@ export default function ChatDock() {
     const text = (w.input || '').trim()
     if (!text) return
 
+    // RATE LIMIT: 2s between sends per conversation
+    const now = Date.now()
+    const elapsed = now - (w.lastSentAt || 0)
+    if (elapsed < w.cooldownMs) {
+      // show a soft hint in the banner area
+      const waitLeft = Math.ceil((w.cooldownMs - elapsed) / 1000)
+      setWindows(ws => ws.map(x => x.userId === partnerId
+        ? { ...x, banner: { tone: 'info', text: `Please wait ${waitLeft}s before sending another message.` } }
+        : x
+      ))
+      // auto-clear hint after a moment
+      setTimeout(() => {
+        setWindows(ws => ws.map(x => x.userId === partnerId
+          ? { ...x, banner: null }
+          : x
+        ))
+      }, 1500)
+      return
+    }
+
     const temp = {
-      id: `temp_${Date.now()}`,
+      id: `temp_${now}`,
       sender: me.id,
       recipient: partnerId,
       body: text,
       created_at: new Date().toISOString()
     }
     setWindows(wins => wins.map(x => x.userId === partnerId
-      ? { ...x, input: '', messages: [...x.messages, temp] }
+      ? { ...x, input: '', messages: [...x.messages, temp], lastSentAt: now }
       : x
     ))
 
@@ -159,7 +183,7 @@ export default function ChatDock() {
       // remove temp + show banner
       setWindows(wins => wins.map(x => {
         if (x.userId !== partnerId) return x
-        const msgs = x.messages.filter(m => m !== temp)
+        const msgs = x.messages.filter(m => m.id !== temp.id)
         return {
           ...x,
           messages: msgs,
@@ -208,17 +232,12 @@ export default function ChatDock() {
     }
   }
 
-  // NEW: Unblock handler (only affects rows where *you* are blocker)
+  // Unblock handler
   async function unblockUser(partnerId) {
     if (!me?.id) return
     const ok = confirm('Unblock this user? They will not be able to message you unless you connect again.')
     if (!ok) return
-    await supabase
-      .from('blocks')
-      .delete()
-      .eq('blocker', me.id)
-      .eq('blocked', partnerId)
-    // Re-check permissions/banners
+    await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', partnerId)
     await refreshWindowPerms(partnerId)
   }
 
@@ -298,7 +317,6 @@ export default function ChatDock() {
                 <div style={{ fontWeight: 700 }}>{w.display_name}</div>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
-                {/* If I blocked them, show Unblock button */}
                 {w.iBlockedThem && (
                   <button className="btn" onClick={() => unblockUser(w.userId)}>Unblock</button>
                 )}
@@ -380,6 +398,7 @@ export default function ChatDock() {
                 />
                 <button className="btn btn-primary" type="submit" disabled={!w.canSend}>Send</button>
               </form>
+              {/* Cooldown hint (subtle): we show it only when banner is the cooldown message; no extra UI here */}
             </div>
           </div>
         ))}
@@ -387,6 +406,7 @@ export default function ChatDock() {
     </>
   )
 }
+
 
 
 
