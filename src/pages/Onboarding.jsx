@@ -18,7 +18,7 @@ export default function Onboarding() {
   const [avatarUrl, setAvatarUrl] = useState('')
   const [interests, setInterests] = useState([])
 
-  // ui
+  // ui state
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -261,5 +261,6 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
+
 
 
