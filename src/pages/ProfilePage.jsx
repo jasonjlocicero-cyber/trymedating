@@ -59,6 +59,11 @@ export default function ProfilePage() {
           <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Profile</span>
         </h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          {profile.public_profile && (
+            <Link className="btn" to={`/u/${profile.handle}`} target="_blank">
+              View Public Profile
+            </Link>
+          )}
           <Link className="btn" to="/settings">Settings</Link>
           <button className="btn" onClick={handleSignOut}>Sign Out</button>
         </div>
@@ -84,6 +89,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
