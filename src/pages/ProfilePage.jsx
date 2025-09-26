@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { Link, useNavigate } from 'react-router-dom'
+import QRCode from 'qrcode.react'
 
 export default function ProfilePage() {
   const [me, setMe] = useState(null)
@@ -81,6 +82,22 @@ export default function ProfilePage() {
           {profile.location && <div style={{ marginBottom: 8 }}>{profile.location}</div>}
           {profile.bio && <p style={{ margin: 0 }}>{profile.bio}</p>}
         </div>
+      </div>
+
+      {/* QR Invite Code (always visible for the owner) */}
+      <div className="card" style={{ marginTop: 16, textAlign: 'center' }}>
+        <h3 style={{ marginTop: 0 }}>Your Invite QR Code</h3>
+        <p style={{ color: 'var(--muted)', marginBottom: 12 }}>
+          Share this QR code with people you want to connect with.
+        </p>
+        <QRCode
+          value={`${window.location.origin}/connect?handle=${profile.handle}`}
+          size={160}
+          bgColor="#ffffff"
+          fgColor="#000000"
+          level="H"
+          includeMargin={true}
+        />
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
