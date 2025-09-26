@@ -1,190 +1,106 @@
-/* ===== TryMeDating Base Styles ===== */
-:root{
-  --bg: #ffffff;
-  --bg-soft: #f7f7f9;
-  --text: #1f2937;
-  --muted: #6b7280;
-  --border: #e5e7eb;
+/* src/index.css */
 
-  /* Brand palette from logo */
-  --primary: #e86f61;        /* coral (for Dating) */
-  --primary-600: #d65d50;    /* darker coral */
-  --secondary: #2a9d8f;      /* teal (for TryMe) */
-  --secondary-600: #238379;  /* darker teal */
-  --danger: #dc2626;         /* keep red for destructive actions */
-
-  --radius: 12px;
-  --shadow: 0 8px 24px rgba(0,0,0,.08);
+/* Brand + global colors */
+:root {
+  --primary: #008080;    /* teal */
+  --secondary: #ff6f61;  /* coral */
+  --muted: #444;         /* darker gray for readability */
+  --border: #ddd;
+  --bg: #fafafa;
+  --card-bg: #fff;
+  --text: #111;
 }
 
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg: #0b1020;
-    --bg-soft: #0f162e;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #1f2a44;
-    --shadow: 0 8px 24px rgba(0,0,0,.35);
-  }
-}
-
-/* Typography & layout */
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; }
-body{
+/* Reset + base */
+body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  background: var(--bg);
   color: var(--text);
-  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%);
+  line-height: 1.5;
 }
 
-.container{
-  width: 100%;
-  max-width: 1040px;
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button, input, textarea {
+  font: inherit;
+}
+
+/* Layout helpers */
+.container {
+  max-width: 960px;
   margin: 0 auto;
   padding: 0 16px;
 }
 
-h1,h2,h3{ margin: 0 0 .5rem; line-height: 1.15; }
-p{ margin: .5rem 0 1rem; color: var(--muted); }
-
-/* Header & footer */
-header{
-  position: sticky;
-  top: 0;
-  background: color-mix(in oklab, var(--bg), #fff 20%);
-  backdrop-filter: saturate(1.2) blur(6px);
-  z-index: 50;
-}
-header a{ color: var(--text); text-decoration: none; }
-header nav a{
-  padding: 6px 10px;
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  line-height: 1;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
-header nav a:hover{
-  background: var(--bg-soft);
-}
-
-footer{
-  color: var(--muted);
-  background: color-mix(in oklab, var(--bg), #000 2%);
-}
-
-/* Links */
-a{ color: var(--secondary); text-decoration: none; }
-a:hover{ text-decoration: underline; }
 
 /* Buttons */
-.btn{
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
+.btn {
+  display: inline-block;
+  padding: 8px 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 6px;
   background: #fff;
-  color: var(--text);
   cursor: pointer;
-  text-decoration: none;
-  transition: transform .04s ease, box-shadow .2s ease, background .2s ease;
-  box-shadow: var(--shadow);
+  transition: background 0.15s;
 }
-.btn:hover{ transform: translateY(-1px); }
-.btn:active{ transform: translateY(0); }
-.btn:disabled{ opacity: .6; cursor: not-allowed; }
 
-.btn-primary{
+.btn:hover {
+  background: #f5f5f5;
+}
+
+.btn-primary {
   background: var(--primary);
+  border-color: var(--primary);
   color: #fff;
-  border-color: color-mix(in oklab, var(--primary), #000 8%);
 }
-.btn-primary:hover{ background: var(--primary-600); }
 
-.btn-secondary{
+.btn-primary:hover {
+  background: #006666;
+}
+
+.btn-secondary {
   background: var(--secondary);
+  border-color: var(--secondary);
   color: #fff;
-  border-color: color-mix(in oklab, var(--secondary), #000 8%);
-}
-.btn-secondary:hover{ background: var(--secondary-600); }
-
-.btn-danger{
-  background: var(--danger);
-  color: #fff;
-  border-color: color-mix(in oklab, var(--danger), #000 8%);
 }
 
-/* Forms */
-input, select, textarea{
-  font: inherit;
-  color: var(--text);
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  outline: none;
+.btn-secondary:hover {
+  background: #e85c50;
+}
+
+/* Form elements */
+input, textarea {
   width: 100%;
-}
-input::placeholder, textarea::placeholder{ color: color-mix(in oklab, var(--muted), #000 10%); }
-input:focus, select:focus, textarea:focus{
-  border-color: color-mix(in oklab, var(--primary), #000 10%);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary), #fff 80%);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
 }
 
-/* Cards & panels */
-.card{
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 16px;
+textarea {
+  resize: vertical;
 }
 
-/* Badges */
-.badge{
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 8px;
-  font-size: 12px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+/* Utility text */
+.muted {
   color: var(--muted);
-  background: var(--bg-soft);
+  font-size: 0.9em;
 }
 
-/* Utilities */
-.flex{ display: flex; }
-.flex-col{ flex-direction: column; }
-.items-center{ align-items: center; }
-.justify-between{ justify-content: space-between; }
-.gap-8{ gap: 8px; }
-.gap-12{ gap: 12px; }
-.mt-12{ margin-top: 12px; }
-.mt-24{ margin-top: 24px; }
-.text-center{ text-align: center; }
-
-/* ChatDock small tweaks (your ChatDock uses inline styles; these just polish) */
-.chatdock-window img{
-  image-rendering: auto;
-  -webkit-font-smoothing: antialiased;
-  border-radius: 10px;
-}
-.chatdock-attach-label{
-  box-shadow: var(--shadow);
-}
-
-/* ===== MessageLauncher helpers ===== */
-@keyframes ml-pulse {
-  0% { box-shadow: 0 18px 40px rgba(42,157,143,.35); transform: translateZ(0) }
-  50% { box-shadow: 0 22px 48px rgba(79,70,229,.35); }
-  100% { box-shadow: 0 18px 40px rgba(42,157,143,.35); }
-}
-.ml-pulse {
-  animation: ml-pulse 2.4s ease-in-out infinite;
-}
-
-/* Hide the "Messages" pill label on small screens so the FAB stays compact */
-@media (max-width: 768px){
-  .ml-label { display: none; }
-}
