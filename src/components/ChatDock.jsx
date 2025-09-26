@@ -17,7 +17,7 @@ export default function ChatDock() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
-  // auth
+  // --- auth state ---
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -30,19 +30,19 @@ export default function ChatDock() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // Public API
+  // --- public API: open/close chats by handle ---
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle }) => {
         if (!handle) return
         setOpen(true)
 
-        const { data: prof } = await supabase
+        const { data: prof, error } = await supabase
           .from('profiles')
           .select('user_id, handle, display_name, avatar_url')
           .eq('handle', handle.toLowerCase())
           .maybeSingle()
-        if (!prof?.user_id) { alert('User not found'); return }
+        if (error || !prof?.user_id) { alert('User not found'); return }
 
         const next = {
           key: `u:${prof.user_id}`,
@@ -55,6 +55,7 @@ export default function ChatDock() {
           canSend: false,
           banner: { tone: 'info', text: 'Checking permissions…' },
           iBlockedThem: false,
+          isTyping: false,              // NEW
           lastSentAt: 0,
           cooldownMs: 2000,
           // report UI
@@ -79,6 +80,26 @@ export default function ChatDock() {
     return () => { delete window.trymeChat }
   }, [me])
 
+  // --- typing indicator realtime channel (broadcast) ---
+  useEffect(() => {
+    if (!me?.id) return
+    const channel = supabase.channel('typing')
+
+    channel.on('broadcast', { event: 'typing' }, payload => {
+      const { from, to } = payload
+      if (to !== me.id) return
+      setWindows(ws => ws.map(w => w.userId === from ? { ...w, isTyping: true } : w))
+      // auto-clear after 3s
+      setTimeout(() => {
+        setWindows(ws => ws.map(w => w.userId === from ? { ...w, isTyping: false } : w))
+      }, 3000)
+    })
+
+    channel.subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [me])
+
+  // --- permissions (connection & blocks) ---
   async function refreshWindowPerms(partnerId) {
     if (!me?.id || !partnerId) return
     const { data: conns } = await supabase
@@ -103,6 +124,7 @@ export default function ChatDock() {
     }))
   }
 
+  // --- load message history ---
   async function loadHistory(partnerId) {
     if (!me?.id || !partnerId) return
     const { data } = await supabase
@@ -113,10 +135,12 @@ export default function ChatDock() {
     setWindows(wins => wins.map(w => w.userId === partnerId ? { ...w, messages: data || [] } : w))
   }
 
+  // --- send message (cooldown + length cap) ---
   async function sendMessage(partnerId) {
     if (!me?.id) { alert('Please sign in.'); return }
     const w = windows.find(x => x.userId === partnerId)
     if (!w || !w.canSend) return
+
     const text = (w.input || '').trim()
     if (!text) return
     if (text.length > 500) {
@@ -143,6 +167,7 @@ export default function ChatDock() {
     }
   }
 
+  // --- unblock / close / report helpers ---
   async function unblockUser(partnerId) {
     if (!me?.id) return
     const ok = confirm('Unblock this user? They will not be able to message you unless you connect again.')
@@ -150,11 +175,9 @@ export default function ChatDock() {
     await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', partnerId)
     await refreshWindowPerms(partnerId)
   }
-
   function closeWindow(id) { setWindows(wins => wins.filter(w => w.userId !== id)) }
   function toggleReport(id, open) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, reportOpen: open, reportNotice: '', reportError: '' } : w)) }
   function setReportField(id, key, val) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, [key]: val } : w)) }
-
   async function submitReport(partnerId) {
     if (!me?.id) { alert('Please sign in.'); return }
     const w = windows.find(x => x.userId === partnerId)
@@ -183,16 +206,13 @@ export default function ChatDock() {
     gap: DOCK_GAP
   }), [open])
 
-  // Place the Close FAB so it doesn't overlap the dock:
-  // - normal: to the LEFT of the rightmost chat column (card width + gap)
-  // - compact screens: above the dock (to avoid covering inputs)
   const closeFabStyle = useMemo(() => {
     if (!open) return null
     if (isCompact) {
       return {
         position: 'fixed',
         right: 16,
-        bottom: 16 + 56, // sit just above the dock area
+        bottom: 16 + 56,
         zIndex: 41,
         background: '#111827', color: '#fff',
         border: 'none', borderRadius: 9999, padding: '10px 14px',
@@ -201,7 +221,7 @@ export default function ChatDock() {
     }
     return {
       position: 'fixed',
-      right: 16 + CARD_WIDTH + DOCK_GAP, // shift left of the dock
+      right: 16 + CARD_WIDTH + DOCK_GAP,
       bottom: 16,
       zIndex: 41,
       background: '#111827', color: '#fff',
@@ -277,27 +297,6 @@ export default function ChatDock() {
               </div>
             )}
 
-            {/* Report panel */}
-            {w.reportOpen && (
-              <div style={{ padding: 12, borderBottom: '1px solid var(--border)' }}>
-                {w.reportNotice && <div style={{ color: 'var(--secondary)', marginBottom: 6 }}>{w.reportNotice}</div>}
-                {w.reportError && <div style={{ color: '#b91c1c', marginBottom: 6 }}>{w.reportError}</div>}
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Report this user</div>
-                <textarea
-                  rows={3}
-                  placeholder="Describe what happened…"
-                  value={w.reportReason}
-                  onChange={(e)=>setReportField(w.userId, 'reportReason', e.target.value)}
-                />
-                <div style={{ display:'flex', gap: 8, marginTop: 8 }}>
-                  <button className="btn btn-primary" disabled={w.reportBusy} onClick={() => submitReport(w.userId)}>
-                    {w.reportBusy ? 'Submitting…' : 'Submit report'}
-                  </button>
-                  <button className="btn" onClick={() => toggleReport(w.userId, false)}>Cancel</button>
-                </div>
-              </div>
-            )}
-
             {/* Messages */}
             <div style={{ maxHeight: 260, overflowY: 'auto', padding: 12, display: 'grid', gap: 8 }}>
               {w.messages.map(m => {
@@ -320,6 +319,13 @@ export default function ChatDock() {
               {w.messages.length === 0 && (
                 <div style={{ color: 'var(--muted)', fontSize: 12 }}>No messages yet.</div>
               )}
+
+              {/* Typing indicator */}
+              {w.isTyping && (
+                <div style={{ color: 'var(--muted)', fontSize: 12, marginLeft: 8 }}>
+                  {w.display_name} is typing…
+                </div>
+              )}
             </div>
 
             {/* Composer */}
@@ -329,7 +335,18 @@ export default function ChatDock() {
                   rows={1}
                   maxLength={500}
                   value={w.input}
-                  onChange={e => setWindows(ws => ws.map(x => x.userId === w.userId ? { ...x, input: e.target.value } : x))}
+                  onChange={e => {
+                    const val = e.target.value
+                    setWindows(ws => ws.map(x => x.userId === w.userId ? { ...x, input: val } : x))
+                    // broadcast typing
+                    if (me?.id) {
+                      supabase.channel('typing').send({
+                        type: 'broadcast',
+                        event: 'typing',
+                        payload: { from: me.id, to: w.userId }
+                      })
+                    }
+                  }}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
