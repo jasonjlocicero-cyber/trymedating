@@ -15,6 +15,7 @@ import Safety from './pages/Safety'
 import InviteQR from './pages/InviteQR'
 import Connect from './pages/Connect'
 import Network from './pages/Network'
+import Onboarding from './pages/Onboarding'
 
 function Home() {
   return (
@@ -62,11 +63,12 @@ export default function App() {
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
-          <nav style={{ display: 'flex', gap: 10 }}>
+          <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <Link to="/profile">Profile</Link>
             <Link to="/settings">Settings</Link>
             <Link to="/invite">Invite</Link>
             <Link to="/network">Network</Link>
+            <Link to="/onboarding">Onboarding</Link>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
@@ -89,6 +91,7 @@ export default function App() {
           <Route path="/invite" element={<InviteQR />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/network" element={<Network />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -106,7 +109,7 @@ export default function App() {
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
           </div>
-          <nav style={{ display: 'flex', gap: 12 }}>
+          <nav style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
