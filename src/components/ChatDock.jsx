@@ -6,14 +6,15 @@ import { supabase } from '../lib/supabaseClient'
 /**
  * ChatDock
  * - Floating launcher opens a dock.
- * - If no chats are open, we now show an EMPTY STATE card with guidance + Close button.
- * - Only allows sending when connected and not blocked (server RLS also enforces).
- * - Exposes window.trymeChat.open({ handle }) for deep links from elsewhere.
+ * - Empty state when open with no chats.
+ * - Guardrails: only send if connected and not blocked (server RLS also enforces).
+ * - Report User: small inline form per conversation; calls RPC submit_report().
+ * - Public API: window.trymeChat.open({ handle }), window.trymeChat.closeAll()
  */
 
 export default function ChatDock() {
   const [me, setMe] = useState(null)
-  const [windows, setWindows] = useState([]) // [{key,userId,handle,display_name,avatar_url,messages,input,canSend,banner}]
+  const [windows, setWindows] = useState([]) // array of window models
   const [open, setOpen] = useState(false)
 
   // auth
@@ -29,7 +30,7 @@ export default function ChatDock() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // Public API for opening a conversation by handle
+  // Public API for opening/closing chats
   useEffect(() => {
     window.trymeChat = {
       open: async ({ handle }) => {
@@ -54,6 +55,13 @@ export default function ChatDock() {
           input: '',
           canSend: false,
           banner: { tone: 'info', text: 'Checking permissions…' },
+          // report UI
+          reportOpen: false,
+          reportReason: '',
+          reportContext: 'chat',
+          reportBusy: false,
+          reportNotice: '',
+          reportError: ''
         }
 
         setWindows(wins => {
@@ -81,28 +89,20 @@ export default function ChatDock() {
       r => (r.user_1 === me.id && r.user_2 === partnerId) || (r.user_2 === me.id && r.user_1 === partnerId)
     )
 
-    // 2) check if I blocked them (RLS lets me see my own blocks)
+    // 2) check if I blocked them (RLS: I can only see my own blocks)
     const { data: myBlocks } = await supabase
       .from('blocks')
-      .select('blocker, blocked')
+      .select('blocked')
       .eq('blocker', me.id)
     const iBlockedThem = (myBlocks || []).some(b => b.blocked === partnerId)
 
     setWindows(wins => wins.map(w => {
       if (w.userId !== partnerId) return w
       if (iBlockedThem) {
-        return {
-          ...w,
-          canSend: false,
-          banner: { tone: 'danger', text: 'You have blocked this user. Unblock them from your Network to resume chatting.' }
-        }
+        return { ...w, canSend: false, banner: { tone: 'danger', text: 'You have blocked this user. Unblock them from your Network to resume chatting.' } }
       }
       if (!connected) {
-        return {
-          ...w,
-          canSend: false,
-          banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR to connect before chatting.' }
-        }
+        return { ...w, canSend: false, banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR to connect before chatting.' } }
       }
       return { ...w, canSend: true, banner: null }
     }))
@@ -122,8 +122,7 @@ export default function ChatDock() {
   async function sendMessage(partnerId) {
     if (!me?.id) { alert('Please sign in.'); return }
     const w = windows.find(x => x.userId === partnerId)
-    if (!w) return
-    if (!w.canSend) return
+    if (!w || !w.canSend) return
 
     const text = (w.input || '').trim()
     if (!text) return
@@ -165,11 +164,43 @@ export default function ChatDock() {
     setWindows(wins => wins.filter(w => w.userId !== partnerId))
   }
 
+  // Report handlers
+  function toggleReport(partnerId, open) {
+    setWindows(wins => wins.map(w => w.userId === partnerId ? { ...w, reportOpen: open, reportNotice: '', reportError: '' } : w))
+  }
+  function setReportField(partnerId, key, val) {
+    setWindows(wins => wins.map(w => w.userId === partnerId ? { ...w, [key]: val } : w))
+  }
+  async function submitReport(partnerId) {
+    if (!me?.id) { alert('Please sign in.'); return }
+    const w = windows.find(x => x.userId === partnerId)
+    if (!w) return
+    const reason = (w.reportReason || '').trim()
+    if (!reason) {
+      setWindows(wins => wins.map(x => x.userId === partnerId ? { ...x, reportError: 'Please describe the issue.' } : x))
+      return
+    }
+    setWindows(wins => wins.map(x => x.userId === partnerId ? { ...x, reportBusy: true, reportError: '', reportNotice: '' } : x))
+    const { error } = await supabase.rpc('submit_report', {
+      p_reported: partnerId,
+      p_reason: reason,
+      p_context: w.reportContext || 'chat'
+    })
+    if (error) {
+      setWindows(wins => wins.map(x => x.userId === partnerId ? { ...x, reportBusy: false, reportError: error.message || 'Could not submit report.' } : x))
+    } else {
+      setWindows(wins => wins.map(x => x.userId === partnerId
+        ? { ...x, reportBusy: false, reportNotice: 'Report submitted. Thank you.', reportReason: '', reportOpen: false }
+        : x
+      ))
+    }
+  }
+
   // styles
   const dockStyle = useMemo(() => ({
     position: 'fixed',
     right: 16,
-    bottom: 16 + 56, // leave room for launcher/close fab
+    bottom: 16 + 56,
     zIndex: 40,
     display: open ? 'grid' : 'none',
     gap: 12
@@ -193,7 +224,7 @@ export default function ChatDock() {
         </button>
       ) : (
         <button
-          onClick={() => { setOpen(false) }}
+          onClick={() => setOpen(false)}
           style={{
             position: 'fixed', right: 16, bottom: 16, zIndex: 41,
             background: '#111827', color: '#fff',
@@ -208,7 +239,7 @@ export default function ChatDock() {
       )}
 
       <div style={dockStyle}>
-        {/* EMPTY STATE when dock is open but no chats yet */}
+        {/* EMPTY STATE */}
         {open && windows.length === 0 && (
           <div className="card" style={{ width: 320 }}>
             <div style={{ fontWeight: 800, marginBottom: 6 }}>Messages</div>
@@ -224,7 +255,7 @@ export default function ChatDock() {
           </div>
         )}
 
-        {/* Open chat windows */}
+        {/* CHAT WINDOWS */}
         {windows.map(w => (
           <div key={w.key} className="card" style={{ width: 320, padding: 0, overflow: 'hidden' }}>
             {/* Header */}
@@ -240,7 +271,12 @@ export default function ChatDock() {
                 />
                 <div style={{ fontWeight: 700 }}>{w.display_name}</div>
               </div>
-              <button className="btn" onClick={() => closeWindow(w.userId)}>×</button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn" onClick={() => toggleReport(w.userId, !w.reportOpen)}>
+                  {w.reportOpen ? 'Cancel' : 'Report'}
+                </button>
+                <button className="btn" onClick={() => closeWindow(w.userId)}>×</button>
+              </div>
             </div>
 
             {/* Banner */}
@@ -255,6 +291,27 @@ export default function ChatDock() {
                 borderBottom: '1px solid var(--border)'
               }}>
                 {w.banner.text}
+              </div>
+            )}
+
+            {/* Report panel */}
+            {w.reportOpen && (
+              <div style={{ padding: 12, borderBottom: '1px solid var(--border)' }}>
+                {w.reportNotice && <div style={{ color: 'var(--secondary)', marginBottom: 6 }}>{w.reportNotice}</div>}
+                {w.reportError && <div style={{ color: '#b91c1c', marginBottom: 6 }}>{w.reportError}</div>}
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Report this user</div>
+                <textarea
+                  rows={3}
+                  placeholder="Describe what happened…"
+                  value={w.reportReason}
+                  onChange={(e)=>setReportField(w.userId, 'reportReason', e.target.value)}
+                />
+                <div style={{ display:'flex', gap: 8, marginTop: 8 }}>
+                  <button className="btn btn-primary" disabled={w.reportBusy} onClick={() => submitReport(w.userId)}>
+                    {w.reportBusy ? 'Submitting…' : 'Submit report'}
+                  </button>
+                  <button className="btn" onClick={() => toggleReport(w.userId, false)}>Cancel</button>
+                </div>
               </div>
             )}
 
