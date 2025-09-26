@@ -3,21 +3,19 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
-/**
- * ChatDock
- * - Floating launcher opens a dock.
- * - Empty state when open with no chats.
- * - Guardrails: only send if connected and not blocked (server RLS also enforces).
- * - Report User: inline form (submit_report RPC).
- * - Unblock button if you blocked them.
- * - Rate limit: 2s cooldown.
- * - NEW: Messages limited to 500 chars, Shift+Enter = newline.
- */
-
 export default function ChatDock() {
   const [me, setMe] = useState(null)
   const [windows, setWindows] = useState([])
   const [open, setOpen] = useState(false)
+  const [isCompact, setIsCompact] = useState(false) // small screens tweak
+
+  // --- responsive placement for Close FAB ---
+  useEffect(() => {
+    const onResize = () => setIsCompact(window.innerWidth < 480)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   // auth
   useEffect(() => {
@@ -39,12 +37,12 @@ export default function ChatDock() {
         if (!handle) return
         setOpen(true)
 
-        const { data: prof, error: pErr } = await supabase
+        const { data: prof } = await supabase
           .from('profiles')
           .select('user_id, handle, display_name, avatar_url')
           .eq('handle', handle.toLowerCase())
           .maybeSingle()
-        if (pErr || !prof?.user_id) { alert('User not found'); return }
+        if (!prof?.user_id) { alert('User not found'); return }
 
         const next = {
           key: `u:${prof.user_id}`,
@@ -59,6 +57,7 @@ export default function ChatDock() {
           iBlockedThem: false,
           lastSentAt: 0,
           cooldownMs: 2000,
+          // report UI
           reportOpen: false,
           reportReason: '',
           reportContext: 'chat',
@@ -118,7 +117,6 @@ export default function ChatDock() {
     if (!me?.id) { alert('Please sign in.'); return }
     const w = windows.find(x => x.userId === partnerId)
     if (!w || !w.canSend) return
-
     const text = (w.input || '').trim()
     if (!text) return
     if (text.length > 500) {
@@ -145,30 +143,188 @@ export default function ChatDock() {
     }
   }
 
+  async function unblockUser(partnerId) {
+    if (!me?.id) return
+    const ok = confirm('Unblock this user? They will not be able to message you unless you connect again.')
+    if (!ok) return
+    await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', partnerId)
+    await refreshWindowPerms(partnerId)
+  }
+
   function closeWindow(id) { setWindows(wins => wins.filter(w => w.userId !== id)) }
+  function toggleReport(id, open) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, reportOpen: open, reportNotice: '', reportError: '' } : w)) }
+  function setReportField(id, key, val) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, [key]: val } : w)) }
 
-  // report + unblock unchanged (keep from your last version) …
+  async function submitReport(partnerId) {
+    if (!me?.id) { alert('Please sign in.'); return }
+    const w = windows.find(x => x.userId === partnerId)
+    if (!w) return
+    const reason = (w.reportReason || '').trim()
+    if (!reason) { setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportError: 'Please describe the issue.' } : x)); return }
+    setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: true, reportError: '', reportNotice: '' } : x))
+    const { error } = await supabase.rpc('submit_report', { p_reported: partnerId, p_reason: reason, p_context: w.reportContext || 'chat' })
+    if (error) {
+      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: false, reportError: error.message || 'Could not submit report.' } : x))
+    } else {
+      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: false, reportNotice: 'Report submitted. Thank you.', reportReason: '', reportOpen: false } : x))
+    }
+  }
 
-  // style
-  const dockStyle = useMemo(() => ({ position: 'fixed', right: 16, bottom: 72, zIndex: 40, display: open ? 'grid' : 'none', gap: 12 }), [open])
+  // --- layout styles ---
+  const CARD_WIDTH = 320
+  const DOCK_GAP = 12
+
+  const dockStyle = useMemo(() => ({
+    position: 'fixed',
+    right: 16,
+    bottom: 16,
+    zIndex: 40,
+    display: open ? 'grid' : 'none',
+    gap: DOCK_GAP
+  }), [open])
+
+  // Place the Close FAB so it doesn't overlap the dock:
+  // - normal: to the LEFT of the rightmost chat column (card width + gap)
+  // - compact screens: above the dock (to avoid covering inputs)
+  const closeFabStyle = useMemo(() => {
+    if (!open) return null
+    if (isCompact) {
+      return {
+        position: 'fixed',
+        right: 16,
+        bottom: 16 + 56, // sit just above the dock area
+        zIndex: 41,
+        background: '#111827', color: '#fff',
+        border: 'none', borderRadius: 9999, padding: '10px 14px',
+        boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700, cursor: 'pointer'
+      }
+    }
+    return {
+      position: 'fixed',
+      right: 16 + CARD_WIDTH + DOCK_GAP, // shift left of the dock
+      bottom: 16,
+      zIndex: 41,
+      background: '#111827', color: '#fff',
+      border: 'none', borderRadius: 9999, padding: '10px 14px',
+      boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700, cursor: 'pointer'
+    }
+  }, [open, isCompact])
+
+  const openFabStyle = {
+    position: 'fixed', right: 16, bottom: 16, zIndex: 41,
+    background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
+    color: '#fff', border: 'none', borderRadius: 9999, padding: '12px 16px',
+    boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 800, cursor: 'pointer'
+  }
 
   return (
     <>
-      {/* Launcher */}
+      {/* Launcher / Close FAB */}
       {!open ? (
-        <button onClick={() => setOpen(true)} style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 41, background: 'linear-gradient(135deg, var(--secondary), var(--primary))', color: '#fff', border: 'none', borderRadius: 9999, padding: '12px 16px', boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 800 }}>Messages</button>
+        <button onClick={() => setOpen(true)} style={openFabStyle} aria-label="Open messages">Messages</button>
       ) : (
-        <button onClick={() => setOpen(false)} style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 41, background: '#111827', color: '#fff', border: 'none', borderRadius: 9999, padding: '10px 14px', boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700 }}>Close</button>
+        <button onClick={() => setOpen(false)} style={closeFabStyle} aria-label="Close messages" title="Close">Close</button>
       )}
 
       <div style={dockStyle}>
-        {open && windows.map(w => (
-          <div key={w.key} className="card" style={{ width: 320, padding: 0, overflow: 'hidden' }}>
-            {/* header + banner + messages (same as before) */}
+        {/* EMPTY STATE */}
+        {open && windows.length === 0 && (
+          <div className="card" style={{ width: CARD_WIDTH }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Messages</div>
+            {!me ? (
+              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+                Please <Link to="/auth">sign in</Link> to start chatting.
+              </div>
+            ) : (
+              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
+                No conversations yet. Open a profile from your <Link to="/network">Network</Link> to start a chat.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* CHAT WINDOWS */}
+        {windows.map(w => (
+          <div key={w.key} className="card" style={{ width: CARD_WIDTH, padding: 0, overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img
+                  src={w.avatar_url || 'https://via.placeholder.com/28?text=%F0%9F%91%A4'}
+                  alt=""
+                  style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+                />
+                <div style={{ fontWeight: 700 }}>{w.display_name}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {w.iBlockedThem && <button className="btn" onClick={() => unblockUser(w.userId)}>Unblock</button>}
+                <button className="btn" onClick={() => toggleReport(w.userId, !w.reportOpen)}>{w.reportOpen ? 'Cancel' : 'Report'}</button>
+                <button className="btn" onClick={() => closeWindow(w.userId)}>×</button>
+              </div>
+            </div>
+
+            {/* Banner */}
+            {w.banner && (
+              <div style={{
+                padding: '8px 12px', fontSize: 12,
+                color: w.banner.tone === 'danger' ? '#b91c1c' : '#374151',
+                background: w.banner.tone === 'danger'
+                  ? 'color-mix(in oklab, #fee2e2, white 50%)'
+                  : 'color-mix(in oklab, var(--bg-soft), white 40%)',
+                borderBottom: '1px solid var(--border)'
+              }}>
+                {w.banner.text}
+              </div>
+            )}
+
+            {/* Report panel */}
+            {w.reportOpen && (
+              <div style={{ padding: 12, borderBottom: '1px solid var(--border)' }}>
+                {w.reportNotice && <div style={{ color: 'var(--secondary)', marginBottom: 6 }}>{w.reportNotice}</div>}
+                {w.reportError && <div style={{ color: '#b91c1c', marginBottom: 6 }}>{w.reportError}</div>}
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Report this user</div>
+                <textarea
+                  rows={3}
+                  placeholder="Describe what happened…"
+                  value={w.reportReason}
+                  onChange={(e)=>setReportField(w.userId, 'reportReason', e.target.value)}
+                />
+                <div style={{ display:'flex', gap: 8, marginTop: 8 }}>
+                  <button className="btn btn-primary" disabled={w.reportBusy} onClick={() => submitReport(w.userId)}>
+                    {w.reportBusy ? 'Submitting…' : 'Submit report'}
+                  </button>
+                  <button className="btn" onClick={() => toggleReport(w.userId, false)}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Messages */}
+            <div style={{ maxHeight: 260, overflowY: 'auto', padding: 12, display: 'grid', gap: 8 }}>
+              {w.messages.map(m => {
+                const mine = m.sender === me?.id
+                return (
+                  <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{
+                      background: mine ? 'var(--primary)' : '#f3f4f6',
+                      color: mine ? '#fff' : '#111827',
+                      borderRadius: 12,
+                      padding: '8px 10px',
+                      maxWidth: 220,
+                      wordBreak: 'break-word'
+                    }}>
+                      {m.body}
+                    </div>
+                  </div>
+                )
+              })}
+              {w.messages.length === 0 && (
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>No messages yet.</div>
+              )}
+            </div>
 
             {/* Composer */}
             <div style={{ borderTop: '1px solid var(--border)', padding: 8 }}>
-              <form onSubmit={e => { e.preventDefault(); sendMessage(w.userId) }} style={{ display: 'grid', gap: 6 }}>
+              <form onSubmit={(e)=>{ e.preventDefault(); sendMessage(w.userId) }} style={{ display: 'grid', gap: 6 }}>
                 <textarea
                   rows={1}
                   maxLength={500}
