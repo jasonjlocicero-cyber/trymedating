@@ -2,10 +2,9 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { Link, useNavigate } from 'react-router-dom'
-import QRCode from 'qrcode.react'
+import QRCode from 'react-qr-code'
 
 export default function ProfilePage() {
-  const [me, setMe] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const nav = useNavigate()
@@ -16,7 +15,6 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!alive) return
       if (!user) { nav('/auth'); return }
-      setMe(user)
 
       const { data, error } = await supabase
         .from('profiles')
@@ -44,7 +42,6 @@ export default function ProfilePage() {
       </div>
     )
   }
-
   if (!profile) {
     return (
       <div className="container" style={{ padding: '32px 0' }}>
@@ -52,6 +49,8 @@ export default function ProfilePage() {
       </div>
     )
   }
+
+  const inviteUrl = `${window.location.origin}/connect?handle=${profile.handle}`
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 720 }}>
@@ -90,14 +89,18 @@ export default function ProfilePage() {
         <p style={{ color: 'var(--muted)', marginBottom: 12 }}>
           Share this QR code with people you want to connect with.
         </p>
-        <QRCode
-          value={`${window.location.origin}/connect?handle=${profile.handle}`}
-          size={160}
-          bgColor="#ffffff"
-          fgColor="#000000"
-          level="H"
-          includeMargin={true}
-        />
+        <div style={{ background: '#fff', display: 'inline-block', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
+          <QRCode value={inviteUrl} size={160} />
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <button
+            className="btn"
+            onClick={() => { navigator.clipboard.writeText(inviteUrl) }}
+            title="Copy invite link"
+          >
+            Copy Invite Link
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
