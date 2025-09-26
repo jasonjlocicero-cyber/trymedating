@@ -1,9 +1,10 @@
 // src/App.jsx
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
 import ChatDock from './components/ChatDock'
 import AppGuard from './components/AppGuard'
 import UserBadge from './components/UserBadge'
+import { supabase } from './lib/supabaseClient'
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -47,6 +48,19 @@ function Home() {
 export default function App() {
   const { pathname } = useLocation()
   const isPublicProfile = pathname.startsWith('/u/')
+  const [signedIn, setSignedIn] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (alive) setSignedIn(!!user)
+    })()
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSignedIn(!!session?.user)
+    })
+    return () => { alive = false; sub.subscription.unsubscribe() }
+  }, [])
 
   return (
     <>
@@ -68,18 +82,19 @@ export default function App() {
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
-          <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link to="/profile">Profile</Link>
-            <Link to="/settings">Settings</Link>
-            <Link to="/invite">Invite</Link>
-            <Link to="/network">Network</Link>
-            <Link to="/onboarding">Onboarding</Link>
-            <Link to="/terms">Terms</Link>
-            <Link to="/privacy">Privacy</Link>
-            <Link to="/contact">Contact</Link>
-            <Link to="/safety">Safety</Link>
-          </nav>
-          <UserBadge />
+
+          {/* If signed out → show nav links. If signed in → show avatar badge only. */}
+          {!signedIn ? (
+            <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <Link to="/auth">Sign In</Link>
+              <Link to="/terms">Terms</Link>
+              <Link to="/privacy">Privacy</Link>
+              <Link to="/contact">Contact</Link>
+              <Link to="/safety">Safety</Link>
+            </nav>
+          ) : (
+            <UserBadge />
+          )}
         </div>
       </header>
 
