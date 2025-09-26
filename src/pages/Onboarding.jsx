@@ -1,5 +1,5 @@
 // src/pages/Onboarding.jsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
@@ -22,10 +22,23 @@ export default function Onboarding() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
-  const normalizedHandle = useMemo(
-    () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, 24),
-    [handle]
-  )
+  // handle availability check
+  const [checkingHandle, setCheckingHandle] = useState(false)
+  const [handleTaken, setHandleTaken] = useState(false)
+  const checkTimer = useRef(null)
+
+  // normalize handle
+  const normalizedHandle = useMemo(() =>
+    (handle || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9_]/g, '')
+      .slice(0, 24)
+  , [handle])
+
+  // derived validity
+  const handleTooShort = normalizedHandle.length > 0 && normalizedHandle.length < 3
+  const canSave = !!me?.id && !saving && !checkingHandle && !handleTaken && normalizedHandle.length >= 3
 
   useEffect(() => {
     let alive = true
@@ -35,6 +48,7 @@ export default function Onboarding() {
       if (!user) { setError('Please sign in to continue.'); setLoading(false); return }
       setMe(user)
 
+      // Load existing profile, if any
       const { data: prof } = await supabase
         .from('profiles')
         .select('user_id, handle, display_name, location, bio, public_profile, avatar_url')
@@ -42,12 +56,15 @@ export default function Onboarding() {
         .maybeSingle()
 
       if (prof) {
-        setHandle(prof.handle || '')
+        setHandle(prof.handle || guessHandleFromEmail(user.email))
         setDisplayName(prof.display_name || '')
         setLocation(prof.location || '')
         setBio(prof.bio || '')
         setPublicProfile(!!prof.public_profile)
         setAvatarUrl(prof.avatar_url || '')
+      } else {
+        // New user: suggest handle from email
+        setHandle(guessHandleFromEmail(user.email))
       }
       setLoading(false)
     })()
@@ -57,29 +74,56 @@ export default function Onboarding() {
     return () => { alive = false; sub.subscription.unsubscribe() }
   }, [])
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  // Debounced handle availability check
+  useEffect(() => {
+    if (!me?.id) return
     setError(''); setNotice('')
 
-    if (!me?.id) { setError('Please sign in first.'); return }
-
     const h = normalizedHandle
+    // no handle, or too short → don't check
     if (!h || h.length < 3) {
-      setError('Handle must be at least 3 characters (letters, numbers, underscore).')
+      setHandleTaken(false)
+      setCheckingHandle(false)
+      if (checkTimer.current) clearTimeout(checkTimer.current)
       return
     }
 
-    setSaving(true)
+    setCheckingHandle(true)
+    if (checkTimer.current) clearTimeout(checkTimer.current)
+    checkTimer.current = setTimeout(async () => {
+      const { data, error: hErr } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('handle', h)
 
-    const { data: existing, error: hErr } = await supabase
-      .from('profiles').select('user_id').eq('handle', h)
-    if (hErr) { setError(hErr.message || 'Could not verify handle.'); setSaving(false); return }
-    const taken = (existing || []).some(r => r.user_id !== me.id)
-    if (taken) { setError('That handle is already taken.'); setSaving(false); return }
+      if (hErr) {
+        setError(hErr.message || 'Could not check handle availability.')
+        setCheckingHandle(false)
+        return
+      }
+      // Taken if any row exists with a different user_id
+      setHandleTaken((data || []).some(r => r.user_id !== me.id))
+      setCheckingHandle(false)
+    }, 400) // debounce 400ms
+
+    return () => { if (checkTimer.current) clearTimeout(checkTimer.current) }
+  }, [normalizedHandle, me])
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setError('')
+    setNotice('')
+
+    if (!me?.id) { setError('Please sign in first.'); return }
+    if (normalizedHandle.length < 3) { setError('Handle must be at least 3 characters.'); return }
+    if (checkingHandle) { setError('Checking handle availability…'); return }
+    if (handleTaken) { setError('That handle is taken. Please choose another.'); return }
+
+    setSaving(true)
 
     const payload = {
       user_id: me.id,
-      handle: h,
+      handle: normalizedHandle,
       display_name: displayName?.trim() || null,
       location: location?.trim() || null,
       bio: bio?.trim() || null,
@@ -87,8 +131,15 @@ export default function Onboarding() {
       avatar_url: avatarUrl || null
     }
 
-    const { error: upErr } = await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' })
-    if (upErr) { setError(upErr.message || 'Could not save profile.'); setSaving(false); return }
+    const { error: upErr } = await supabase
+      .from('profiles')
+      .upsert(payload, { onConflict: 'user_id' })
+
+    if (upErr) {
+      setError(upErr.message || 'Could not save profile.')
+      setSaving(false)
+      return
+    }
 
     setNotice('Saved! Redirecting to your profile…')
     setSaving(false)
@@ -103,14 +154,18 @@ export default function Onboarding() {
     )
   }
 
+  const previewPublicUrl = normalizedHandle ? `/u/${normalizedHandle}` : null
+
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
-      <h1 style={{ marginBottom: 8 }}>
+      {/* Tiny step header */}
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Step 1 of 1</div>
+      <h1 style={{ marginTop: 0, marginBottom: 8 }}>
         <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Finish</span>{' '}
         <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Setting Up</span>
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-        Add a photo and fill in your basics. You can change these anytime in Settings.
+        Add a photo and your details. You can change these anytime in Settings.
       </p>
 
       {/* Avatar uploader */}
@@ -130,26 +185,55 @@ export default function Onboarding() {
       <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14, marginTop: 12 }}>
         {/* Handle */}
         <div>
-          <label style={{ fontWeight: 700 }}>Handle</label>
+          <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Handle
+            {normalizedHandle && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && (
+              <span title="Available" style={{ color: 'green', fontSize: 12 }}>✓ available</span>
+            )}
+            {normalizedHandle && !checkingHandle && handleTaken && (
+              <span title="Taken" style={{ color: '#b91c1c', fontSize: 12 }}>✗ taken</span>
+            )}
+            {checkingHandle && <span style={{ color: 'var(--muted)', fontSize: 12 }}>checking…</span>}
+          </label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ color: 'var(--muted)' }}>@</span>
-            <input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="yourname" required />
+            <input
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              placeholder="yourname"
+              aria-label="handle"
+            />
           </div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-            Only letters, numbers, and underscores. Shown on your public link.
+          <div style={{ fontSize: 12, color: handleTooShort ? '#b91c1c' : 'var(--muted)', marginTop: 4 }}>
+            {handleTooShort
+              ? 'Handle must be at least 3 characters.'
+              : 'Letters, numbers, underscore. Up to 24 characters.'}
           </div>
+          {publicProfile && previewPublicUrl && (
+            <div style={{ fontSize: 12, marginTop: 6 }}>
+              Public link (if public): <code>{window.location.origin}{previewPublicUrl}</code>
+            </div>
+          )}
         </div>
 
         {/* Display name */}
         <div>
           <label style={{ fontWeight: 700 }}>Display name</label>
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="How you want to appear" />
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="How you want to appear"
+          />
         </div>
 
         {/* Location */}
         <div>
           <label style={{ fontWeight: 700 }}>Location</label>
-          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City, State (optional)" />
+          <input
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="City, State (optional)"
+          />
         </div>
 
         {/* Bio */}
@@ -170,21 +254,33 @@ export default function Onboarding() {
 
         {/* Public profile toggle */}
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input id="publicProfile" type="checkbox" checked={publicProfile} onChange={(e) => setPublicProfile(e.target.checked)} />
+          <input
+            id="publicProfile"
+            type="checkbox"
+            checked={publicProfile}
+            onChange={(e) => setPublicProfile(e.target.checked)}
+          />
           <label htmlFor="publicProfile" style={{ userSelect: 'none' }}>
             Make my profile public (anyone with my link can view)
           </label>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-primary" type="submit" disabled={saving}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" type="submit" disabled={!canSave}>
             {saving ? 'Saving…' : 'Save & Continue'}
           </button>
-          <button className="btn" type="button" onClick={() => window.history.back()} disabled={saving}>
-            Cancel
+          <button className="btn" type="button" onClick={() => nav('/profile')} disabled={saving}>
+            Skip for now
           </button>
         </div>
       </form>
     </div>
   )
+}
+
+// helpers
+function guessHandleFromEmail(email) {
+  if (!email) return ''
+  const base = email.split('@')[0] || ''
+  return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
