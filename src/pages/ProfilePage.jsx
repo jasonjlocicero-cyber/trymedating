@@ -17,7 +17,7 @@ export default function ProfilePage() {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('handle, display_name, location, bio, avatar_url, public_profile')
+        .select('handle, display_name, location, bio, avatar_url, public_profile, interests')
         .eq('user_id', user.id)
         .maybeSingle()
 
@@ -76,7 +76,6 @@ export default function ProfilePage() {
           style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover' }}
         />
         <div>
-          {/* Stronger readable text */}
           <h2 style={{ margin: '0 0 8px', color: 'var(--text)' }}>
             {profile.display_name || 'Unnamed user'}
           </h2>
@@ -92,6 +91,19 @@ export default function ProfilePage() {
             <p style={{ margin: 0, color: 'var(--text)' }}>
               {profile.bio}
             </p>
+          )}
+
+          {/* Interests chips */}
+          {Array.isArray(profile.interests) && profile.interests.length > 0 && (
+            <div style={{ marginTop: 10, display:'flex', gap:8, flexWrap:'wrap' }}>
+              {profile.interests.map(tag => (
+                <span key={tag} style={{
+                  padding:'6px 10px', borderRadius:9999, border:'1px solid var(--border)', background:'#fff'
+                }}>
+                  #{tag}
+                </span>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -133,6 +145,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
