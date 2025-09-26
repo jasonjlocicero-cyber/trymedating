@@ -8,13 +8,14 @@ import { supabase } from '../lib/supabaseClient'
  * - Floating launcher opens a dock.
  * - Empty state when open with no chats.
  * - Guardrails: only send if connected and not blocked (server RLS also enforces).
- * - Report User: small inline form per conversation; calls RPC submit_report().
+ * - Report User: inline form (submit_report RPC).
+ * - NEW: If you blocked the user, show Unblock button and re-check permissions after unblocking.
  * - Public API: window.trymeChat.open({ handle }), window.trymeChat.closeAll()
  */
 
 export default function ChatDock() {
   const [me, setMe] = useState(null)
-  const [windows, setWindows] = useState([]) // array of window models
+  const [windows, setWindows] = useState([]) // window models
   const [open, setOpen] = useState(false)
 
   // auth
@@ -55,6 +56,7 @@ export default function ChatDock() {
           input: '',
           canSend: false,
           banner: { tone: 'info', text: 'Checking permissions…' },
+          iBlockedThem: false, // NEW
           // report UI
           reportOpen: false,
           reportReason: '',
@@ -99,12 +101,22 @@ export default function ChatDock() {
     setWindows(wins => wins.map(w => {
       if (w.userId !== partnerId) return w
       if (iBlockedThem) {
-        return { ...w, canSend: false, banner: { tone: 'danger', text: 'You have blocked this user. Unblock them from your Network to resume chatting.' } }
+        return {
+          ...w,
+          iBlockedThem: true,
+          canSend: false,
+          banner: { tone: 'danger', text: 'You have blocked this user.' }
+        }
       }
       if (!connected) {
-        return { ...w, canSend: false, banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR to connect before chatting.' } }
+        return {
+          ...w,
+          iBlockedThem: false,
+          canSend: false,
+          banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR to connect before chatting.' }
+        }
       }
-      return { ...w, canSend: true, banner: null }
+      return { ...w, iBlockedThem: false, canSend: true, banner: null }
     }))
   }
 
@@ -196,6 +208,20 @@ export default function ChatDock() {
     }
   }
 
+  // NEW: Unblock handler (only affects rows where *you* are blocker)
+  async function unblockUser(partnerId) {
+    if (!me?.id) return
+    const ok = confirm('Unblock this user? They will not be able to message you unless you connect again.')
+    if (!ok) return
+    await supabase
+      .from('blocks')
+      .delete()
+      .eq('blocker', me.id)
+      .eq('blocked', partnerId)
+    // Re-check permissions/banners
+    await refreshWindowPerms(partnerId)
+  }
+
   // styles
   const dockStyle = useMemo(() => ({
     position: 'fixed',
@@ -272,6 +298,10 @@ export default function ChatDock() {
                 <div style={{ fontWeight: 700 }}>{w.display_name}</div>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
+                {/* If I blocked them, show Unblock button */}
+                {w.iBlockedThem && (
+                  <button className="btn" onClick={() => unblockUser(w.userId)}>Unblock</button>
+                )}
                 <button className="btn" onClick={() => toggleReport(w.userId, !w.reportOpen)}>
                   {w.reportOpen ? 'Cancel' : 'Report'}
                 </button>
