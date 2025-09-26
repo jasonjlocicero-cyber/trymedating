@@ -8,14 +8,7 @@ export default function AppGuard() {
   const { pathname } = useLocation()
   const [checking, setChecking] = useState(false)
 
-  const SKIP = [
-    '/auth',
-    '/onboarding',
-    '/terms',
-    '/privacy',
-    '/contact',
-    '/safety'
-  ]
+  const SKIP = ['/auth', '/onboarding', '/terms', '/privacy', '/contact', '/safety']
   const isPublicProfile = pathname.startsWith('/u/')
 
   useEffect(() => {
