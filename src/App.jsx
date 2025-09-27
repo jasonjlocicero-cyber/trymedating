@@ -137,7 +137,7 @@ export default function App() {
             <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
           </div>
           <nav style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button className="btn" type="button" onClick={()=>setShowFeedback(true)}>Feedback</button>
+            <a href="#" onClick={(e)=>{ e.preventDefault(); setShowFeedback(true); }}>Feedback</a>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
