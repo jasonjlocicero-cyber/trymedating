@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { Link, useNavigate } from 'react-router-dom'
+import { track } from '../lib/analytics'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState(null)
@@ -126,7 +127,10 @@ export default function ProfilePage() {
         <div style={{ marginTop: 10, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button
             className="btn"
-            onClick={() => { navigator.clipboard.writeText(inviteUrl) }}
+            onClick={() => {
+              navigator.clipboard.writeText(inviteUrl)
+              track('Invite Link Copied')
+            }}
             title="Copy invite link"
           >
             Copy Invite Link
