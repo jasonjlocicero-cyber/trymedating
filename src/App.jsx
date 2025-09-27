@@ -7,7 +7,10 @@ import UserBadge from './components/UserBadge'
 import { supabase } from './lib/supabaseClient'
 import { pageview } from './lib/analytics'
 
-// Pages
+// ⬇️ NEW
+import FeedbackModal from './components/FeedbackModal'
+
+// Pages …
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
@@ -26,7 +29,7 @@ function Home() {
     <section style={{
       padding: '80px 16px',
       textAlign: 'center',
-      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)'
+      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)'
     }}>
       <div className="container" style={{ maxWidth: 720 }}>
         <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
@@ -51,10 +54,10 @@ export default function App() {
   const isPublicProfile = pathname.startsWith('/u/')
   const [signedIn, setSignedIn] = useState(false)
 
-  // SPA pageview on route change
-  useEffect(() => {
-    pageview()
-  }, [pathname])
+  // ⬇️ NEW
+  const [showFeedback, setShowFeedback] = useState(false)
+
+  useEffect(() => { pageview() }, [pathname])
 
   useEffect(() => {
     let alive = true
@@ -87,8 +90,6 @@ export default function App() {
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
-
-          {/* Signed out → nav links. Signed in → avatar badge only. */}
           {!signedIn ? (
             <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Link to="/auth">Sign In</Link>
@@ -136,6 +137,7 @@ export default function App() {
             <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
           </div>
           <nav style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <button className="btn" type="button" onClick={()=>setShowFeedback(true)}>Feedback</button>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/contact">Contact</Link>
@@ -145,6 +147,9 @@ export default function App() {
       </footer>
 
       {!isPublicProfile && <ChatDock />}
+
+      {/* ⬇️ NEW */}
+      <FeedbackModal open={showFeedback} onClose={()=>setShowFeedback(false)} />
     </>
   )
 }
