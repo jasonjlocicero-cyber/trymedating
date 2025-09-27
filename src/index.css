@@ -80,8 +80,9 @@ input, textarea, select {
   color: var(--muted);
 }
 
-/* Mobile polish for footer links */
+/* Mobile polish for nav links */
 @media (max-width: 640px) {
+  header nav a,
   footer nav a {
     font-size: 1.1rem;
     line-height: 1.6;
