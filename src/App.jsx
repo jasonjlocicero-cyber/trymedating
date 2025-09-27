@@ -6,11 +6,9 @@ import AppGuard from './components/AppGuard'
 import UserBadge from './components/UserBadge'
 import { supabase } from './lib/supabaseClient'
 import { pageview } from './lib/analytics'
-
-// ⬇️ NEW
 import FeedbackModal from './components/FeedbackModal'
 
-// Pages …
+// Pages
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
@@ -29,7 +27,7 @@ function Home() {
     <section style={{
       padding: '80px 16px',
       textAlign: 'center',
-      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)'
+      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)'
     }}>
       <div className="container" style={{ maxWidth: 720 }}>
         <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
@@ -53,8 +51,6 @@ export default function App() {
   const { pathname } = useLocation()
   const isPublicProfile = pathname.startsWith('/u/')
   const [signedIn, setSignedIn] = useState(false)
-
-  // ⬇️ NEW
   const [showFeedback, setShowFeedback] = useState(false)
 
   useEffect(() => { pageview() }, [pathname])
@@ -90,6 +86,7 @@ export default function App() {
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
+
           {!signedIn ? (
             <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Link to="/auth">Sign In</Link>
@@ -130,13 +127,16 @@ export default function App() {
 
       <footer style={{ borderTop: '1px solid #eee', padding: '20px 16px' }}>
         <div className="container" style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap'
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 12,
         }}>
           <div style={{ fontWeight: 800 }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
           </div>
-          <nav style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
             <a href="#" onClick={(e)=>{ e.preventDefault(); setShowFeedback(true); }}>Feedback</a>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
@@ -148,11 +148,11 @@ export default function App() {
 
       {!isPublicProfile && <ChatDock />}
 
-      {/* ⬇️ NEW */}
       <FeedbackModal open={showFeedback} onClose={()=>setShowFeedback(false)} />
     </>
   )
 }
+
 
 
 
