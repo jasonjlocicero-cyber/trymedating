@@ -1,106 +1,91 @@
-/* src/index.css */
-
-/* Brand + global colors */
 :root {
-  --primary: #008080;    /* teal */
-  --secondary: #ff6f61;  /* coral */
-  --muted: #444;         /* darker gray for readability */
+  --primary: #008080;   /* teal */
+  --secondary: #ff6f61; /* coral */
   --border: #ddd;
+  --muted: #555;        /* darker grey for readability */
   --bg: #fafafa;
-  --card-bg: #fff;
-  --text: #111;
+  --bg-soft: #fefefe;
 }
 
-/* Reset + base */
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
+  color: #111;
 }
 
 a {
   color: var(--primary);
   text-decoration: none;
 }
-
 a:hover {
   text-decoration: underline;
 }
 
-button, input, textarea {
-  font: inherit;
-}
-
-/* Layout helpers */
 .container {
   max-width: 960px;
   margin: 0 auto;
   padding: 0 16px;
 }
 
-.card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
-/* Buttons */
 .btn {
   display: inline-block;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
+  padding: 8px 16px;
   border-radius: 6px;
+  border: 1px solid var(--border);
   background: #fff;
   cursor: pointer;
-  transition: background 0.15s;
+  font-size: 0.95rem;
+  text-decoration: none;
+  color: inherit;
 }
-
 .btn:hover {
   background: #f5f5f5;
 }
-
 .btn-primary {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
 }
-
 .btn-primary:hover {
   background: #006666;
 }
-
 .btn-secondary {
   background: var(--secondary);
   border-color: var(--secondary);
   color: #fff;
 }
-
 .btn-secondary:hover {
-  background: #e85c50;
+  background: #e65c50;
 }
 
-/* Form elements */
-input, textarea {
-  width: 100%;
+input, textarea, select {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  font-size: 0.95rem;
+  width: 100%;
   box-sizing: border-box;
 }
 
-textarea {
-  resize: vertical;
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
 }
 
-/* Utility text */
 .muted {
   color: var(--muted);
-  font-size: 0.9em;
 }
+
+/* Mobile polish for footer links */
+@media (max-width: 640px) {
+  footer nav a {
+    font-size: 1.1rem;
+    line-height: 1.6;
+  }
+}
+
 
