@@ -80,13 +80,20 @@ input, textarea, select {
   color: var(--muted);
 }
 
-/* Mobile polish for nav links */
+/* Mobile polish for nav links + buttons */
 @media (max-width: 640px) {
   header nav a,
   footer nav a {
     font-size: 1.1rem;
     line-height: 1.6;
   }
+
+  .btn {
+    font-size: 1.05rem;
+    padding: 12px 20px;
+    border-radius: 8px;
+  }
 }
+
 
 
