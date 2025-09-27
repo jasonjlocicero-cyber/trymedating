@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
+import InterestsPicker from '../components/InterestsPicker'
 
 export default function SettingsPage() {
   const nav = useNavigate()
@@ -14,6 +15,7 @@ export default function SettingsPage() {
   const [bio, setBio] = useState('')
   const [publicProfile, setPublicProfile] = useState(true)
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [interests, setInterests] = useState([])
 
   // ui
   const [loading, setLoading] = useState(true)
@@ -31,7 +33,7 @@ export default function SettingsPage() {
 
       const { data: prof, error: perr } = await supabase
         .from('profiles')
-        .select('display_name, location, bio, public_profile, avatar_url, handle')
+        .select('display_name, location, bio, public_profile, avatar_url, handle, interests')
         .eq('user_id', user.id)
         .maybeSingle()
 
@@ -43,6 +45,7 @@ export default function SettingsPage() {
         setBio(prof.bio || '')
         setPublicProfile(!!prof.public_profile)
         setAvatarUrl(prof.avatar_url || '')
+        setInterests(Array.isArray(prof.interests) ? prof.interests : [])
       }
       setLoading(false)
     })()
@@ -63,7 +66,8 @@ export default function SettingsPage() {
       location: location?.trim() || null,
       bio: bio?.trim() || null,
       public_profile: publicProfile,
-      avatar_url: avatarUrl || null
+      avatar_url: avatarUrl || null,
+      interests: Array.isArray(interests) ? interests : []
     }
     const { error: upErr } = await supabase
       .from('profiles')
@@ -86,14 +90,12 @@ export default function SettingsPage() {
   async function deleteAccount() {
     const ok = confirm('Delete your account? This removes your profile and messages. This cannot be undone.')
     if (!ok) return
-    // Call your Netlify Function (adjust path if different)
     try {
       const res = await fetch('/api/delete-account', { method: 'POST' })
       if (!res.ok) {
         const txt = await res.text()
         throw new Error(txt || 'Delete failed')
       }
-      // sign out after deletion
       await supabase.auth.signOut()
       alert('Account deleted.')
       nav('/')
@@ -136,7 +138,7 @@ export default function SettingsPage() {
         <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
       </div>
 
-      {/* Profile details */}
+      {/* Profile details + Interests */}
       <form onSubmit={saveProfile} className="card" style={{ marginTop: 16, display: 'grid', gap: 14 }}>
         <div>
           <label style={{ fontWeight: 700 }}>Display name</label>
@@ -163,6 +165,9 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Interests editor */}
+        <InterestsPicker value={interests} onChange={setInterests} max={8} />
+
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <input
             id="publicProfile"
@@ -186,7 +191,7 @@ export default function SettingsPage() {
       {/* Danger zone */}
       <div className="card" style={{ marginTop: 16, borderLeft: '4px solid #e11d48' }}>
         <div style={{ fontWeight: 800, marginBottom: 8 }}>Danger zone</div>
-        <p style={{ color: 'var(--muted)' }}>
+        <p className="muted">
           Permanently delete your account and associated data.
         </p>
         <button className="btn" onClick={deleteAccount} style={{ borderColor: '#e11d48', color: '#e11d48' }}>
@@ -196,6 +201,7 @@ export default function SettingsPage() {
     </div>
   )
 }
+
 
 
 
