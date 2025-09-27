@@ -125,18 +125,27 @@ export default function App() {
         </Routes>
       </main>
 
-      <footer style={{ borderTop: '1px solid #eee', padding: '20px 16px' }}>
+      <footer style={{ borderTop: '1px solid #eee', padding: '24px 16px' }}>
         <div className="container" style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: 12,
+          textAlign: 'center',
+          gap: 16,
         }}>
           <div style={{ fontWeight: 800 }}>
             <span style={{ color: 'var(--secondary)' }}>TryMe</span>
             <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
           </div>
-          <nav style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <nav
+            style={{
+              display: 'flex',
+              gap: 20,
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              maxWidth: '90%',
+            }}
+          >
             <a href="#" onClick={(e)=>{ e.preventDefault(); setShowFeedback(true); }}>Feedback</a>
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
@@ -152,6 +161,7 @@ export default function App() {
     </>
   )
 }
+
 
 
 
