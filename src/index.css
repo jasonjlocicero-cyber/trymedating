@@ -80,7 +80,7 @@ input, textarea, select {
   color: var(--muted);
 }
 
-/* Mobile polish for nav links + buttons */
+/* Mobile polish for nav links, buttons, and inputs */
 @media (max-width: 640px) {
   header nav a,
   footer nav a {
@@ -93,7 +93,16 @@ input, textarea, select {
     padding: 12px 20px;
     border-radius: 8px;
   }
+
+  input,
+  textarea,
+  select {
+    font-size: 1.05rem;
+    padding: 12px;
+    border-radius: 8px;
+  }
 }
+
 
 
 
