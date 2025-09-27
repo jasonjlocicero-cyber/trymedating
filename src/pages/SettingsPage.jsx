@@ -4,12 +4,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
 import InterestsPicker from '../components/InterestsPicker'
+import { track } from '../lib/analytics'
 
 export default function SettingsPage() {
   const nav = useNavigate()
   const [me, setMe] = useState(null)
 
-  // profile fields
   const [displayName, setDisplayName] = useState('')
   const [location, setLocation] = useState('')
   const [bio, setBio] = useState('')
@@ -17,7 +17,6 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState('')
   const [interests, setInterests] = useState([])
 
-  // ui
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState('')
@@ -78,6 +77,12 @@ export default function SettingsPage() {
       setError(upErr.message || 'Could not save settings.')
     } else {
       setNotice('Settings saved.')
+      // 🔴 Custom analytics event
+      track('Settings Saved', {
+        has_avatar: !!avatarUrl,
+        interests_count: (Array.isArray(interests) ? interests.length : 0),
+        public_profile: !!publicProfile
+      })
     }
     setSaving(false)
   }
@@ -201,6 +206,7 @@ export default function SettingsPage() {
     </div>
   )
 }
+
 
 
 
