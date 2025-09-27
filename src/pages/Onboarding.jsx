@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
 import InterestsPicker from '../components/InterestsPicker'
+import { track } from '../lib/analytics'
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -18,7 +19,7 @@ export default function Onboarding() {
   const [avatarUrl, setAvatarUrl] = useState('')
   const [interests, setInterests] = useState([])
 
-  // ui state
+  // ui
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -137,6 +138,13 @@ export default function Onboarding() {
       return
     }
 
+    // 🔴 Custom analytics event
+    track('Onboarding Completed', {
+      has_avatar: !!avatarUrl,
+      interests_count: interests.length,
+      public_profile: !!publicProfile
+    })
+
     setNotice('Saved! Redirecting to your profile…')
     setSaving(false)
     setTimeout(() => nav('/profile'), 600)
@@ -163,7 +171,6 @@ export default function Onboarding() {
         Add a photo, choose a handle, and pick a few interests.
       </p>
 
-      {/* Avatar */}
       <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
 
       {error && (
