@@ -5,6 +5,7 @@ import ChatDock from './components/ChatDock'
 import AppGuard from './components/AppGuard'
 import UserBadge from './components/UserBadge'
 import { supabase } from './lib/supabaseClient'
+import { pageview } from './lib/analytics'
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -50,6 +51,11 @@ export default function App() {
   const isPublicProfile = pathname.startsWith('/u/')
   const [signedIn, setSignedIn] = useState(false)
 
+  // SPA pageview on route change
+  useEffect(() => {
+    pageview()
+  }, [pathname])
+
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -64,7 +70,6 @@ export default function App() {
 
   return (
     <>
-      {/* Global guard for onboarding redirect */}
       <AppGuard />
 
       <header style={{
@@ -83,7 +88,7 @@ export default function App() {
             <span style={{ color: 'var(--primary)' }}>Dating</span>
           </Link>
 
-          {/* If signed out → show nav links. If signed in → show avatar badge only. */}
+          {/* Signed out → nav links. Signed in → avatar badge only. */}
           {!signedIn ? (
             <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Link to="/auth">Sign In</Link>
