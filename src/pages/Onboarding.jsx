@@ -15,7 +15,7 @@ const TOTAL_STEPS = 4
 const STEP_LABELS = ['Welcome', 'Photo', 'Basics', 'Interests']
 const HANDLE_MAX = 24
 const BIO_MAX = 300
-const DRAFT_VERSION = 'v2' // bump if structure changes
+const DRAFT_VERSION = 'v2' // keep in sync with your server draft version
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -39,13 +39,14 @@ export default function Onboarding() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [savedHint, setSavedHint] = useState(false)
+  const [celebrate, setCelebrate] = useState(false) // ✅ celebration overlay
 
   // handle availability
   const [checkingHandle, setCheckingHandle] = useState(false)
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
-  // refs for auto-focus / key handling
+  // refs
   const avatarStepStartRef = useRef(null)
   const handleInputRef = useRef(null)
   const displayNameRef = useRef(null)
@@ -53,7 +54,7 @@ export default function Onboarding() {
   const bioRef = useRef(null)
   const interestsFirstFocusableRef = useRef(null)
 
-  // ===== Validation helpers =====
+  // ===== Validation =====
   const normalizedHandle = useMemo(
     () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX),
     [handle]
@@ -81,10 +82,7 @@ export default function Onboarding() {
   // ===== Local draft helpers (fallback) =====
   const localDraftKey = me?.id ? `onbDraft:${DRAFT_VERSION}:${me.id}` : null
   const debounceTimer = useRef(null)
-  function showSavedHint() {
-    setSavedHint(true)
-    setTimeout(() => setSavedHint(false), 900)
-  }
+  function showSavedHint() { setSavedHint(true); setTimeout(() => setSavedHint(false), 900) }
   function saveLocalDraftImmediate() {
     if (!localDraftKey) return
     const payload = { step, handle, displayName, location, bio, publicProfile, avatarUrl, interests, ts: Date.now(), v: DRAFT_VERSION }
@@ -105,10 +103,7 @@ export default function Onboarding() {
       return d
     } catch { return null }
   }
-  function clearLocalDraft() {
-    if (!localDraftKey) return
-    try { localStorage.removeItem(localDraftKey) } catch {}
-  }
+  function clearLocalDraft() { if (localDraftKey) try { localStorage.removeItem(localDraftKey) } catch {} }
 
   // ===== Server draft helpers (Supabase) =====
   const serverSaveTimer = useRef(null)
@@ -124,10 +119,7 @@ export default function Onboarding() {
   }
   async function saveServerDraftImmediate() {
     if (!me?.id) return
-    const payload = {
-      step, handle, displayName, location, bio, publicProfile, avatarUrl, interests,
-      v: DRAFT_VERSION
-    }
+    const payload = { step, handle, displayName, location, bio, publicProfile, avatarUrl, interests, v: DRAFT_VERSION }
     const { error: upErr } = await supabase
       .from('onboarding_drafts')
       .upsert({ user_id: me.id, data: payload, updated_at: new Date().toISOString() })
@@ -186,9 +178,7 @@ export default function Onboarding() {
         setDisplayName(server.displayName ?? '')
         setLocation(server.location ?? '')
         setBio(server.bio ?? '')
-        setPublicProfile(
-          typeof server.publicProfile === 'boolean' ? server.publicProfile : true
-        )
+        setPublicProfile(typeof server.publicProfile === 'boolean' ? server.publicProfile : true)
         setAvatarUrl(server.avatarUrl ?? '')
         setInterests(Array.isArray(server.interests) ? server.interests : [])
         setNotice('Draft restored from server.')
@@ -390,9 +380,10 @@ export default function Onboarding() {
     clearLocalDraft()
     await clearServerDraft()
 
-    setNotice('Saved! Redirecting to your profile…')
+    // 🎉 Show celebration for ~900ms, then go to profile
+    setCelebrate(true)
     setSaving(false)
-    setTimeout(() => nav('/profile'), 600)
+    setTimeout(() => nav('/profile'), 900)
   }
 
   // Top visual progress (line) + numbered stepper
@@ -740,6 +731,9 @@ export default function Onboarding() {
           Draft saved
         </div>
       )}
+
+      {/* 🎉 Celebration overlay */}
+      {celebrate && <CelebrateOverlay displayName={displayName || normalizedHandle} />}
     </>
   )
 }
@@ -749,6 +743,64 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX)
 }
+
+/* ========= Celebration UI (no dependencies) ========= */
+function CelebrateOverlay({ displayName }) {
+  const words = ['🎉','✨','💖','🎊','🥳','💫']
+  return (
+    <div style={celeWrap}>
+      <div style={celeCard}>
+        <div style={{ fontSize: 42, lineHeight: 1, marginBottom: 8 }}>✅</div>
+        <div style={{ fontWeight: 800, fontSize: 22, marginBottom: 4 }}>Profile saved!</div>
+        <div className="muted" style={{ fontSize: 14, marginBottom: 6 }}>
+          Welcome aboard{displayName ? `, ${displayName}` : ''} — redirecting…
+        </div>
+      </div>
+      {/* floating emojis */}
+      {Array.from({ length: 16 }).map((_, i) => (
+        <span
+          key={i}
+          style={{
+            position:'absolute',
+            left: `${Math.random()*100}%`,
+            bottom: -20,
+            fontSize: 20 + Math.random()*12,
+            animation: `rise ${600 + Math.random()*800}ms ease-out ${Math.random()*200}ms forwards`,
+            opacity: 0.9
+          }}
+        >
+          {words[i % words.length]}
+        </span>
+      ))}
+      <style>{`
+        @keyframes rise {
+          0% { transform: translateY(0) scale(0.9) rotate(0deg); opacity: 0 }
+          30% { opacity: 1 }
+          100% { transform: translateY(-60vh) scale(1.1) rotate(20deg); opacity: 0 }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+const celeWrap = {
+  position:'fixed',
+  inset:0,
+  display:'grid',
+  placeItems:'center',
+  background:'rgba(255,255,255,0.75)',
+  zIndex: 3000
+}
+const celeCard = {
+  background:'#fff',
+  border:'1px solid #e5e7eb',
+  borderRadius:14,
+  padding:'18px 22px',
+  boxShadow:'0 18px 60px rgba(0,0,0,0.15)',
+  textAlign:'center',
+  color:'#0f172a'
+}
+
 
 
 
