@@ -13,6 +13,8 @@ import { track } from '../lib/analytics'
 // 3 = Interests & Visibility (save)
 const TOTAL_STEPS = 4
 const STEP_LABELS = ['Welcome', 'Photo', 'Basics', 'Interests']
+const HANDLE_MAX = 24
+const BIO_MAX = 300
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -41,19 +43,30 @@ export default function Onboarding() {
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
+  // ===== Validation helpers =====
   const normalizedHandle = useMemo(
-    () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, 24),
+    () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX),
     [handle]
   )
+  const handleDirty = handle.length > 0
+  const handleLen = normalizedHandle.length
+  const handleTooShort = handleDirty && handleLen < 3
+  const handleTooLong = handleLen > HANDLE_MAX
+  const handleValidFormat = useMemo(() => /^[a-z0-9_]{3,24}$/.test(normalizedHandle), [normalizedHandle])
+  const handleValid = handleDirty && handleValidFormat && !checkingHandle && !handleTaken
 
-  const handleTooShort = normalizedHandle.length > 0 && normalizedHandle.length < 3
+  const bioLen = bio.length
+  const bioNearLimit = bioLen > BIO_MAX - 60
+  const bioTooLong = bioLen > BIO_MAX
+
   const interestsValid = Array.isArray(interests) && interests.length >= 1
+
   const canSave =
     !!me?.id &&
     !saving &&
     !checkingHandle &&
-    !handleTaken &&
-    normalizedHandle.length >= 3 &&
+    handleValid &&
+    !bioTooLong &&
     interestsValid
 
   useEffect(() => {
@@ -97,13 +110,13 @@ export default function Onboarding() {
     return () => { alive = false; sub.subscription.unsubscribe() }
   }, [nav])
 
-  // Debounced handle availability check
+  // Debounced handle availability check (only when format looks valid and changed)
   useEffect(() => {
     if (!me?.id) return
     setError(''); setNotice('')
 
     const h = normalizedHandle
-    if (!h || h.length < 3) {
+    if (!h || h.length < 3 || !/^[a-z0-9_]+$/.test(h)) {
       setHandleTaken(false)
       setCheckingHandle(false)
       if (checkTimer.current) clearTimeout(checkTimer.current)
@@ -142,8 +155,15 @@ export default function Onboarding() {
   }
 
   function nextFromBasics() {
-    if (normalizedHandle.length < 3) { setError('Handle must be at least 3 characters.'); return }
-    if (handleTaken) { setError('That handle is taken.'); return }
+    // Allow Next only if handle is valid and bio length is okay.
+    if (!handleValid) {
+      setError('Please choose a valid, available handle.')
+      return
+    }
+    if (bioTooLong) {
+      setError('Bio is too long.')
+      return
+    }
     setError('')
     setStep(3)
   }
@@ -153,10 +173,9 @@ export default function Onboarding() {
     setError(''); setNotice('')
 
     if (!me?.id) { setError('Please sign in first.'); return }
-    if (normalizedHandle.length < 3) { setError('Handle must be at least 3 characters.'); return }
-    if (checkingHandle) { setError('Checking handle availability…'); return }
-    if (handleTaken) { setError('That handle is taken.'); return }
+    if (!handleValid) { setError('Please choose a valid, available handle.'); return }
     if (!interestsValid) { setError('Please add at least one interest.'); return }
+    if (bioTooLong) { setError('Bio is too long.'); return }
 
     setSaving(true)
 
@@ -192,13 +211,10 @@ export default function Onboarding() {
     setTimeout(() => nav('/profile'), 600)
   }
 
-  // Top visual progress (line)
+  // Top visual progress (line) + numbered stepper
   const progressPct = Math.max(0, Math.min(100, Math.round((step / (TOTAL_STEPS - 1)) * 100)))
-
-  // Stepper header component
   const Stepper = () => (
     <div style={{ position:'sticky', top:0, zIndex:5, background:'transparent' }}>
-      {/* Progress bar */}
       <div style={{ height: 4, width: '100%', background: '#eee' }}>
         <div
           style={{
@@ -209,8 +225,6 @@ export default function Onboarding() {
           }}
         />
       </div>
-
-      {/* Numbered steps */}
       <div
         style={{
           display:'grid',
@@ -224,7 +238,7 @@ export default function Onboarding() {
         {STEP_LABELS.map((label, idx) => {
           const active = idx === step
           const done = idx < step
-          const canClick = idx <= step // only allow going backwards or to current
+          const canClick = idx <= step
           return (
             <button
               key={label}
@@ -349,8 +363,18 @@ export default function Onboarding() {
     )
   }
 
-  // STEP 2: Handle & Basics
+  // STEP 2: Handle & Basics (with inline validation)
   if (step === 2) {
+    const handleHelp = (() => {
+      if (!handleDirty) return 'Letters, numbers, underscore. 3–24 characters.'
+      if (handleTooShort) return 'Handle must be at least 3 characters.'
+      if (!/^[a-z0-9_]+$/.test(normalizedHandle)) return 'Only lowercase letters, numbers, and underscore allowed.'
+      if (checkingHandle) return 'Checking availability…'
+      if (handleTaken) return 'That handle is taken — try another.'
+      if (handleValid) return 'Looks good! Your handle is available.'
+      return 'Letters, numbers, underscore. 3–24 characters.'
+    })()
+
     return (
       <>
         <Stepper />
@@ -377,13 +401,8 @@ export default function Onboarding() {
             <div>
               <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
                 Handle
-                {normalizedHandle && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && (
-                  <span title="Available" style={{ color: 'green', fontSize: 12 }}>✓ available</span>
-                )}
-                {normalizedHandle && !checkingHandle && handleTaken && (
-                  <span title="Taken" style={{ color: '#b91c1c', fontSize: 12 }}>✗ taken</span>
-                )}
-                {checkingHandle && <span style={{ color: 'var(--muted)', fontSize: 12 }}>checking…</span>}
+                {handleValid && <span title="Available" style={{ color: 'green', fontSize: 12 }}>✓ available</span>}
+                {handleTaken && !checkingHandle && <span style={{ color: '#b91c1c', fontSize: 12 }}>✗ taken</span>}
               </label>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ color: 'var(--muted)' }}>@</span>
@@ -392,39 +411,88 @@ export default function Onboarding() {
                   onChange={(e) => setHandle(e.target.value)}
                   placeholder="yourname"
                   aria-label="handle"
+                  aria-invalid={!(handleValid || !handleDirty)}
+                  style={{
+                    borderColor:
+                      handleValid ? 'rgba(0,128,0,0.65)' :
+                      (handleDirty && !checkingHandle && (handleTooShort || handleTaken || !handleValidFormat))
+                        ? '#e11d48'
+                        : undefined,
+                    boxShadow:
+                      handleValid ? '0 0 0 2px rgba(0,128,0,0.15)' :
+                      (handleDirty && !checkingHandle && (handleTooShort || handleTaken || !handleValidFormat))
+                        ? '0 0 0 2px rgba(225,29,72,0.15)'
+                        : undefined
+                  }}
                 />
               </div>
-              <div style={{ fontSize: 12, color: handleTooShort ? '#b91c1c' : 'var(--muted)', marginTop: 4 }}>
-                {handleTooShort
-                  ? 'Handle must be at least 3 characters.'
-                  : 'Letters, numbers, underscore. Up to 24 characters.'}
+              <div style={{
+                fontSize: 12,
+                marginTop: 4,
+                color: handleValid ? 'green' : (handleTaken || handleTooShort || !handleValidFormat) ? '#b91c1c' : 'var(--muted)'
+              }}>
+                {handleHelp}
               </div>
             </div>
 
             {/* Display name */}
             <div>
-              <label style={{ fontWeight: 700 }}>Display name</label>
-              <input value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="How you want to appear" />
+              <label style={{ fontWeight: 700 }}>
+                Display name <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+              </label>
+              <input
+                value={displayName}
+                onChange={(e)=>setDisplayName(e.target.value)}
+                placeholder="How you want to appear"
+              />
             </div>
 
             {/* Location */}
             <div>
-              <label style={{ fontWeight: 700 }}>Location</label>
-              <input value={location} onChange={(e)=>setLocation(e.target.value)} placeholder="City, State (optional)" />
+              <label style={{ fontWeight: 700 }}>
+                Location <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+              </label>
+              <input
+                value={location}
+                onChange={(e)=>setLocation(e.target.value)}
+                placeholder="City, State"
+              />
             </div>
 
             {/* Bio */}
             <div>
-              <label style={{ fontWeight: 700 }}>Short bio</label>
-              <textarea rows={3} maxLength={300} value={bio} onChange={(e)=>setBio(e.target.value)} placeholder="A sentence or two (optional)" style={{ resize:'vertical' }} />
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-                {bio.length > 240 ? `${bio.length}/300` : 'Up to 300 characters.'}
+              <label style={{ fontWeight: 700 }}>
+                Short bio <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+              </label>
+              <textarea
+                rows={3}
+                maxLength={BIO_MAX}
+                value={bio}
+                onChange={(e)=>setBio(e.target.value)}
+                placeholder="A sentence or two"
+                style={{
+                  resize:'vertical',
+                  borderColor: bioTooLong ? '#e11d48' : undefined,
+                  boxShadow: bioTooLong ? '0 0 0 2px rgba(225,29,72,0.15)' : undefined
+                }}
+                aria-invalid={bioTooLong ? true : undefined}
+              />
+              <div style={{
+                fontSize: 12,
+                color: bioTooLong ? '#b91c1c' : bioNearLimit ? '#92400e' : 'var(--muted)',
+                marginTop: 4
+              }}>
+                {bioTooLong ? `${bioLen}/${BIO_MAX} — too long` :
+                 bioNearLimit ? `${bioLen}/${BIO_MAX} — near the limit` :
+                 `${bioLen}/${BIO_MAX}`}
               </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button className="btn" type="button" onClick={() => setStep(1)}>Back</button>
-              <button className="btn btn-primary" type="submit">Next</button>
+              <button className="btn btn-primary" type="submit" disabled={!handleValid || bioTooLong}>
+                Next
+              </button>
             </div>
           </form>
         </div>
@@ -464,6 +532,11 @@ export default function Onboarding() {
         <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14 }}>
           {/* Interests */}
           <InterestsPicker value={interests} onChange={setInterests} max={8} />
+          {!interestsValid && (
+            <div style={{ fontSize: 12, color:'#b91c1c' }}>
+              Please add at least one interest.
+            </div>
+          )}
 
           {/* Public toggle */}
           <div className="card" style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -498,7 +571,7 @@ export default function Onboarding() {
 function guessHandleFromEmail(email) {
   if (!email) return ''
   const base = email.split('@')[0] || ''
-  return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
+  return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX)
 }
 
 
