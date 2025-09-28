@@ -12,6 +12,7 @@ import { track } from '../lib/analytics'
 // 2 = Handle & Basics
 // 3 = Interests & Visibility (save)
 const TOTAL_STEPS = 4
+const STEP_LABELS = ['Welcome', 'Photo', 'Basics', 'Interests']
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -141,14 +142,8 @@ export default function Onboarding() {
   }
 
   function nextFromBasics() {
-    if (normalizedHandle.length < 3) {
-      setError('Handle must be at least 3 characters.')
-      return
-    }
-    if (handleTaken) {
-      setError('That handle is taken.')
-      return
-    }
+    if (normalizedHandle.length < 3) { setError('Handle must be at least 3 characters.'); return }
+    if (handleTaken) { setError('That handle is taken.'); return }
     setError('')
     setStep(3)
   }
@@ -197,10 +192,13 @@ export default function Onboarding() {
     setTimeout(() => nav('/profile'), 600)
   }
 
-  // Progress bar (0% → 100% across steps 0..3)
+  // Top visual progress (line)
   const progressPct = Math.max(0, Math.min(100, Math.round((step / (TOTAL_STEPS - 1)) * 100)))
-  const ProgressBar = () => (
+
+  // Stepper header component
+  const Stepper = () => (
     <div style={{ position:'sticky', top:0, zIndex:5, background:'transparent' }}>
+      {/* Progress bar */}
       <div style={{ height: 4, width: '100%', background: '#eee' }}>
         <div
           style={{
@@ -210,6 +208,63 @@ export default function Onboarding() {
             transition: 'width 240ms ease'
           }}
         />
+      </div>
+
+      {/* Numbered steps */}
+      <div
+        style={{
+          display:'grid',
+          gridTemplateColumns:`repeat(${TOTAL_STEPS}, 1fr)`,
+          gap:8,
+          padding:'10px 0',
+          maxWidth: 940,
+          margin: '0 auto'
+        }}
+      >
+        {STEP_LABELS.map((label, idx) => {
+          const active = idx === step
+          const done = idx < step
+          const canClick = idx <= step // only allow going backwards or to current
+          return (
+            <button
+              key={label}
+              onClick={() => { if (canClick) setStep(idx) }}
+              title={label}
+              disabled={!canClick}
+              style={{
+                display:'flex',
+                alignItems:'center',
+                gap:10,
+                justifyContent:'center',
+                padding:'8px 6px',
+                border:'1px solid var(--border)',
+                borderRadius:10,
+                background: active
+                  ? 'color-mix(in oklab, var(--primary), #ffffff 85%)'
+                  : done
+                    ? 'color-mix(in oklab, var(--primary), #ffffff 92%)'
+                    : '#fff',
+                color:'#111',
+                cursor: canClick ? 'pointer' : 'not-allowed'
+              }}
+            >
+              <span style={{
+                display:'inline-grid',
+                placeItems:'center',
+                width:24, height:24,
+                borderRadius:20,
+                border: '1px solid var(--border)',
+                background: active || done ? 'var(--primary)' : '#fff',
+                color: active || done ? '#fff' : '#333',
+                fontWeight: 700,
+                fontSize: 12
+              }}>{idx+1}</span>
+              <span style={{ fontWeight: active ? 800 : 600, color: active ? 'var(--primary)' : undefined }}>
+                {label}
+              </span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -226,7 +281,7 @@ export default function Onboarding() {
   if (step === 0) {
     return (
       <>
-        <ProgressBar />
+        <Stepper />
         <div className="container" style={{ padding: '48px 0', maxWidth: 820, textAlign: 'center' }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
             Step 1 of {TOTAL_STEPS}
@@ -267,7 +322,7 @@ export default function Onboarding() {
   if (step === 1) {
     return (
       <>
-        <ProgressBar />
+        <Stepper />
         <div className="container" style={{ padding: '48px 0', maxWidth: 820 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
             Step 2 of {TOTAL_STEPS}
@@ -298,7 +353,7 @@ export default function Onboarding() {
   if (step === 2) {
     return (
       <>
-        <ProgressBar />
+        <Stepper />
         <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
             Step 3 of {TOTAL_STEPS}
@@ -382,7 +437,7 @@ export default function Onboarding() {
 
   return (
     <>
-      <ProgressBar />
+      <Stepper />
       <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
           Step 4 of {TOTAL_STEPS}
