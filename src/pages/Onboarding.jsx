@@ -6,8 +6,12 @@ import AvatarUploader from '../components/AvatarUploader'
 import InterestsPicker from '../components/InterestsPicker'
 import { track } from '../lib/analytics'
 
-// 0 = Welcome, 1 = Avatar, 2 = Profile setup
-const TOTAL_STEPS = 3
+// Steps:
+// 0 = Welcome
+// 1 = Avatar
+// 2 = Handle & Basics
+// 3 = Interests & Visibility (save)
+const TOTAL_STEPS = 4
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -36,9 +40,10 @@ export default function Onboarding() {
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
-  const normalizedHandle = useMemo(() =>
-    (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, 24)
-  , [handle])
+  const normalizedHandle = useMemo(
+    () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, 24),
+    [handle]
+  )
 
   const handleTooShort = normalizedHandle.length > 0 && normalizedHandle.length < 3
   const interestsValid = Array.isArray(interests) && interests.length >= 1
@@ -130,13 +135,23 @@ export default function Onboarding() {
   }
 
   function nextFromAvatar() {
-    // Track whether they added an avatar or skipped
-    if (avatarUrl) {
-      track('Onboarding Avatar Added')
-    } else {
-      track('Onboarding Avatar Skipped')
-    }
+    if (avatarUrl) track('Onboarding Avatar Added')
+    else track('Onboarding Avatar Skipped')
     setStep(2)
+  }
+
+  function nextFromBasics() {
+    // Light validation on this step: just ensure handle length (we'll still re-check on save)
+    if (normalizedHandle.length < 3) {
+      setError('Handle must be at least 3 characters.')
+      return
+    }
+    if (handleTaken) {
+      setError('That handle is taken.')
+      return
+    }
+    setError('')
+    setStep(3)
   }
 
   async function handleSubmit(e) {
@@ -249,6 +264,7 @@ export default function Onboarding() {
         </div>
 
         <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <button className="btn" onClick={() => setStep(0)}>Back</button>
           <button className="btn btn-primary" onClick={nextFromAvatar}>Next</button>
           <button className="btn" onClick={() => { setAvatarUrl(''); nextFromAvatar() }}>Skip for now</button>
         </div>
@@ -256,20 +272,100 @@ export default function Onboarding() {
     )
   }
 
-  // STEP 2: Profile setup (handle, basics, interests, public toggle)
+  // STEP 2: Handle & Basics
+  if (step === 2) {
+    return (
+      <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+          Step 3 of {TOTAL_STEPS}
+        </div>
+        <h1 style={{ marginTop: 0, marginBottom: 8 }}>
+          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Choose</span>{' '}
+          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Your Handle</span>
+        </h1>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          Pick a unique handle and add a few basics.
+        </p>
+
+        {error && (
+          <div className="card" style={{ borderLeft: '4px solid #e11d48', color: '#b91c1c', marginBottom: 12 }}>
+            {error}
+          </div>
+        )}
+
+        <form className="card" onSubmit={(e) => { e.preventDefault(); nextFromBasics() }} style={{ display: 'grid', gap: 14 }}>
+          {/* Handle */}
+          <div>
+            <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+              Handle
+              {normalizedHandle && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && (
+                <span title="Available" style={{ color: 'green', fontSize: 12 }}>✓ available</span>
+              )}
+              {normalizedHandle && !checkingHandle && handleTaken && (
+                <span title="Taken" style={{ color: '#b91c1c', fontSize: 12 }}>✗ taken</span>
+              )}
+              {checkingHandle && <span style={{ color: 'var(--muted)', fontSize: 12 }}>checking…</span>}
+            </label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ color: 'var(--muted)' }}>@</span>
+              <input
+                value={handle}
+                onChange={(e) => setHandle(e.target.value)}
+                placeholder="yourname"
+                aria-label="handle"
+              />
+            </div>
+            <div style={{ fontSize: 12, color: handleTooShort ? '#b91c1c' : 'var(--muted)', marginTop: 4 }}>
+              {handleTooShort
+                ? 'Handle must be at least 3 characters.'
+                : 'Letters, numbers, underscore. Up to 24 characters.'}
+            </div>
+          </div>
+
+          {/* Display name */}
+          <div>
+            <label style={{ fontWeight: 700 }}>Display name</label>
+            <input value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="How you want to appear" />
+          </div>
+
+          {/* Location */}
+          <div>
+            <label style={{ fontWeight: 700 }}>Location</label>
+            <input value={location} onChange={(e)=>setLocation(e.target.value)} placeholder="City, State (optional)" />
+          </div>
+
+          {/* Bio */}
+          <div>
+            <label style={{ fontWeight: 700 }}>Short bio</label>
+            <textarea rows={3} maxLength={300} value={bio} onChange={(e)=>setBio(e.target.value)} placeholder="A sentence or two (optional)" style={{ resize:'vertical' }} />
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+              {bio.length > 240 ? `${bio.length}/300` : 'Up to 300 characters.'}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn" type="button" onClick={() => setStep(1)}>Back</button>
+            <button className="btn btn-primary" type="submit">Next</button>
+          </div>
+        </form>
+      </div>
+    )
+  }
+
+  // STEP 3: Interests & Visibility (final save)
   const previewPublicUrl = normalizedHandle ? `/u/${normalizedHandle}` : null
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-        Step 3 of {TOTAL_STEPS}
+        Step 4 of {TOTAL_STEPS}
       </div>
       <h1 style={{ marginTop: 0, marginBottom: 8 }}>
-        <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Finish</span>{' '}
-        <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Setting Up</span>
+        <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Interests</span>{' '}
+        <span style={{ color: 'var(--primary)', fontWeight: 800 }}>& Visibility</span>
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-        Choose a handle and add a few details so others can find you.
+        Add a few interests and choose whether your profile is public.
       </p>
 
       {error && (
@@ -284,60 +380,6 @@ export default function Onboarding() {
       )}
 
       <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14 }}>
-        {/* Handle */}
-        <div>
-          <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Handle
-            {normalizedHandle && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && (
-              <span title="Available" style={{ color: 'green', fontSize: 12 }}>✓ available</span>
-            )}
-            {normalizedHandle && !checkingHandle && handleTaken && (
-              <span title="Taken" style={{ color: '#b91c1c', fontSize: 12 }}>✗ taken</span>
-            )}
-            {checkingHandle && <span style={{ color: 'var(--muted)', fontSize: 12 }}>checking…</span>}
-          </label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ color: 'var(--muted)' }}>@</span>
-            <input
-              value={handle}
-              onChange={(e) => setHandle(e.target.value)}
-              placeholder="yourname"
-              aria-label="handle"
-            />
-          </div>
-          <div style={{ fontSize: 12, color: handleTooShort ? '#b91c1c' : 'var(--muted)', marginTop: 4 }}>
-            {handleTooShort
-              ? 'Handle must be at least 3 characters.'
-              : 'Letters, numbers, underscore. Up to 24 characters.'}
-          </div>
-          {publicProfile && previewPublicUrl && (
-            <div style={{ fontSize: 12, marginTop: 6 }}>
-              Public link (if public): <code>{window.location.origin}{previewPublicUrl}</code>
-            </div>
-          )}
-        </div>
-
-        {/* Display name */}
-        <div>
-          <label style={{ fontWeight: 700 }}>Display name</label>
-          <input value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="How you want to appear" />
-        </div>
-
-        {/* Location */}
-        <div>
-          <label style={{ fontWeight: 700 }}>Location</label>
-          <input value={location} onChange={(e)=>setLocation(e.target.value)} placeholder="City, State (optional)" />
-        </div>
-
-        {/* Bio */}
-        <div>
-          <label style={{ fontWeight: 700 }}>Short bio</label>
-          <textarea rows={3} maxLength={300} value={bio} onChange={(e)=>setBio(e.target.value)} placeholder="A sentence or two (optional)" style={{ resize:'vertical' }} />
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-            {bio.length > 240 ? `${bio.length}/300` : 'Up to 300 characters.'}
-          </div>
-        </div>
-
         {/* Interests */}
         <InterestsPicker value={interests} onChange={setInterests} max={8} />
 
@@ -349,7 +391,15 @@ export default function Onboarding() {
           </label>
         </div>
 
+        {/* Preview link (optional) */}
+        {publicProfile && previewPublicUrl && (
+          <div className="muted" style={{ fontSize: 12 }}>
+            Your public link will be: <code>{window.location.origin}{previewPublicUrl}</code>
+          </div>
+        )}
+
         <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          <button className="btn" type="button" onClick={() => setStep(2)} disabled={saving}>Back</button>
           <button className="btn btn-primary" type="submit" disabled={!canSave}>
             {saving ? 'Saving…' : 'Save & Continue'}
           </button>
