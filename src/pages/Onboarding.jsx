@@ -15,6 +15,7 @@ const TOTAL_STEPS = 4
 const STEP_LABELS = ['Welcome', 'Photo', 'Basics', 'Interests']
 const HANDLE_MAX = 24
 const BIO_MAX = 300
+const DRAFT_VERSION = 'v1' // bump if structure changes
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -37,19 +38,20 @@ export default function Onboarding() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [savedHint, setSavedHint] = useState(false)
 
   // handle availability
   const [checkingHandle, setCheckingHandle] = useState(false)
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
-  // ===== refs for auto-focus / key handling =====
+  // refs for auto-focus / key handling
   const avatarStepStartRef = useRef(null)
   const handleInputRef = useRef(null)
   const displayNameRef = useRef(null)
   const locationRef = useRef(null)
   const bioRef = useRef(null)
-  const interestsFirstFocusableRef = useRef(null) // set by InterestsPicker via prop (optional)
+  const interestsFirstFocusableRef = useRef(null)
 
   // ===== Validation helpers =====
   const normalizedHandle = useMemo(
@@ -76,7 +78,45 @@ export default function Onboarding() {
     !bioTooLong &&
     interestsValid
 
-  // ===== Auth bootstrap =====
+  // ===== Helpers for draft =====
+  const draftKey = me?.id ? `onbDraft:${DRAFT_VERSION}:${me.id}` : null
+  const draftSaveTimer = useRef(null)
+  function showSavedHint() {
+    setSavedHint(true)
+    setTimeout(() => setSavedHint(false), 900)
+  }
+  function saveDraftImmediate() {
+    if (!draftKey) return
+    const payload = {
+      step, handle, displayName, location, bio, publicProfile, avatarUrl, interests,
+      ts: Date.now(), v: DRAFT_VERSION
+    }
+    try {
+      localStorage.setItem(draftKey, JSON.stringify(payload))
+      showSavedHint()
+    } catch {}
+  }
+  function saveDraftDebounced() {
+    if (!draftKey) return
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current)
+    draftSaveTimer.current = setTimeout(saveDraftImmediate, 400)
+  }
+  function loadDraftIfAny() {
+    if (!draftKey) return null
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (!raw) return null
+      const d = JSON.parse(raw)
+      if (!d || d.v !== DRAFT_VERSION) return null
+      return d
+    } catch { return null }
+  }
+  function clearDraft() {
+    if (!draftKey) return
+    try { localStorage.removeItem(draftKey) } catch {}
+  }
+
+  // ===== Auth bootstrap + initial data (and draft restore) =====
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -91,6 +131,7 @@ export default function Onboarding() {
         .eq('user_id', user.id)
         .maybeSingle()
 
+      // If profile exists, seed from DB
       if (prof) {
         setHandle(prof.handle || guessHandleFromEmail(user.email))
         setDisplayName(prof.display_name || '')
@@ -104,17 +145,35 @@ export default function Onboarding() {
         setInterests([])
       }
 
-      // Skip if already complete
+      // If already complete, skip onboarding
       if (prof?.handle && Array.isArray(prof?.interests) && prof.interests.length >= 1) {
         nav('/profile', { replace: true })
         return
       }
 
-      setLoading(false)
+      // Try restoring a local draft (only if not complete)
+      setTimeout(() => {
+        const d = loadDraftIfAny()
+        if (d) {
+          setStep(d.step ?? 0)
+          setHandle(d.handle ?? '')
+          setDisplayName(d.displayName ?? '')
+          setLocation(d.location ?? '')
+          setBio(d.bio ?? '')
+          setPublicProfile(typeof d.publicProfile === 'boolean' ? d.publicProfile : true)
+          setAvatarUrl(d.avatarUrl ?? '')
+          setInterests(Array.isArray(d.interests) ? d.interests : [])
+          setNotice('Draft restored.')
+          setTimeout(() => setNotice(''), 1200)
+        }
+        setLoading(false)
+      }, 0)
     })()
+
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       if (!s?.user) { setMe(null); setError('Please sign in to continue.') } else { setMe(s.user) }
     })
+
     return () => { alive = false; sub.subscription.unsubscribe() }
   }, [nav])
 
@@ -153,22 +212,17 @@ export default function Onboarding() {
 
   // ===== Step auto-focus & hotkeys =====
   useEffect(() => {
-    // Focus first useful element per step
     const focus = (el) => { try { el?.focus() } catch {} }
 
     if (step === 1) {
-      // Avatar step: focus a "Next" helper anchor if provided
       focus(avatarStepStartRef.current)
     } else if (step === 2) {
-      // Basics: focus handle first if not valid, else display name
       if (!handleValid) focus(handleInputRef.current)
       else focus(displayNameRef.current)
     } else if (step === 3) {
-      // Interests: try to focus the first focusable inside picker if exposed; else nothing
       focus(interestsFirstFocusableRef.current)
     }
 
-    // Global hotkeys for steps 1–3
     function onKeyDown(e) {
       const esc = e.key === 'Escape'
       if (esc && step > 0) {
@@ -179,30 +233,19 @@ export default function Onboarding() {
         return
       }
 
-      // Enter-to-advance (not on Welcome)
       if (e.key === 'Enter' && !e.shiftKey) {
-        // Avoid submitting when typing multiline bio
         const active = document.activeElement
         const isBio = active && active.getAttribute('aria-label') === 'bio-textarea'
         if (isBio) return
 
-        if (step === 1) {
-          e.preventDefault()
-          nextFromAvatar()
-          return
-        }
+        if (step === 1) { e.preventDefault(); nextFromAvatar(); return }
         if (step === 2) {
-          // Only advance if basic validations are OK
-          if (handleValid && !bioTooLong) {
-            e.preventDefault()
-            nextFromBasics()
-          }
+          if (handleValid && !bioTooLong) { e.preventDefault(); nextFromBasics() }
           return
         }
         if (step === 3) {
           if (canSave) {
             e.preventDefault()
-            // submit the main form programmatically
             const btn = document.getElementById('onb-save-btn')
             btn?.click()
           }
@@ -216,16 +259,27 @@ export default function Onboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, handleValid, bioTooLong, canSave])
 
-  // When handle transitions from invalid→valid, auto-focus display name once
+  // When handle transitions invalid→valid, move focus once
   const lastHandleValidRef = useRef(false)
   useEffect(() => {
     if (!lastHandleValidRef.current && handleValid) {
-      // became valid now
       try { displayNameRef.current?.focus() } catch {}
     }
     lastHandleValidRef.current = handleValid
   }, [handleValid])
 
+  // ===== Auto-save draft on any relevant change =====
+  useEffect(() => { saveDraftDebounced() },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [draftKey, step, handle, displayName, location, bio, publicProfile, avatarUrl, JSON.stringify(interests)]
+  )
+  // Also save when unmounting
+  useEffect(() => {
+    return () => { if (draftSaveTimer.current) { clearTimeout(draftSaveTimer.current); saveDraftImmediate() } }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ===== Actions =====
   function startOnboarding() {
     setStep(1)
     track('Onboarding Started')
@@ -281,6 +335,8 @@ export default function Onboarding() {
       interests_count: interests.length,
       public_profile: !!publicProfile
     })
+
+    clearDraft() // ✅ clear saved draft on success
 
     setNotice('Saved! Redirecting to your profile…')
     setSaving(false)
@@ -417,13 +473,13 @@ export default function Onboarding() {
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
             Step 2 of {TOTAL_STEPS}
           </div>
-        <h1 style={{ marginTop: 0, marginBottom: 8 }}>
-          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Add</span>{' '}
-          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>a Photo</span>
-        </h1>
-        <p className="muted" style={{ marginBottom: 16 }}>
-          Profiles with photos get more responses. You can always change or remove it later.
-        </p>
+          <h1 style={{ marginTop: 0, marginBottom: 8 }}>
+            <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Add</span>{' '}
+            <span style={{ color: 'var(--primary)', fontWeight: 800 }}>a Photo</span>
+          </h1>
+          <p className="muted" style={{ marginBottom: 16 }}>
+            Profiles with photos get more responses. You can always change or remove it later.
+          </p>
 
           <div className="card">
             <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
@@ -442,7 +498,7 @@ export default function Onboarding() {
     )
   }
 
-  // STEP 2: Handle & Basics (with inline validation and auto-focus)
+  // STEP 2: Handle & Basics
   if (step === 2) {
     const handleHelp = (() => {
       if (!handleDirty) return 'Letters, numbers, underscore. 3–24 characters.'
@@ -475,11 +531,7 @@ export default function Onboarding() {
             </div>
           )}
 
-          <form
-            className="card"
-            onSubmit={(e) => { e.preventDefault(); nextFromBasics() }}
-            style={{ display: 'grid', gap: 14 }}
-          >
+          <form className="card" onSubmit={(e) => { e.preventDefault(); nextFromBasics() }} style={{ display: 'grid', gap: 14 }}>
             {/* Handle */}
             <div>
               <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -621,7 +673,6 @@ export default function Onboarding() {
             value={interests}
             onChange={setInterests}
             max={8}
-            // Optional: pass a ref setter so we can focus first chip/button
             firstFocusableRef={interestsFirstFocusableRef}
           />
           {!interestsValid && (
@@ -656,6 +707,17 @@ export default function Onboarding() {
           </div>
         </form>
       </div>
+
+      {/* Tiny "Draft saved" hint */}
+      {savedHint && (
+        <div style={{
+          position:'fixed', left:12, bottom:12, padding:'6px 10px',
+          border:'1px solid #e5e7eb', background:'#fff', borderRadius:8,
+          boxShadow:'0 6px 20px rgba(0,0,0,0.10)', fontSize:12, color:'#374151'
+        }}>
+          Draft saved
+        </div>
+      )}
     </>
   )
 }
@@ -665,6 +727,7 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX)
 }
+
 
 
 
