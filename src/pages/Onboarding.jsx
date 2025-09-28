@@ -15,7 +15,7 @@ const TOTAL_STEPS = 4
 const STEP_LABELS = ['Welcome', 'Photo', 'Basics', 'Interests']
 const HANDLE_MAX = 24
 const BIO_MAX = 300
-const DRAFT_VERSION = 'v1' // bump if structure changes
+const DRAFT_VERSION = 'v2' // bump if structure changes
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -78,42 +78,69 @@ export default function Onboarding() {
     !bioTooLong &&
     interestsValid
 
-  // ===== Helpers for draft =====
-  const draftKey = me?.id ? `onbDraft:${DRAFT_VERSION}:${me.id}` : null
-  const draftSaveTimer = useRef(null)
+  // ===== Local draft helpers (fallback) =====
+  const localDraftKey = me?.id ? `onbDraft:${DRAFT_VERSION}:${me.id}` : null
+  const debounceTimer = useRef(null)
   function showSavedHint() {
     setSavedHint(true)
     setTimeout(() => setSavedHint(false), 900)
   }
-  function saveDraftImmediate() {
-    if (!draftKey) return
-    const payload = {
-      step, handle, displayName, location, bio, publicProfile, avatarUrl, interests,
-      ts: Date.now(), v: DRAFT_VERSION
-    }
-    try {
-      localStorage.setItem(draftKey, JSON.stringify(payload))
-      showSavedHint()
-    } catch {}
+  function saveLocalDraftImmediate() {
+    if (!localDraftKey) return
+    const payload = { step, handle, displayName, location, bio, publicProfile, avatarUrl, interests, ts: Date.now(), v: DRAFT_VERSION }
+    try { localStorage.setItem(localDraftKey, JSON.stringify(payload)) } catch {}
   }
-  function saveDraftDebounced() {
-    if (!draftKey) return
-    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current)
-    draftSaveTimer.current = setTimeout(saveDraftImmediate, 400)
+  function saveLocalDraftDebounced() {
+    if (!localDraftKey) return
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    debounceTimer.current = setTimeout(saveLocalDraftImmediate, 400)
   }
-  function loadDraftIfAny() {
-    if (!draftKey) return null
+  function loadLocalDraft() {
+    if (!localDraftKey) return null
     try {
-      const raw = localStorage.getItem(draftKey)
+      const raw = localStorage.getItem(localDraftKey)
       if (!raw) return null
       const d = JSON.parse(raw)
       if (!d || d.v !== DRAFT_VERSION) return null
       return d
     } catch { return null }
   }
-  function clearDraft() {
-    if (!draftKey) return
-    try { localStorage.removeItem(draftKey) } catch {}
+  function clearLocalDraft() {
+    if (!localDraftKey) return
+    try { localStorage.removeItem(localDraftKey) } catch {}
+  }
+
+  // ===== Server draft helpers (Supabase) =====
+  const serverSaveTimer = useRef(null)
+  async function loadServerDraft() {
+    if (!me?.id) return null
+    const { data, error: err } = await supabase
+      .from('onboarding_drafts')
+      .select('data, updated_at')
+      .eq('user_id', me.id)
+      .maybeSingle()
+    if (err) return null
+    return data?.data || null
+  }
+  async function saveServerDraftImmediate() {
+    if (!me?.id) return
+    const payload = {
+      step, handle, displayName, location, bio, publicProfile, avatarUrl, interests,
+      v: DRAFT_VERSION
+    }
+    const { error: upErr } = await supabase
+      .from('onboarding_drafts')
+      .upsert({ user_id: me.id, data: payload, updated_at: new Date().toISOString() })
+    if (!upErr) showSavedHint()
+  }
+  function saveServerDraftDebounced() {
+    if (!me?.id) return
+    if (serverSaveTimer.current) clearTimeout(serverSaveTimer.current)
+    serverSaveTimer.current = setTimeout(saveServerDraftImmediate, 450)
+  }
+  async function clearServerDraft() {
+    if (!me?.id) return
+    await supabase.from('onboarding_drafts').delete().eq('user_id', me.id)
   }
 
   // ===== Auth bootstrap + initial data (and draft restore) =====
@@ -131,7 +158,7 @@ export default function Onboarding() {
         .eq('user_id', user.id)
         .maybeSingle()
 
-      // If profile exists, seed from DB
+      // Seed from DB first
       if (prof) {
         setHandle(prof.handle || guessHandleFromEmail(user.email))
         setDisplayName(prof.display_name || '')
@@ -151,23 +178,41 @@ export default function Onboarding() {
         return
       }
 
-      // Try restoring a local draft (only if not complete)
-      setTimeout(() => {
-        const d = loadDraftIfAny()
-        if (d) {
-          setStep(d.step ?? 0)
-          setHandle(d.handle ?? '')
-          setDisplayName(d.displayName ?? '')
-          setLocation(d.location ?? '')
-          setBio(d.bio ?? '')
-          setPublicProfile(typeof d.publicProfile === 'boolean' ? d.publicProfile : true)
-          setAvatarUrl(d.avatarUrl ?? '')
-          setInterests(Array.isArray(d.interests) ? d.interests : [])
-          setNotice('Draft restored.')
-          setTimeout(() => setNotice(''), 1200)
-        }
+      // Try server draft first
+      const server = await loadServerDraft()
+      if (server && server.v === DRAFT_VERSION) {
+        setStep(server.step ?? 0)
+        setHandle(server.handle ?? '')
+        setDisplayName(server.displayName ?? '')
+        setLocation(server.location ?? '')
+        setBio(server.bio ?? '')
+        setPublicProfile(
+          typeof server.publicProfile === 'boolean' ? server.publicProfile : true
+        )
+        setAvatarUrl(server.avatarUrl ?? '')
+        setInterests(Array.isArray(server.interests) ? server.interests : [])
+        setNotice('Draft restored from server.')
+        setTimeout(() => setNotice(''), 1200)
         setLoading(false)
-      }, 0)
+        return
+      }
+
+      // Fallback: local draft
+      const local = loadLocalDraft()
+      if (local) {
+        setStep(local.step ?? 0)
+        setHandle(local.handle ?? '')
+        setDisplayName(local.displayName ?? '')
+        setLocation(local.location ?? '')
+        setBio(local.bio ?? '')
+        setPublicProfile(typeof local.publicProfile === 'boolean' ? local.publicProfile : true)
+        setAvatarUrl(local.avatarUrl ?? '')
+        setInterests(Array.isArray(local.interests) ? local.interests : [])
+        setNotice('Draft restored.')
+        setTimeout(() => setNotice(''), 1200)
+      }
+
+      setLoading(false)
     })()
 
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
@@ -268,14 +313,19 @@ export default function Onboarding() {
     lastHandleValidRef.current = handleValid
   }, [handleValid])
 
-  // ===== Auto-save draft on any relevant change =====
-  useEffect(() => { saveDraftDebounced() },
+  // ===== Auto-save (local + server) on changes =====
+  useEffect(() => {
+    saveLocalDraftDebounced()
+    saveServerDraftDebounced()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draftKey, step, handle, displayName, location, bio, publicProfile, avatarUrl, JSON.stringify(interests)]
-  )
+  }, [me?.id, step, handle, displayName, location, bio, publicProfile, avatarUrl, JSON.stringify(interests)])
+
   // Also save when unmounting
   useEffect(() => {
-    return () => { if (draftSaveTimer.current) { clearTimeout(draftSaveTimer.current); saveDraftImmediate() } }
+    return () => {
+      if (debounceTimer.current) { clearTimeout(debounceTimer.current); saveLocalDraftImmediate() }
+      if (serverSaveTimer.current) { clearTimeout(serverSaveTimer.current); saveServerDraftImmediate() }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -336,7 +386,9 @@ export default function Onboarding() {
       public_profile: !!publicProfile
     })
 
-    clearDraft() // ✅ clear saved draft on success
+    // Clear drafts
+    clearLocalDraft()
+    await clearServerDraft()
 
     setNotice('Saved! Redirecting to your profile…')
     setSaving(false)
@@ -348,25 +400,9 @@ export default function Onboarding() {
   const Stepper = () => (
     <div style={{ position:'sticky', top:0, zIndex:5, background:'transparent' }}>
       <div style={{ height: 4, width: '100%', background: '#eee' }}>
-        <div
-          style={{
-            height: 4,
-            width: `${progressPct}%`,
-            background: 'var(--primary)',
-            transition: 'width 240ms ease'
-          }}
-        />
+        <div style={{ height: 4, width: `${progressPct}%`, background: 'var(--primary)', transition: 'width 240ms ease' }} />
       </div>
-      <div
-        style={{
-          display:'grid',
-          gridTemplateColumns:`repeat(${TOTAL_STEPS}, 1fr)`,
-          gap:8,
-          padding:'10px 0',
-          maxWidth: 940,
-          margin: '0 auto'
-        }}
-      >
+      <div style={{ display:'grid', gridTemplateColumns:`repeat(${TOTAL_STEPS}, 1fr)`, gap:8, padding:'10px 0', maxWidth: 940, margin: '0 auto' }}>
         {STEP_LABELS.map((label, idx) => {
           const active = idx === step
           const done = idx < step
@@ -378,32 +414,18 @@ export default function Onboarding() {
               title={label}
               disabled={!canClick}
               style={{
-                display:'flex',
-                alignItems:'center',
-                gap:10,
-                justifyContent:'center',
-                padding:'8px 6px',
-                border:'1px solid var(--border)',
-                borderRadius:10,
-                background: active
-                  ? 'color-mix(in oklab, var(--primary), #ffffff 85%)'
-                  : done
-                    ? 'color-mix(in oklab, var(--primary), #ffffff 92%)'
-                    : '#fff',
-                color:'#111',
-                cursor: canClick ? 'pointer' : 'not-allowed'
+                display:'flex', alignItems:'center', gap:10, justifyContent:'center',
+                padding:'8px 6px', border:'1px solid var(--border)', borderRadius:10,
+                background: active ? 'color-mix(in oklab, var(--primary), #ffffff 85%)'
+                  : done ? 'color-mix(in oklab, var(--primary), #ffffff 92%)' : '#fff',
+                color:'#111', cursor: canClick ? 'pointer' : 'not-allowed'
               }}
             >
               <span style={{
-                display:'inline-grid',
-                placeItems:'center',
-                width:24, height:24,
-                borderRadius:20,
+                display:'inline-grid', placeItems:'center', width:24, height:24, borderRadius:20,
                 border: '1px solid var(--border)',
                 background: active || done ? 'var(--primary)' : '#fff',
-                color: active || done ? '#fff' : '#333',
-                fontWeight: 700,
-                fontSize: 12
+                color: active || done ? '#fff' : '#333', fontWeight: 700, fontSize: 12
               }}>{idx+1}</span>
               <span style={{ fontWeight: active ? 800 : 600, color: active ? 'var(--primary)' : undefined }}>
                 {label}
