@@ -43,6 +43,14 @@ export default function Onboarding() {
   const [handleTaken, setHandleTaken] = useState(false)
   const checkTimer = useRef(null)
 
+  // ===== refs for auto-focus / key handling =====
+  const avatarStepStartRef = useRef(null)
+  const handleInputRef = useRef(null)
+  const displayNameRef = useRef(null)
+  const locationRef = useRef(null)
+  const bioRef = useRef(null)
+  const interestsFirstFocusableRef = useRef(null) // set by InterestsPicker via prop (optional)
+
   // ===== Validation helpers =====
   const normalizedHandle = useMemo(
     () => (handle || '').toLowerCase().trim().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX),
@@ -51,7 +59,6 @@ export default function Onboarding() {
   const handleDirty = handle.length > 0
   const handleLen = normalizedHandle.length
   const handleTooShort = handleDirty && handleLen < 3
-  const handleTooLong = handleLen > HANDLE_MAX
   const handleValidFormat = useMemo(() => /^[a-z0-9_]{3,24}$/.test(normalizedHandle), [normalizedHandle])
   const handleValid = handleDirty && handleValidFormat && !checkingHandle && !handleTaken
 
@@ -69,6 +76,7 @@ export default function Onboarding() {
     !bioTooLong &&
     interestsValid
 
+  // ===== Auth bootstrap =====
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -96,7 +104,7 @@ export default function Onboarding() {
         setInterests([])
       }
 
-      // If they already meet requirements, skip onboarding entirely
+      // Skip if already complete
       if (prof?.handle && Array.isArray(prof?.interests) && prof.interests.length >= 1) {
         nav('/profile', { replace: true })
         return
@@ -110,7 +118,7 @@ export default function Onboarding() {
     return () => { alive = false; sub.subscription.unsubscribe() }
   }, [nav])
 
-  // Debounced handle availability check (only when format looks valid and changed)
+  // ===== Debounced handle availability check =====
   useEffect(() => {
     if (!me?.id) return
     setError(''); setNotice('')
@@ -138,10 +146,85 @@ export default function Onboarding() {
       }
       setHandleTaken((data || []).some(r => r.user_id !== me.id))
       setCheckingHandle(false)
-    }, 400)
+    }, 350)
 
     return () => { if (checkTimer.current) clearTimeout(checkTimer.current) }
   }, [normalizedHandle, me])
+
+  // ===== Step auto-focus & hotkeys =====
+  useEffect(() => {
+    // Focus first useful element per step
+    const focus = (el) => { try { el?.focus() } catch {} }
+
+    if (step === 1) {
+      // Avatar step: focus a "Next" helper anchor if provided
+      focus(avatarStepStartRef.current)
+    } else if (step === 2) {
+      // Basics: focus handle first if not valid, else display name
+      if (!handleValid) focus(handleInputRef.current)
+      else focus(displayNameRef.current)
+    } else if (step === 3) {
+      // Interests: try to focus the first focusable inside picker if exposed; else nothing
+      focus(interestsFirstFocusableRef.current)
+    }
+
+    // Global hotkeys for steps 1–3
+    function onKeyDown(e) {
+      const esc = e.key === 'Escape'
+      if (esc && step > 0) {
+        e.preventDefault()
+        if (step === 1) setStep(0)
+        if (step === 2) setStep(1)
+        if (step === 3) setStep(2)
+        return
+      }
+
+      // Enter-to-advance (not on Welcome)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        // Avoid submitting when typing multiline bio
+        const active = document.activeElement
+        const isBio = active && active.getAttribute('aria-label') === 'bio-textarea'
+        if (isBio) return
+
+        if (step === 1) {
+          e.preventDefault()
+          nextFromAvatar()
+          return
+        }
+        if (step === 2) {
+          // Only advance if basic validations are OK
+          if (handleValid && !bioTooLong) {
+            e.preventDefault()
+            nextFromBasics()
+          }
+          return
+        }
+        if (step === 3) {
+          if (canSave) {
+            e.preventDefault()
+            // submit the main form programmatically
+            const btn = document.getElementById('onb-save-btn')
+            btn?.click()
+          }
+          return
+        }
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, handleValid, bioTooLong, canSave])
+
+  // When handle transitions from invalid→valid, auto-focus display name once
+  const lastHandleValidRef = useRef(false)
+  useEffect(() => {
+    if (!lastHandleValidRef.current && handleValid) {
+      // became valid now
+      try { displayNameRef.current?.focus() } catch {}
+    }
+    lastHandleValidRef.current = handleValid
+  }, [handleValid])
 
   function startOnboarding() {
     setStep(1)
@@ -155,15 +238,8 @@ export default function Onboarding() {
   }
 
   function nextFromBasics() {
-    // Allow Next only if handle is valid and bio length is okay.
-    if (!handleValid) {
-      setError('Please choose a valid, available handle.')
-      return
-    }
-    if (bioTooLong) {
-      setError('Bio is too long.')
-      return
-    }
+    if (!handleValid) { setError('Please choose a valid, available handle.'); return }
+    if (bioTooLong) { setError('Bio is too long.'); return }
     setError('')
     setStep(3)
   }
@@ -341,21 +417,24 @@ export default function Onboarding() {
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
             Step 2 of {TOTAL_STEPS}
           </div>
-          <h1 style={{ marginTop: 0, marginBottom: 8 }}>
-            <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Add</span>{' '}
-            <span style={{ color: 'var(--primary)', fontWeight: 800 }}>a Photo</span>
-          </h1>
-          <p className="muted" style={{ marginBottom: 16 }}>
-            Profiles with photos get more responses. You can always change or remove it later.
-          </p>
+        <h1 style={{ marginTop: 0, marginBottom: 8 }}>
+          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Add</span>{' '}
+          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>a Photo</span>
+        </h1>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          Profiles with photos get more responses. You can always change or remove it later.
+        </p>
 
           <div className="card">
             <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
           </div>
 
+          {/* Invisible anchor for focus start */}
+          <button ref={avatarStepStartRef} style={{ position:'absolute', left:-9999, top:-9999 }} aria-hidden />
+
           <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button className="btn" onClick={() => setStep(0)}>Back</button>
-            <button className="btn btn-primary" onClick={nextFromAvatar}>Next</button>
+            <button className="btn" onClick={() => setStep(0)}>Back (Esc)</button>
+            <button className="btn btn-primary" onClick={nextFromAvatar}>Next (Enter)</button>
             <button className="btn" onClick={() => { setAvatarUrl(''); nextFromAvatar() }}>Skip for now</button>
           </div>
         </div>
@@ -363,7 +442,7 @@ export default function Onboarding() {
     )
   }
 
-  // STEP 2: Handle & Basics (with inline validation)
+  // STEP 2: Handle & Basics (with inline validation and auto-focus)
   if (step === 2) {
     const handleHelp = (() => {
       if (!handleDirty) return 'Letters, numbers, underscore. 3–24 characters.'
@@ -396,7 +475,11 @@ export default function Onboarding() {
             </div>
           )}
 
-          <form className="card" onSubmit={(e) => { e.preventDefault(); nextFromBasics() }} style={{ display: 'grid', gap: 14 }}>
+          <form
+            className="card"
+            onSubmit={(e) => { e.preventDefault(); nextFromBasics() }}
+            style={{ display: 'grid', gap: 14 }}
+          >
             {/* Handle */}
             <div>
               <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -407,11 +490,11 @@ export default function Onboarding() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <span style={{ color: 'var(--muted)' }}>@</span>
                 <input
+                  ref={handleInputRef}
                   value={handle}
                   onChange={(e) => setHandle(e.target.value)}
                   placeholder="yourname"
                   aria-label="handle"
-                  aria-invalid={!(handleValid || !handleDirty)}
                   style={{
                     borderColor:
                       handleValid ? 'rgba(0,128,0,0.65)' :
@@ -441,6 +524,7 @@ export default function Onboarding() {
                 Display name <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
               </label>
               <input
+                ref={displayNameRef}
                 value={displayName}
                 onChange={(e)=>setDisplayName(e.target.value)}
                 placeholder="How you want to appear"
@@ -453,6 +537,7 @@ export default function Onboarding() {
                 Location <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
               </label>
               <input
+                ref={locationRef}
                 value={location}
                 onChange={(e)=>setLocation(e.target.value)}
                 placeholder="City, State"
@@ -465,17 +550,18 @@ export default function Onboarding() {
                 Short bio <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
               </label>
               <textarea
+                ref={bioRef}
                 rows={3}
                 maxLength={BIO_MAX}
                 value={bio}
                 onChange={(e)=>setBio(e.target.value)}
                 placeholder="A sentence or two"
+                aria-label="bio-textarea"
                 style={{
                   resize:'vertical',
                   borderColor: bioTooLong ? '#e11d48' : undefined,
                   boxShadow: bioTooLong ? '0 0 0 2px rgba(225,29,72,0.15)' : undefined
                 }}
-                aria-invalid={bioTooLong ? true : undefined}
               />
               <div style={{
                 fontSize: 12,
@@ -489,9 +575,9 @@ export default function Onboarding() {
             </div>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button className="btn" type="button" onClick={() => setStep(1)}>Back</button>
+              <button className="btn" type="button" onClick={() => setStep(1)}>Back (Esc)</button>
               <button className="btn btn-primary" type="submit" disabled={!handleValid || bioTooLong}>
-                Next
+                Next (Enter)
               </button>
             </div>
           </form>
@@ -531,7 +617,13 @@ export default function Onboarding() {
 
         <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14 }}>
           {/* Interests */}
-          <InterestsPicker value={interests} onChange={setInterests} max={8} />
+          <InterestsPicker
+            value={interests}
+            onChange={setInterests}
+            max={8}
+            // Optional: pass a ref setter so we can focus first chip/button
+            firstFocusableRef={interestsFirstFocusableRef}
+          />
           {!interestsValid && (
             <div style={{ fontSize: 12, color:'#b91c1c' }}>
               Please add at least one interest.
@@ -554,9 +646,9 @@ export default function Onboarding() {
           )}
 
           <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-            <button className="btn" type="button" onClick={() => setStep(2)} disabled={saving}>Back</button>
-            <button className="btn btn-primary" type="submit" disabled={!canSave}>
-              {saving ? 'Saving…' : 'Save & Continue'}
+            <button className="btn" type="button" onClick={() => setStep(2)} disabled={saving}>Back (Esc)</button>
+            <button id="onb-save-btn" className="btn btn-primary" type="submit" disabled={!canSave}>
+              {saving ? 'Saving…' : 'Save & Continue (Enter)'}
             </button>
             <button className="btn" type="button" onClick={()=>nav('/profile')} disabled={saving}>
               Skip for now
@@ -573,6 +665,7 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, HANDLE_MAX)
 }
+
 
 
 
