@@ -6,7 +6,8 @@ import AvatarUploader from '../components/AvatarUploader'
 import InterestsPicker from '../components/InterestsPicker'
 import { track } from '../lib/analytics'
 
-const TOTAL_STEPS = 2 // 0 = Welcome, 1 = Profile setup
+// 0 = Welcome, 1 = Avatar, 2 = Profile setup
+const TOTAL_STEPS = 3
 
 export default function Onboarding() {
   const nav = useNavigate()
@@ -41,7 +42,13 @@ export default function Onboarding() {
 
   const handleTooShort = normalizedHandle.length > 0 && normalizedHandle.length < 3
   const interestsValid = Array.isArray(interests) && interests.length >= 1
-  const canSave = !!me?.id && !saving && !checkingHandle && !handleTaken && normalizedHandle.length >= 3 && interestsValid
+  const canSave =
+    !!me?.id &&
+    !saving &&
+    !checkingHandle &&
+    !handleTaken &&
+    normalizedHandle.length >= 3 &&
+    interestsValid
 
   useEffect(() => {
     let alive = true
@@ -122,6 +129,16 @@ export default function Onboarding() {
     track('Onboarding Started')
   }
 
+  function nextFromAvatar() {
+    // Track whether they added an avatar or skipped
+    if (avatarUrl) {
+      track('Onboarding Avatar Added')
+    } else {
+      track('Onboarding Avatar Skipped')
+    }
+    setStep(2)
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError(''); setNotice('')
@@ -155,7 +172,6 @@ export default function Onboarding() {
       return
     }
 
-    // analytics
     track('Onboarding Completed', {
       has_avatar: !!avatarUrl,
       interests_count: interests.length,
@@ -213,37 +229,61 @@ export default function Onboarding() {
     )
   }
 
-  // STEP 1: Profile setup (existing form)
+  // STEP 1: Avatar
+  if (step === 1) {
+    return (
+      <div className="container" style={{ padding: '48px 0', maxWidth: 820 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+          Step 2 of {TOTAL_STEPS}
+        </div>
+        <h1 style={{ marginTop: 0, marginBottom: 8 }}>
+          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Add</span>{' '}
+          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>a Photo</span>
+        </h1>
+        <p className="muted" style={{ marginBottom: 16 }}>
+          Profiles with photos get more responses. You can always change or remove it later.
+        </p>
+
+        <div className="card">
+          <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
+        </div>
+
+        <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={nextFromAvatar}>Next</button>
+          <button className="btn" onClick={() => { setAvatarUrl(''); nextFromAvatar() }}>Skip for now</button>
+        </div>
+      </div>
+    )
+  }
+
+  // STEP 2: Profile setup (handle, basics, interests, public toggle)
   const previewPublicUrl = normalizedHandle ? `/u/${normalizedHandle}` : null
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-        Step 2 of {TOTAL_STEPS}
+        Step 3 of {TOTAL_STEPS}
       </div>
       <h1 style={{ marginTop: 0, marginBottom: 8 }}>
         <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Finish</span>{' '}
         <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Setting Up</span>
       </h1>
       <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
-        Add a photo, choose a handle, and pick a few interests.
+        Choose a handle and add a few details so others can find you.
       </p>
 
-      {/* Avatar */}
-      <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
-
       {error && (
-        <div className="card" style={{ borderLeft: '4px solid #e11d48', color: '#b91c1c', marginTop: 12 }}>
+        <div className="card" style={{ borderLeft: '4px solid #e11d48', color: '#b91c1c', marginBottom: 12 }}>
           {error}
         </div>
       )}
       {notice && (
-        <div className="card" style={{ borderLeft: '4px solid var(--secondary)', color: 'var(--secondary)', marginTop: 12 }}>
+        <div className="card" style={{ borderLeft: '4px solid var(--secondary)', color: 'var(--secondary)', marginBottom: 12 }}>
           {notice}
         </div>
       )}
 
-      <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14, marginTop: 12 }}>
+      <form className="card" onSubmit={handleSubmit} style={{ display: 'grid', gap: 14 }}>
         {/* Handle */}
         <div>
           <label style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -327,6 +367,7 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
+
 
 
 
