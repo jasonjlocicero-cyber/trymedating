@@ -1,375 +1,466 @@
 // src/components/ChatDock.jsx
-import React, { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { track } from '../lib/analytics'
 
 export default function ChatDock() {
-  const [me, setMe] = useState(null)
-  const [windows, setWindows] = useState([])
   const [open, setOpen] = useState(false)
-  const [isCompact, setIsCompact] = useState(false) // small screens tweak
+  const [me, setMe] = useState(null)
 
-  // --- responsive placement for Close FAB ---
-  useEffect(() => {
-    const onResize = () => setIsCompact(window.innerWidth < 480)
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+  // threads & messages
+  const [threads, setThreads] = useState([]) // [{ other_id, other_handle, other_name, last_body, last_at }]
+  const [selected, setSelected] = useState(null) // { other_id, other_handle, other_name }
+  const [messages, setMessages] = useState([]) // current thread messages
+  const [loadingThread, setLoadingThread] = useState(false)
 
-  // --- auth state ---
+  // compose
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+
+  // unread
+  const [unreadByUser, setUnreadByUser] = useState({}) // { other_id: count }
+
+  const listRef = useRef(null)
+
+  // auth bootstrap
   useEffect(() => {
-    let mounted = true
+    let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (mounted) setMe(user || null)
+      if (!alive) return
+      setMe(user || null)
     })()
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setMe(session?.user || null)
     })
-    return () => sub.subscription.unsubscribe()
+    return () => { alive = false; sub.subscription.unsubscribe() }
   }, [])
 
-  // --- public API: open/close chats by handle ---
+  // load recent threads when I’m known
   useEffect(() => {
-    window.trymeChat = {
-      open: async ({ handle }) => {
-        if (!handle) return
-        setOpen(true)
+    if (!me?.id) return
+    loadRecentThreads()
+  }, [me?.id])
 
-        const { data: prof, error } = await supabase
-          .from('profiles')
-          .select('user_id, handle, display_name, avatar_url')
-          .eq('handle', handle.toLowerCase())
-          .maybeSingle()
-        if (error || !prof?.user_id) { alert('User not found'); return }
-
-        const next = {
-          key: `u:${prof.user_id}`,
-          userId: prof.user_id,
-          handle: prof.handle,
-          display_name: prof.display_name || prof.handle,
-          avatar_url: prof.avatar_url || '',
-          messages: [],
-          input: '',
-          canSend: false,
-          banner: { tone: 'info', text: 'Checking permissions…' },
-          iBlockedThem: false,
-          isTyping: false,              // NEW
-          lastSentAt: 0,
-          cooldownMs: 2000,
-          // report UI
-          reportOpen: false,
-          reportReason: '',
-          reportContext: 'chat',
-          reportBusy: false,
-          reportNotice: '',
-          reportError: ''
+  // realtime: incoming messages to me
+  useEffect(() => {
+    if (!me?.id) return
+    const channel = supabase
+      .channel('messages_realtime_dock')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `recipient_id=eq.${me.id}`
+      }, async (payload) => {
+        const msg = payload.new
+        // bump unread for that sender if not currently focused on them
+        if (!selected || selected.other_id !== msg.sender_id || !open) {
+          setUnreadByUser(prev => ({ ...prev, [msg.sender_id]: (prev[msg.sender_id] || 0) + 1 }))
         }
 
-        setWindows(wins => {
-          if (wins.some(w => w.userId === next.userId)) return wins
-          return [next, ...wins].slice(0, 4)
-        })
+        // update thread list top item
+        await loadRecentThreads()
 
-        await refreshWindowPerms(prof.user_id)
-        await loadHistory(prof.user_id)
-      },
-      closeAll: () => { setWindows([]); setOpen(false) }
-    }
-    return () => { delete window.trymeChat }
-  }, [me])
+        // if we’re currently in the thread with that sender, append + scroll
+        if (selected && selected.other_id === msg.sender_id) {
+          setMessages(prev => {
+            const next = [...prev, msg]
+            return next.sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+          })
+          scrollToBottomSoon()
+        }
 
-  // --- typing indicator realtime channel (broadcast) ---
-  useEffect(() => {
+        // analytics
+        track('Message Received', { from: msg.sender_id })
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [me?.id, selected, open])
+
+  async function loadRecentThreads() {
     if (!me?.id) return
-    const channel = supabase.channel('typing')
+    // get last 100 messages where I am sender or recipient
+    const { data: msgs, error } = await supabase
+      .from('messages')
+      .select('id,sender_id,recipient_id,body,created_at')
+      .or(`sender_id.eq.${me.id},recipient_id.eq.${me.id}`)
+      .order('created_at', { ascending: false })
+      .limit(100)
 
-    channel.on('broadcast', { event: 'typing' }, payload => {
-      const { from, to } = payload
-      if (to !== me.id) return
-      setWindows(ws => ws.map(w => w.userId === from ? { ...w, isTyping: true } : w))
-      // auto-clear after 3s
-      setTimeout(() => {
-        setWindows(ws => ws.map(w => w.userId === from ? { ...w, isTyping: false } : w))
-      }, 3000)
+    if (error) return
+
+    // build map of other participant -> newest msg
+    const latestByOther = new Map()
+    ;(msgs || []).forEach(m => {
+      const otherId = m.sender_id === me.id ? m.recipient_id : m.sender_id
+      if (!latestByOther.has(otherId)) {
+        latestByOther.set(otherId, m)
+      }
     })
 
-    channel.subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [me])
-
-  // --- permissions (connection & blocks) ---
-  async function refreshWindowPerms(partnerId) {
-    if (!me?.id || !partnerId) return
-    const { data: conns } = await supabase
-      .from('connections')
-      .select('user_1, user_2')
-      .or(`user_1.eq.${me.id},user_2.eq.${me.id}`)
-    const connected = (conns || []).some(
-      r => (r.user_1 === me.id && r.user_2 === partnerId) || (r.user_2 === me.id && r.user_1 === partnerId)
-    )
-
-    const { data: myBlocks } = await supabase
-      .from('blocks')
-      .select('blocked')
-      .eq('blocker', me.id)
-    const iBlockedThem = (myBlocks || []).some(b => b.blocked === partnerId)
-
-    setWindows(wins => wins.map(w => {
-      if (w.userId !== partnerId) return w
-      if (iBlockedThem) return { ...w, iBlockedThem: true, canSend: false, banner: { tone: 'danger', text: 'You have blocked this user.' } }
-      if (!connected) return { ...w, iBlockedThem: false, canSend: false, banner: { tone: 'info', text: 'You are not connected. Ask them to scan your QR first.' } }
-      return { ...w, iBlockedThem: false, canSend: true, banner: null }
-    }))
-  }
-
-  // --- load message history ---
-  async function loadHistory(partnerId) {
-    if (!me?.id || !partnerId) return
-    const { data } = await supabase
-      .from('messages')
-      .select('id, sender, recipient, body, created_at')
-      .or(`and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`)
-      .order('created_at', { ascending: true })
-    setWindows(wins => wins.map(w => w.userId === partnerId ? { ...w, messages: data || [] } : w))
-  }
-
-  // --- send message (cooldown + length cap) ---
-  async function sendMessage(partnerId) {
-    if (!me?.id) { alert('Please sign in.'); return }
-    const w = windows.find(x => x.userId === partnerId)
-    if (!w || !w.canSend) return
-
-    const text = (w.input || '').trim()
-    if (!text) return
-    if (text.length > 500) {
-      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, banner: { tone: 'danger', text: 'Message too long (max 500 chars).' } } : x))
+    const others = Array.from(latestByOther.keys())
+    if (others.length === 0) {
+      setThreads([])
       return
     }
 
-    const now = Date.now()
-    const elapsed = now - (w.lastSentAt || 0)
-    if (elapsed < w.cooldownMs) {
-      const waitLeft = Math.ceil((w.cooldownMs - elapsed) / 1000)
-      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, banner: { tone: 'info', text: `Please wait ${waitLeft}s…` } } : x))
-      return
-    }
+    // fetch profiles for display
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('user_id, handle, display_name')
+      .in('user_id', others)
 
-    const temp = { id: `temp_${now}`, sender: me.id, recipient: partnerId, body: text, created_at: new Date().toISOString() }
-    setWindows(wins => wins.map(x => x.userId === partnerId ? { ...x, input: '', messages: [...x.messages, temp], lastSentAt: now } : x))
-
-    const { error } = await supabase.from('messages').insert({ sender: me.id, recipient: partnerId, body: text })
-    if (error) {
-      setWindows(wins => wins.map(x => x.userId === partnerId ? { ...x, messages: x.messages.filter(m => m.id !== temp.id), banner: { tone: 'danger', text: 'Message blocked.' }, canSend: false } : x))
-    } else {
-      loadHistory(partnerId)
-    }
-  }
-
-  // --- unblock / close / report helpers ---
-  async function unblockUser(partnerId) {
-    if (!me?.id) return
-    const ok = confirm('Unblock this user? They will not be able to message you unless you connect again.')
-    if (!ok) return
-    await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', partnerId)
-    await refreshWindowPerms(partnerId)
-  }
-  function closeWindow(id) { setWindows(wins => wins.filter(w => w.userId !== id)) }
-  function toggleReport(id, open) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, reportOpen: open, reportNotice: '', reportError: '' } : w)) }
-  function setReportField(id, key, val) { setWindows(wins => wins.map(w => w.userId === id ? { ...w, [key]: val } : w)) }
-  async function submitReport(partnerId) {
-    if (!me?.id) { alert('Please sign in.'); return }
-    const w = windows.find(x => x.userId === partnerId)
-    if (!w) return
-    const reason = (w.reportReason || '').trim()
-    if (!reason) { setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportError: 'Please describe the issue.' } : x)); return }
-    setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: true, reportError: '', reportNotice: '' } : x))
-    const { error } = await supabase.rpc('submit_report', { p_reported: partnerId, p_reason: reason, p_context: w.reportContext || 'chat' })
-    if (error) {
-      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: false, reportError: error.message || 'Could not submit report.' } : x))
-    } else {
-      setWindows(ws => ws.map(x => x.userId === partnerId ? { ...x, reportBusy: false, reportNotice: 'Report submitted. Thank you.', reportReason: '', reportOpen: false } : x))
-    }
-  }
-
-  // --- layout styles ---
-  const CARD_WIDTH = 320
-  const DOCK_GAP = 12
-
-  const dockStyle = useMemo(() => ({
-    position: 'fixed',
-    right: 16,
-    bottom: 16,
-    zIndex: 40,
-    display: open ? 'grid' : 'none',
-    gap: DOCK_GAP
-  }), [open])
-
-  const closeFabStyle = useMemo(() => {
-    if (!open) return null
-    if (isCompact) {
+    const profById = Object.fromEntries((profs || []).map(p => [p.user_id, p]))
+    const rows = Array.from(latestByOther.entries()).map(([other_id, m]) => {
+      const p = profById[other_id] || {}
       return {
-        position: 'fixed',
-        right: 16,
-        bottom: 16 + 56,
-        zIndex: 41,
-        background: '#111827', color: '#fff',
-        border: 'none', borderRadius: 9999, padding: '10px 14px',
-        boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700, cursor: 'pointer'
+        other_id,
+        other_handle: p.handle || shortId(other_id),
+        other_name: p.display_name || p.handle || shortId(other_id),
+        last_body: m.body,
+        last_at: m.created_at
       }
-    }
-    return {
-      position: 'fixed',
-      right: 16 + CARD_WIDTH + DOCK_GAP,
-      bottom: 16,
-      zIndex: 41,
-      background: '#111827', color: '#fff',
-      border: 'none', borderRadius: 9999, padding: '10px 14px',
-      boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 700, cursor: 'pointer'
-    }
-  }, [open, isCompact])
+    }).sort((a,b) => new Date(b.last_at) - new Date(a.last_at))
 
-  const openFabStyle = {
-    position: 'fixed', right: 16, bottom: 16, zIndex: 41,
-    background: 'linear-gradient(135deg, var(--secondary), var(--primary))',
-    color: '#fff', border: 'none', borderRadius: 9999, padding: '12px 16px',
-    boxShadow: '0 6px 20px rgba(0,0,0,0.2)', fontWeight: 800, cursor: 'pointer'
+    setThreads(rows)
   }
+
+  async function openThread(t) {
+    setSelected(t)
+    setUnreadByUser(prev => ({ ...prev, [t.other_id]: 0 }))
+    await loadThreadMessages(t.other_id)
+    setOpen(true)
+  }
+
+  async function loadThreadMessages(otherId) {
+    if (!me?.id || !otherId) return
+    setLoadingThread(true)
+    const { data: msgs, error } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${me.id},recipient_id.eq.${otherId}),and(sender_id.eq.${otherId},recipient_id.eq.${me.id})`)
+      .order('created_at', { ascending: true })
+      .limit(200)
+    setLoadingThread(false)
+    if (error) return
+    setMessages(msgs || [])
+    scrollToBottomSoon()
+  }
+
+  function scrollToBottomSoon() {
+    requestAnimationFrame(() => {
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight
+      }
+    })
+  }
+
+  async function sendMessage() {
+    const body = (text || '').trim()
+    if (!body || sending || !me?.id || !selected?.other_id) return
+    setSending(true)
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          sender_id: me.id,
+          recipient_id: selected.other_id,
+          body
+        })
+      if (error) throw error
+
+      // optimistic append; realtime will also arrive for recipient
+      const now = new Date().toISOString()
+      setMessages(prev => [...prev, {
+        id: `local-${now}`,
+        sender_id: me.id,
+        recipient_id: selected.other_id,
+        body,
+        created_at: now
+      }])
+      setText('')
+      scrollToBottomSoon()
+
+      // refresh thread ordering
+      await loadRecentThreads()
+
+      // analytics
+      track('Message Sent', { length: body.length })
+    } catch (e) {
+      console.error(e)
+      // (optional) surface an error toast if you want
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // open dock with most recent thread if user clicks floating button and none selected yet
+  function handleOpenDock() {
+    setOpen(true)
+    if (!selected && threads.length > 0) {
+      openThread(threads[0])
+    }
+  }
+
+  // UI
+  const unreadTotal = useMemo(
+    () => Object.values(unreadByUser).reduce((a,b) => a + (b||0), 0),
+    [unreadByUser]
+  )
+
+  if (!me?.id) return null // only render for signed-in users
 
   return (
     <>
-      {/* Launcher / Close FAB */}
-      {!open ? (
-        <button onClick={() => setOpen(true)} style={openFabStyle} aria-label="Open messages">Messages</button>
-      ) : (
-        <button onClick={() => setOpen(false)} style={closeFabStyle} aria-label="Close messages" title="Close">Close</button>
+      {/* Floating open button */}
+      {!open && (
+        <button
+          className="btn btn-primary"
+          onClick={handleOpenDock}
+          style={fab}
+          title="Open messages"
+        >
+          Messages
+          {!!unreadTotal && <span style={dot} aria-label={`${unreadTotal} unread`} />}
+        </button>
       )}
 
-      <div style={dockStyle}>
-        {/* EMPTY STATE */}
-        {open && windows.length === 0 && (
-          <div className="card" style={{ width: CARD_WIDTH }}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Messages</div>
-            {!me ? (
-              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
-                Please <Link to="/auth">sign in</Link> to start chatting.
-              </div>
-            ) : (
-              <div style={{ color: 'var(--muted)', fontSize: 14 }}>
-                No conversations yet. Open a profile from your <Link to="/network">Network</Link> to start a chat.
-              </div>
-            )}
+      {/* Dock */}
+      {open && (
+        <div style={dock}>
+          <div style={dockHeader}>
+            <div style={{ fontWeight: 800 }}>Messages</div>
+            <button className="btn" onClick={() => setOpen(false)} title="Close">×</button>
           </div>
-        )}
 
-        {/* CHAT WINDOWS */}
-        {windows.map(w => (
-          <div key={w.key} className="card" style={{ width: CARD_WIDTH, padding: 0, overflow: 'hidden' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <img
-                  src={w.avatar_url || 'https://via.placeholder.com/28?text=%F0%9F%91%A4'}
-                  alt=""
-                  style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
-                />
-                <div style={{ fontWeight: 700 }}>{w.display_name}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {w.iBlockedThem && <button className="btn" onClick={() => unblockUser(w.userId)}>Unblock</button>}
-                <button className="btn" onClick={() => toggleReport(w.userId, !w.reportOpen)}>{w.reportOpen ? 'Cancel' : 'Report'}</button>
-                <button className="btn" onClick={() => closeWindow(w.userId)}>×</button>
-              </div>
-            </div>
-
-            {/* Banner */}
-            {w.banner && (
-              <div style={{
-                padding: '8px 12px', fontSize: 12,
-                color: w.banner.tone === 'danger' ? '#b91c1c' : '#374151',
-                background: w.banner.tone === 'danger'
-                  ? 'color-mix(in oklab, #fee2e2, white 50%)'
-                  : 'color-mix(in oklab, var(--bg-soft), white 40%)',
-                borderBottom: '1px solid var(--border)'
-              }}>
-                {w.banner.text}
-              </div>
-            )}
-
-            {/* Messages */}
-            <div style={{ maxHeight: 260, overflowY: 'auto', padding: 12, display: 'grid', gap: 8 }}>
-              {w.messages.map(m => {
-                const mine = m.sender === me?.id
+          <div style={dockBody}>
+            {/* Threads sidebar */}
+            <aside style={sidebar}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Recent</div>
+              {threads.length === 0 && (
+                <div className="muted">No conversations yet.</div>
+              )}
+              {threads.map(t => {
+                const active = selected?.other_id === t.other_id
+                const unread = unreadByUser[t.other_id] || 0
                 return (
-                  <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
-                    <div style={{
-                      background: mine ? 'var(--primary)' : '#f3f4f6',
-                      color: mine ? '#fff' : '#111827',
-                      borderRadius: 12,
-                      padding: '8px 10px',
-                      maxWidth: 220,
-                      wordBreak: 'break-word'
-                    }}>
-                      {m.body}
+                  <button
+                    key={t.other_id}
+                    className="btn"
+                    onClick={() => openThread(t)}
+                    style={{
+                      ...threadBtn,
+                      ...(active ? threadBtnActive : {})
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>
+                      @{t.other_handle}{' '}
+                      {unread > 0 && <span style={pill}>{unread}</span>}
                     </div>
-                  </div>
+                    <div className="muted" style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth: '100%' }}>
+                      {t.last_body}
+                    </div>
+                  </button>
                 )
               })}
-              {w.messages.length === 0 && (
-                <div style={{ color: 'var(--muted)', fontSize: 12 }}>No messages yet.</div>
-              )}
+            </aside>
 
-              {/* Typing indicator */}
-              {w.isTyping && (
-                <div style={{ color: 'var(--muted)', fontSize: 12, marginLeft: 8 }}>
-                  {w.display_name} is typing…
-                </div>
-              )}
-            </div>
-
-            {/* Composer */}
-            <div style={{ borderTop: '1px solid var(--border)', padding: 8 }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); sendMessage(w.userId) }} style={{ display: 'grid', gap: 6 }}>
-                <textarea
-                  rows={1}
-                  maxLength={500}
-                  value={w.input}
-                  onChange={e => {
-                    const val = e.target.value
-                    setWindows(ws => ws.map(x => x.userId === w.userId ? { ...x, input: val } : x))
-                    // broadcast typing
-                    if (me?.id) {
-                      supabase.channel('typing').send({
-                        type: 'broadcast',
-                        event: 'typing',
-                        payload: { from: me.id, to: w.userId }
-                      })
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      sendMessage(w.userId)
-                    }
-                  }}
-                  placeholder={w.canSend ? 'Type a message… (Shift+Enter = newline)' : 'Messaging disabled'}
-                  disabled={!w.canSend}
-                  style={{ resize: 'none' }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                    {w.input.length > 450 && `${w.input.length}/500`}
+            {/* Messages pane */}
+            <section style={pane}>
+              {!selected ? (
+                <div className="muted">Choose a conversation on the left to start chatting.</div>
+              ) : (
+                <>
+                  <div style={paneHeader}>
+                    <div>
+                      <div style={{ fontWeight: 800 }}>@{selected.other_handle}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>{selected.other_name}</div>
+                    </div>
                   </div>
-                  <button className="btn btn-primary" type="submit" disabled={!w.canSend}>Send</button>
-                </div>
-              </form>
-            </div>
+
+                  <div ref={listRef} style={messageList}>
+                    {loadingThread && <div className="muted">Loading…</div>}
+                    {messages.map(m => {
+                      const mine = m.sender_id === me.id
+                      return (
+                        <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            ...bubble,
+                            ...(mine ? bubbleMine : bubbleTheirs)
+                          }}>
+                            {m.body}
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, textAlign: mine ? 'right' : 'left' }}>
+                              {formatTime(m.created_at)}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Composer */}
+                  <div style={composer}>
+                    <input
+                      value={text}
+                      onChange={(e)=>setText(e.target.value)}
+                      placeholder="Type a message…"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          sendMessage()
+                        }
+                      }}
+                    />
+                    <button className="btn btn-primary" onClick={sendMessage} disabled={sending || !text.trim()}>
+                      Send
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </>
   )
+}
+
+/* ===== Helpers & styles ===== */
+
+function shortId(id='') {
+  return id.slice(0,6)
+}
+
+function formatTime(iso) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString()
+  } catch { return '' }
+}
+
+const fab = {
+  position: 'fixed',
+  right: 16,
+  bottom: 16,
+  zIndex: 1000,
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8
+}
+
+const dot = {
+  display:'inline-block',
+  width:10, height:10, borderRadius:6,
+  background:'var(--secondary)'
+}
+
+const dock = {
+  position: 'fixed',
+  right: 12,
+  bottom: 12,
+  width: 'min(960px, 96vw)',
+  height: 'min(560px, 85vh)',
+  background: '#fff',
+  border: '1px solid var(--border)',
+  borderRadius: 12,
+  boxShadow: '0 16px 40px rgba(0,0,0,0.18)',
+  zIndex: 1000,
+  display: 'flex',
+  flexDirection: 'column'
+}
+
+const dockHeader = {
+  padding: 10,
+  borderBottom: '1px solid var(--border)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between'
+}
+
+const dockBody = {
+  flex: 1,
+  display: 'grid',
+  gridTemplateColumns: '280px 1fr',
+  minHeight: 0 // so children can use overflow
+}
+
+const sidebar = {
+  padding: 10,
+  borderRight: '1px solid var(--border)',
+  overflow: 'auto'
+}
+
+const threadBtn = {
+  width: '100%',
+  textAlign: 'left',
+  display: 'grid',
+  gap: 2,
+  marginBottom: 8,
+  borderRadius: 10
+}
+
+const threadBtnActive = {
+  background: 'color-mix(in oklab, var(--primary), #ffffff 86%)',
+  borderColor: 'var(--primary)'
+}
+
+const pill = {
+  display:'inline-block',
+  marginLeft: 6,
+  fontSize: 10,
+  padding: '2px 6px',
+  background: 'var(--secondary)',
+  color: '#fff',
+  borderRadius: 999
+}
+
+const pane = {
+  display: 'grid',
+  gridTemplateRows: 'auto 1fr auto',
+  minHeight: 0
+}
+
+const paneHeader = {
+  padding: '8px 12px',
+  borderBottom: '1px solid var(--border)',
+  background: 'color-mix(in oklab, #fff, var(--bg) 30%)',
+  position: 'sticky',
+  top: 0,
+  zIndex: 1
+}
+
+const messageList = {
+  padding: 12,
+  overflow: 'auto',
+  background: 'linear-gradient(180deg, var(--bg-soft), #fff)'
+}
+
+const bubble = {
+  maxWidth: '72%',
+  padding: '10px 12px',
+  borderRadius: 12,
+  border: '1px solid var(--border)',
+  background: '#fff',
+  margin: '6px 0'
+}
+
+const bubbleMine = {
+  background: 'color-mix(in oklab, var(--primary), #ffffff 85%)',
+  borderColor: 'var(--primary)'
+}
+
+const bubbleTheirs = {
+  background: '#fff'
+}
+
+const composer = {
+  padding: 10,
+  borderTop: '1px solid var(--border)',
+  display: 'grid',
+  gridTemplateColumns: '1fr auto',
+  gap: 8
 }
 
 
