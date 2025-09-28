@@ -6,9 +6,14 @@ import AvatarUploader from '../components/AvatarUploader'
 import InterestsPicker from '../components/InterestsPicker'
 import { track } from '../lib/analytics'
 
+const TOTAL_STEPS = 2 // 0 = Welcome, 1 = Profile setup
+
 export default function Onboarding() {
   const nav = useNavigate()
   const [me, setMe] = useState(null)
+
+  // stepper
+  const [step, setStep] = useState(0)
 
   // form state
   const [handle, setHandle] = useState('')
@@ -64,13 +69,20 @@ export default function Onboarding() {
         setHandle(guessHandleFromEmail(user.email))
         setInterests([])
       }
+
+      // If they already meet requirements, skip onboarding entirely
+      if (prof?.handle && Array.isArray(prof?.interests) && prof.interests.length >= 1) {
+        nav('/profile', { replace: true })
+        return
+      }
+
       setLoading(false)
     })()
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
       if (!s?.user) { setMe(null); setError('Please sign in to continue.') } else { setMe(s.user) }
     })
     return () => { alive = false; sub.subscription.unsubscribe() }
-  }, [])
+  }, [nav])
 
   // Debounced handle availability check
   useEffect(() => {
@@ -105,6 +117,11 @@ export default function Onboarding() {
     return () => { if (checkTimer.current) clearTimeout(checkTimer.current) }
   }, [normalizedHandle, me])
 
+  function startOnboarding() {
+    setStep(1)
+    track('Onboarding Started')
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError(''); setNotice('')
@@ -138,7 +155,7 @@ export default function Onboarding() {
       return
     }
 
-    // 🔴 Custom analytics event
+    // analytics
     track('Onboarding Completed', {
       has_avatar: !!avatarUrl,
       interests_count: interests.length,
@@ -158,11 +175,52 @@ export default function Onboarding() {
     )
   }
 
+  // STEP 0: Welcome
+  if (step === 0) {
+    return (
+      <div className="container" style={{ padding: '48px 0', maxWidth: 820, textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+          Step 1 of {TOTAL_STEPS}
+        </div>
+        <h1 style={{ marginTop: 0, marginBottom: 8 }}>
+          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Welcome</span>{' '}
+          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>to TryMeDating</span>
+        </h1>
+        <p className="muted" style={{ fontSize: '1.05rem', marginBottom: 16 }}>
+          Let’s set up your profile in about a minute. You can change anything later.
+        </p>
+
+        <div className="card" style={{ margin: '0 auto', maxWidth: 640, textAlign: 'left' }}>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.75 }}>
+            <li>Upload a photo (you can skip for now)</li>
+            <li>Pick a unique handle (e.g. <code>yourname</code>)</li>
+            <li>Add a few interests (helps others find you)</li>
+            <li>Choose whether your profile is public</li>
+          </ul>
+        </div>
+
+        <div style={{ marginTop: 18, display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={startOnboarding}>Get Started</button>
+          <button className="btn" onClick={() => nav('/profile')}>Skip for now</button>
+        </div>
+
+        {error && (
+          <div className="card" style={{ borderLeft: '4px solid #e11d48', color: '#b91c1c', marginTop: 16 }}>
+            {error}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // STEP 1: Profile setup (existing form)
   const previewPublicUrl = normalizedHandle ? `/u/${normalizedHandle}` : null
 
   return (
     <div className="container" style={{ padding: '32px 0', maxWidth: 820 }}>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Step 1 of 1</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+        Step 2 of {TOTAL_STEPS}
+      </div>
       <h1 style={{ marginTop: 0, marginBottom: 8 }}>
         <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Finish</span>{' '}
         <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Setting Up</span>
@@ -171,6 +229,7 @@ export default function Onboarding() {
         Add a photo, choose a handle, and pick a few interests.
       </p>
 
+      {/* Avatar */}
       <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
 
       {error && (
@@ -268,6 +327,7 @@ function guessHandleFromEmail(email) {
   const base = email.split('@')[0] || ''
   return base.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
+
 
 
 
