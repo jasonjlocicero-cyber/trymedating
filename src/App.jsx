@@ -7,6 +7,7 @@ import UserBadge from './components/UserBadge'
 import { supabase } from './lib/supabaseClient'
 import { pageview } from './lib/analytics'
 import FeedbackModal from './components/FeedbackModal'
+import EventsDebugPanel from './components/EventsDebugPanel' // ✅ NEW
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -53,8 +54,10 @@ export default function App() {
   const [signedIn, setSignedIn] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
 
+  // analytics per route change
   useEffect(() => { pageview() }, [pathname])
 
+  // auth state for header
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -71,6 +74,7 @@ export default function App() {
     <>
       <AppGuard />
 
+      {/* Header */}
       <header style={{
         borderBottom: '1px solid #eee',
         padding: '10px 16px',
@@ -101,21 +105,28 @@ export default function App() {
         </div>
       </header>
 
+      {/* Routes */}
       <main style={{ minHeight: 'calc(100vh - 160px)' }}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/u/:handle" element={<PublicProfile />} />
+
+          {/* Informational pages */}
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/safety" element={<Safety />} />
+
+          {/* Network/invite */}
           <Route path="/invite" element={<InviteQR />} />
           <Route path="/connect" element={<Connect />} />
           <Route path="/network" element={<Network />} />
-          <Route path="/onboarding" element={<Onboarding />} />
+
+          {/* 404 */}
           <Route path="*" element={
             <div className="container" style={{ padding: '32px 0' }}>
               <h2>Page not found</h2>
@@ -125,6 +136,7 @@ export default function App() {
         </Routes>
       </main>
 
+      {/* Footer (stacked center, mobile-friendly spacing) */}
       <footer style={{ borderTop: '1px solid #eee', padding: '24px 16px' }}>
         <div className="container" style={{
           display: 'flex',
@@ -155,9 +167,10 @@ export default function App() {
         </div>
       </footer>
 
+      {/* Global widgets */}
       {!isPublicProfile && <ChatDock />}
-
       <FeedbackModal open={showFeedback} onClose={()=>setShowFeedback(false)} />
+      <EventsDebugPanel /> {/* ✅ Mounted globally; shows only with ?debug=1 or localStorage flag */}
     </>
   )
 }
