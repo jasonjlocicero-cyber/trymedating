@@ -1,15 +1,8 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import ProfileHoverCard from './ProfileHoverCard'
 
-/**
- * Props:
- * - me: { id, email }
- * - convoId: string|number|null
- * - peer: { id?, handle?, avatar_url? } | null
- * - open: boolean
- * - onClose: () => void
- */
 export default function ChatDock({ me, convoId, peer, open, onClose }) {
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
@@ -23,12 +16,15 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
   const listRef = useRef(null)
   const inputRef = useRef(null)
 
+  // Hovercard
+  const [cardOpen, setCardOpen] = useState(false)
+  const [cardTarget, setCardTarget] = useState({ userId: null, handle: null, rect: null })
+
   const canSend = useMemo(
     () => open && me?.id && convoId != null && text.trim().length > 0 && !sending,
     [open, me?.id, convoId, text, sending]
   )
 
-  // Load messages for the active convo
   useEffect(() => {
     if (!open || !convoId) { setMessages([]); return }
     let cancel = false
@@ -49,7 +45,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, convoId])
 
-  // Realtime: inserts & updates within convo
   useEffect(() => {
     if (!open || !convoId) return
     const ch = supabase
@@ -61,7 +56,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
           setMessages(prev => [...prev, m])
           setTimeout(() => listRef.current?.scrollTo({ top: 9e9 }), 10)
           if (m.sender_id !== me?.id) {
-            // delivery ack + read
             broadcastDelivered(m.id)
             markIncomingRead([m.id])
           }
@@ -76,7 +70,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     return () => { supabase.removeChannel(ch) }
   }, [open, convoId, me?.id])
 
-  // Typing indicator (broadcast)
   useEffect(() => {
     if (!open || !convoId) return
     const ch = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self: false } } })
@@ -103,7 +96,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
       .catch(()=>{})
   }
 
-  // Delivery acks
   useEffect(() => {
     if (!open || !convoId) return
     const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self: false } } })
@@ -123,7 +115,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
       .catch(()=>{})
   }
 
-  // Read receipts
   async function markIncomingRead(ids) {
     if (!ids?.length) return
     await supabase
@@ -158,14 +149,10 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
         body
       })
       if (error) throw error
-      setText('')
-      inputRef.current?.focus()
+      setText(''); inputRef.current?.focus()
     } catch (e) {
-      console.error(e)
-      alert('Could not send. Try again.')
-    } finally {
-      setSending(false)
-    }
+      console.error(e); alert('Could not send. Try again.')
+    } finally { setSending(false) }
   }
 
   function computeStatus(m, mine) {
@@ -173,6 +160,21 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     if (m.read_at) return { icon:'✓✓', read:true }
     if (deliveredMap[m.id]) return { icon:'✓✓', read:false }
     return { icon:'✓', read:false }
+  }
+
+  // open hovercard for peer (header)
+  function openCardForPeer(e) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCardTarget({ userId: peer?.id || null, handle: peer?.handle || null, rect })
+    setCardOpen(true)
+  }
+  // open hovercard for a message (other user only)
+  function openCardForMessage(e, msg) {
+    if (msg.sender_id === me?.id) return
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCardTarget({ userId: msg.sender_id, handle: null, rect })
+    setCardOpen(true)
   }
 
   if (!open) return null
@@ -183,7 +185,19 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
         <div style={head}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             <strong>Messages</strong>
-            {peer?.handle && <span className="muted">@{peer.handle}</span>}
+            {peer?.handle && (
+              <button
+                type="button"
+                className="linklike"
+                onMouseEnter={openCardForPeer}
+                onFocus={openCardForPeer}
+                onClick={openCardForPeer}
+                style={{ color:'var(--muted)' }}
+                title={`@${peer.handle}`}
+              >
+                @{peer.handle}
+              </button>
+            )}
           </div>
           <button className="btn" onClick={onClose}>Close</button>
         </div>
@@ -194,11 +208,17 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
               No conversation selected.
             </div>
           )}
+
           {convoId && messages.map(m => {
             const mine = m.sender_id === me?.id
             const status = computeStatus(m, mine)
             return (
-              <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+              <div
+                key={m.id}
+                onContextMenu={(e) => openCardForMessage(e, m)}
+                onTouchStart={(e) => openCardForMessage(e, m)}
+                style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}
+              >
                 <div style={{
                   maxWidth:'78%', margin:'6px 8px', padding:'8px 10px', borderRadius:12,
                   background: mine ? 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)' : '#fff',
@@ -217,6 +237,7 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
               </div>
             )
           })}
+
           {typingFrom && (
             <div className="muted" style={{ padding:'4px 10px' }}>{typingFrom} is typing…</div>
           )}
@@ -230,14 +251,21 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
             disabled={!convoId}
             value={text}
             onChange={(e) => { setText(e.target.value); sendTyping() }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-            }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
             style={ta}
           />
           <button className="btn btn-primary" type="submit" disabled={!canSend}>Send</button>
         </form>
       </div>
+
+      {/* Hovercard */}
+      <ProfileHoverCard
+        userId={cardTarget.userId}
+        handle={cardTarget.handle}
+        anchorRect={cardTarget.rect}
+        open={cardOpen}
+        onClose={() => setCardOpen(false)}
+      />
     </div>
   )
 }
@@ -252,7 +280,6 @@ const head = { display:'flex', alignItems:'center', justifyContent:'space-betwee
 const list = { overflowY:'auto', padding:'8px 4px' }
 const composer = { display:'flex', gap:8, padding:'10px', borderTop:'1px solid var(--border)', background:'#fff' }
 const ta = { flex:1, minHeight:38, maxHeight:120, resize:'vertical' }
-
 
 
 
