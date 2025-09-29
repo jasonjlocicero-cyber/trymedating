@@ -136,7 +136,7 @@ function Header({ me, onOpenChat }) {
           <img
             src={logoUrl}
             alt="TryMeDating"
-            style={{ display:'block', height: 36, width: 'auto', objectFit: 'contain' }}
+            style={{ display:'block', height: 108, width: 'auto', objectFit: 'contain' }}
           />
         </Link>
 
