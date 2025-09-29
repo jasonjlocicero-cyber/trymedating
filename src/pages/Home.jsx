@@ -1,8 +1,27 @@
-import React from "react";
+// src/pages/Home.jsx
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 
 export default function Home({ me, onOpenChat }) {
   const authed = !!me?.id;
+  const [needsProfile, setNeedsProfile] = useState(false);
+
+  useEffect(() => {
+    let cancel = false;
+    if (!authed) { setNeedsProfile(false); return }
+    ;(async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('display_name, handle')
+        .eq('user_id', me.id)
+        .maybeSingle()
+      if (!cancel) {
+        setNeedsProfile(!data?.display_name || !data?.handle)
+      }
+    })()
+    return () => { cancel = true }
+  }, [authed, me?.id])
 
   return (
     <div className="container" style={{ padding: "32px 0", maxWidth: 960 }}>
@@ -57,6 +76,16 @@ export default function Home({ me, onOpenChat }) {
         </div>
       </section>
 
+      {/* Onboarding nudge */}
+      {authed && needsProfile && (
+        <section className="card" style={{ padding: 12, marginTop: 12, borderLeft: '4px solid var(--secondary)', background: '#fffaf7' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+            <div><strong>Complete your profile</strong> — add your name and handle to be discoverable.</div>
+            <Link to="/profile" className="btn">Edit profile</Link>
+          </div>
+        </section>
+      )}
+
       {/* HIGHLIGHTS */}
       <section style={{ marginTop: 16, display: "grid", gap: 12 }}>
         <div className="card" style={{ padding: 16 }}>
@@ -79,7 +108,6 @@ export default function Home({ me, onOpenChat }) {
         </div>
       </section>
 
-      {/* CTA FOR LOGGED OUT */}
       {!authed && (
         <section style={{ marginTop: 16, textAlign: "center" }}>
           <Link to="/auth" className="btn btn-primary">Get started</Link>
@@ -88,4 +116,5 @@ export default function Home({ me, onOpenChat }) {
     </div>
   );
 }
+
 
