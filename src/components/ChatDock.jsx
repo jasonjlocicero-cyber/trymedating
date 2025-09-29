@@ -1,13 +1,12 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import ProfileHoverCard from './ProfileHoverCard'
 
 /**
  * Props:
- * - me: { id, email, handle? }
- * - convoId: string|number
- * - peer: { id, handle?, avatar_url? }
+ * - me: { id, email }
+ * - convoId: string|number|null
+ * - peer: { id?, handle?, avatar_url? } | null
  * - open: boolean
  * - onClose: () => void
  */
@@ -16,58 +15,41 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
 
-  // Typing indicator
   const [typingFrom, setTypingFrom] = useState(null)
   const typingClearTimer = useRef(null)
   const lastTypingSentAt = useRef(0)
 
-  // Delivery/read
   const [deliveredMap, setDeliveredMap] = useState({})
-
-  // Threaded replies + reactions (from your last version)
-  const [replyToId, setReplyToId] = useState(null)
-  const [hoverMsgId, setHoverMsgId] = useState(null)
-  const [reactPickerFor, setReactPickerFor] = useState(null)
-
   const listRef = useRef(null)
   const inputRef = useRef(null)
 
-  // Hovercard state
-  const [cardOpen, setCardOpen] = useState(false)
-  const [cardTarget, setCardTarget] = useState({ userId: null, handle: null, rect: null })
-
-  const EMOJIS = ['👍','❤️','😂','😮','🙌']
-
   const canSend = useMemo(
-    () => me?.id && convoId && text.trim().length > 0 && !sending,
-    [me, convoId, text, sending]
+    () => open && me?.id && convoId != null && text.trim().length > 0 && !sending,
+    [open, me?.id, convoId, text, sending]
   )
 
-  // ========= Initial load =========
+  // Load messages for the active convo
   useEffect(() => {
-    if (!open || !me?.id || !convoId) return
-    let canceled = false
+    if (!open || !convoId) { setMessages([]); return }
+    let cancel = false
     ;(async () => {
       const { data, error } = await supabase
         .from('messages')
-        .select('id, convo_id, sender_id, body, created_at, read_at, parent_id, reactions')
+        .select('id, convo_id, sender_id, body, created_at, read_at')
         .eq('convo_id', convoId)
         .order('created_at', { ascending: true })
-      if (!canceled) {
-        if (error) {
-          console.error('load messages error', error)
-        } else {
-          setMessages(data || [])
-          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior:'smooth' }), 50)
-          markAllIncomingRead()
-        }
+      if (!cancel) {
+        if (error) console.error(error)
+        setMessages(data || [])
+        setTimeout(() => listRef.current?.scrollTo({ top: 9e9 }), 50)
+        markAllIncomingRead(data || [])
       }
     })()
-    return () => { canceled = true }
+    return () => { cancel = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, me?.id, convoId])
+  }, [open, convoId])
 
-  // ========= Realtime INSERT + UPDATE =========
+  // Realtime: inserts & updates within convo
   useEffect(() => {
     if (!open || !convoId) return
     const ch = supabase
@@ -77,53 +59,54 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
         (payload) => {
           const m = payload.new
           setMessages(prev => [...prev, m])
-          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior:'smooth' }), 10)
-          if (m.sender_id !== me?.id) { broadcastDelivered(m.id); markIncomingRead([m.id]) }
-        }
-      )
+          setTimeout(() => listRef.current?.scrollTo({ top: 9e9 }), 10)
+          if (m.sender_id !== me?.id) {
+            // delivery ack + read
+            broadcastDelivered(m.id)
+            markIncomingRead([m.id])
+          }
+        })
       .on('postgres_changes',
         { event:'UPDATE', schema:'public', table:'messages', filter:`convo_id=eq.${convoId}` },
         (payload) => {
           const updated = payload.new
           setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m))
-        }
-      )
+        })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, convoId, me?.id])
 
-  // ========= Typing indicator (broadcast) =========
+  // Typing indicator (broadcast)
   useEffect(() => {
     if (!open || !convoId) return
-    const channel = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
-    channel.on('broadcast', { event:'typing' }, (payload) => {
+    const ch = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self: false } } })
+    ch.on('broadcast', { event:'typing' }, (payload) => {
       const { user_id, handle } = payload?.payload || {}
       if (!user_id || user_id === me?.id) return
       setTypingFrom(handle || 'Someone')
       if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
-      typingClearTimer.current = setTimeout(() => setTypingFrom(null), 3000)
+      typingClearTimer.current = setTimeout(() => setTypingFrom(null), 2500)
     })
-    channel.subscribe()
+    ch.subscribe()
     return () => {
       if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
-      supabase.removeChannel(channel)
+      supabase.removeChannel(ch)
     }
   }, [open, convoId, me?.id])
 
   function sendTyping() {
     const now = Date.now()
-    if (now - lastTypingSentAt.current < 2000) return
+    if (now - lastTypingSentAt.current < 1500) return
     lastTypingSentAt.current = now
-    supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
-      .send({ type:'broadcast', event:'typing', payload:{ user_id: me?.id, handle: me?.handle || me?.email || 'Someone' } })
+    supabase.channel(`typing:${convoId}`, { config: { broadcast: { self: false } } })
+      .send({ type:'broadcast', event:'typing', payload:{ user_id: me?.id, handle: me?.email || 'Someone' } })
       .catch(()=>{})
   }
 
-  // ========= Delivery acks (broadcast) =========
+  // Delivery acks
   useEffect(() => {
     if (!open || !convoId) return
-    const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
+    const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self: false } } })
     ch.on('broadcast', { event:'delivered' }, (payload) => {
       const { message_id, from_user } = payload?.payload || {}
       if (!message_id) return
@@ -135,36 +118,24 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
   }, [open, convoId, me?.id])
 
   function broadcastDelivered(messageId) {
-    supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
+    supabase.channel(`acks:${convoId}`, { config: { broadcast: { self: false } } })
       .send({ type:'broadcast', event:'delivered', payload:{ message_id: messageId, from_user: me?.id } })
       .catch(()=>{})
   }
 
-  // ========= Read receipts =========
+  // Read receipts
   async function markIncomingRead(ids) {
-    try {
-      if (!ids || ids.length === 0) return
-      const { error } = await supabase
-        .from('messages')
-        .update({ read_at: new Date().toISOString() })
-        .in('id', ids)
-        .neq('sender_id', me.id)
-        .is('read_at', null)
-      if (error) console.error('markIncomingRead error', error)
-    } catch (e) { console.error('markIncomingRead exception', e) }
+    if (!ids?.length) return
+    await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .in('id', ids)
+      .neq('sender_id', me.id)
+      .is('read_at', null)
   }
-  async function markAllIncomingRead() {
-    try {
-      const unread = (messages || []).filter(m => m.sender_id !== me?.id && !m.read_at).map(m => m.id)
-      if (unread.length === 0) return
-      const { error } = await supabase
-        .from('messages')
-        .update({ read_at: new Date().toISOString() })
-        .in('id', unread)
-        .neq('sender_id', me.id)
-        .is('read_at', null)
-      if (error) console.error('markAllIncomingRead error', error)
-    } catch (e) { console.error('markAllIncomingRead exception', e) }
+  async function markAllIncomingRead(list) {
+    const unread = (list || messages).filter(m => m.sender_id !== me?.id && !m.read_at).map(m => m.id)
+    if (unread.length) await markIncomingRead(unread)
   }
   useEffect(() => {
     if (!open) return
@@ -175,68 +146,35 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, messages, me?.id])
 
-  // ========= Send message (with optional parent_id) =========
   async function handleSend(e) {
     e?.preventDefault?.()
     if (!canSend) return
     setSending(true)
-    const body = text.trim()
     try {
-      const insertPayload = { convo_id: convoId, sender_id: me.id, body }
-      if (replyToId) insertPayload.parent_id = replyToId
-      const { error } = await supabase.from('messages').insert(insertPayload)
+      const body = text.trim()
+      const { error } = await supabase.from('messages').insert({
+        convo_id: convoId,
+        sender_id: me.id,
+        body
+      })
       if (error) throw error
-      setText(''); setReplyToId(null); inputRef.current?.focus()
-    } catch (err) {
-      console.error('send error', err); alert('Could not send message. Please try again.')
-    } finally { setSending(false) }
+      setText('')
+      inputRef.current?.focus()
+    } catch (e) {
+      console.error(e)
+      alert('Could not send. Try again.')
+    } finally {
+      setSending(false)
+    }
   }
 
-  // ========= Reactions =========
-  async function toggleReaction(messageId, emoji) {
-    try {
-      const msg = messages.find(m => m.id === messageId)
-      if (!msg) return
-      const current = msg.reactions || {}
-      const arr = Array.isArray(current[emoji]) ? [...current[emoji]] : []
-      const idx = arr.indexOf(me.id)
-      if (idx >= 0) arr.splice(idx, 1); else arr.push(me.id)
-      const next = { ...current, [emoji]: arr }
-      const { error } = await supabase.from('messages')
-        .update({ reactions: next })
-        .eq('id', messageId).eq('convo_id', convoId)
-      if (error) throw error
-      setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions: next } : m))
-    } catch (e) { console.error('toggleReaction error', e) } finally { setReactPickerFor(null) }
-  }
-
-  // ========= Keyboard =========
-  function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-  }
   function computeStatus(m, mine) {
-    if (!mine) return { icon: null, read:false }
+    if (!mine) return { icon:null, read:false }
     if (m.read_at) return { icon:'✓✓', read:true }
     if (deliveredMap[m.id]) return { icon:'✓✓', read:false }
     return { icon:'✓', read:false }
   }
 
-  // ========= Hovercard helpers =========
-  function openCardForPeer(e) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setCardTarget({ userId: peer?.id || null, handle: peer?.handle || null, rect })
-    setCardOpen(true)
-  }
-  function openCardForMessage(e, msg) {
-    // only for other person's messages
-    if (msg.sender_id === me?.id) return
-    e.preventDefault()
-    const rect = e.currentTarget.getBoundingClientRect()
-    setCardTarget({ userId: msg.sender_id, handle: null, rect })
-    setCardOpen(true)
-  }
-
-  // ========= UI =========
   if (!open) return null
 
   return (
@@ -245,246 +183,70 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
         <div style={head}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             <strong>Messages</strong>
-            {peer?.handle && (
-              <button
-                type="button"
-                className="linklike"
-                onMouseEnter={openCardForPeer}
-                onFocus={openCardForPeer}
-                onClick={openCardForPeer}
-                style={{ color:'var(--muted)' }}
-                title={`@${peer.handle}`}
-              >
-                @{peer.handle}
-              </button>
-            )}
+            {peer?.handle && <span className="muted">@{peer.handle}</span>}
           </div>
           <button className="btn" onClick={onClose}>Close</button>
         </div>
 
         <div ref={listRef} style={list}>
-          {messages.length === 0 && (
-            <div className="muted" style={{ textAlign:'center', padding:'12px 0' }}>
-              Say hi 👋
+          {!convoId && (
+            <div className="muted" style={{ padding:12, textAlign:'center' }}>
+              No conversation selected.
             </div>
           )}
-
-          {messages.map(m => {
+          {convoId && messages.map(m => {
             const mine = m.sender_id === me?.id
             const status = computeStatus(m, mine)
-            const reactsCount = totalReacts(m.reactions)
-            const parent = m.parent_id ? messages.find(x => x.id === m.parent_id) : null
-
             return (
-              <div
-                key={m.id}
-                id={`msg-${m.id}`}
-                style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}
-                onMouseEnter={() => setHoverMsgId(m.id)}
-                onMouseLeave={() => { if (reactPickerFor !== m.id) setHoverMsgId(null) }}
-                onContextMenu={(e) => openCardForMessage(e, m)} // right-click to preview sender
-                onTouchStart={(e) => openCardForMessage(e, m)} // long-press (mobile will treat as touchstart)
-              >
+              <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                 <div style={{
-                  maxWidth: '78%',
-                  margin: '6px 8px',
-                  padding: '8px 10px',
-                  borderRadius: 12,
-                  background: mine
-                    ? 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)'
-                    : '#fff',
+                  maxWidth:'78%', margin:'6px 8px', padding:'8px 10px', borderRadius:12,
+                  background: mine ? 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)' : '#fff',
                   color: mine ? '#fff' : '#111',
                   border: mine ? '1px solid transparent' : '1px solid var(--border)',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  boxShadow: mine ? '0 2px 12px rgba(0,0,0,0.10)' : '0 1px 8px rgba(0,0,0,0.06)',
-                  position:'relative'
+                  whiteSpace:'pre-wrap', wordBreak:'break-word', position:'relative'
                 }}>
-                  {/* Reply preview */}
-                  {parent && (
-                    <button
-                      type="button"
-                      onClick={() => scrollToMessage(parent.id, listRef)}
-                      title="Go to quoted message"
-                      style={{
-                        display:'block',
-                        width:'100%',
-                        textAlign:'left',
-                        marginBottom:6,
-                        padding:'6px 8px',
-                        borderRadius:8,
-                        border: mine ? '1px solid rgba(255,255,255,0.35)' : '1px solid var(--border)',
-                        background: mine ? 'rgba(255,255,255,0.15)' : '#fafafa',
-                        color: mine ? 'rgba(255,255,255,0.92)' : '#374151',
-                        cursor:'pointer'
-                      }}
-                    >
-                      <span style={{ fontWeight:700, marginRight:6, fontSize:12 }}>Replying to</span>
-                      <span style={{ fontSize:12, opacity:0.9 }}>
-                        {parent.body.length > 80 ? parent.body.slice(0,80)+'…' : parent.body}
-                      </span>
-                    </button>
-                  )}
-
-                  {/* Body */}
                   {m.body}
-
-                  {/* Status */}
                   {mine && (
                     <span style={{
-                      position:'absolute', right: 8, bottom: -16, fontSize: 12,
+                      position:'absolute', right:8, bottom:-16, fontSize:12,
                       color: status.read ? 'var(--primary)' : '#9ca3af'
-                    }}>
-                      {status.icon}
-                    </span>
-                  )}
-
-                  {/* Reactions */}
-                  {reactsCount > 0 && (
-                    <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
-                      {Object.entries(m.reactions || {}).map(([emoji, arr]) => {
-                        const count = Array.isArray(arr) ? arr.length : 0
-                        if (!count) return null
-                        const mineReacted = Array.isArray(arr) && arr.includes(me.id)
-                        return (
-                          <button
-                            key={emoji}
-                            type="button"
-                            onClick={() => toggleReaction(m.id, emoji)}
-                            title={mineReacted ? 'Remove reaction' : 'Add reaction'}
-                            style={{
-                              display:'inline-flex', alignItems:'center', gap:6,
-                              padding:'2px 6px', borderRadius:999, border:'1px solid var(--border)',
-                              background: mineReacted ? 'color-mix(in oklab, var(--secondary), #ffffff 80%)' : '#fff',
-                              color:'#111', fontSize:13, lineHeight:1
-                            }}
-                          >
-                            <span>{emoji}</span><span style={{ fontWeight:700 }}>{count}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* Hover actions */}
-                  {(hoverMsgId === m.id || reactPickerFor === m.id) && (
-                    <div style={{ position:'absolute', top:-26, right: mine ? 6 : 'auto', left: mine ? 'auto' : 6, display:'flex', gap:6 }}>
-                      <button type="button" className="btn" onClick={() => setReplyToId(m.id)} title="Reply" style={{ padding:'2px 8px', height:22 }}>
-                        ↩ Reply
-                      </button>
-                      <div style={{ position:'relative' }}>
-                        <button type="button" className="btn" onClick={() => setReactPickerFor(prev => prev === m.id ? null : m.id)} title="React" style={{ padding:'2px 8px', height:22 }}>
-                          🙂
-                        </button>
-                        {reactPickerFor === m.id && (
-                          <div
-                            onMouseLeave={() => { setReactPickerFor(null); setHoverMsgId(null) }}
-                            style={{
-                              position:'absolute', top:-42, left:0,
-                              background:'#fff', border:'1px solid var(--border)', borderRadius:12, padding:'6px 8px',
-                              boxShadow:'0 10px 24px rgba(0,0,0,0.12)', display:'flex', gap:6, zIndex:10
-                            }}
-                          >
-                            {EMOJIS.map(e => (
-                              <button key={e} type="button" onClick={() => toggleReaction(m.id, e)} style={{ fontSize:18, background:'transparent', border:'none', cursor:'pointer' }} title={`React ${e}`}>
-                                {e}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    }}>{status.icon}</span>
                   )}
                 </div>
               </div>
             )
           })}
-
-          {/* Typing */}
           {typingFrom && (
-            <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', color:'var(--muted)' }}>
-              <TypingDots /> <span>{typingFrom} is typing…</span>
-            </div>
+            <div className="muted" style={{ padding:'4px 10px' }}>{typingFrom} is typing…</div>
           )}
         </div>
 
-        {/* Reply banner */}
-        {replyToId && (
-          <div style={{ borderTop:'1px dashed var(--border)', padding:'6px 10px', background:'#fafafa', fontSize:13, display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
-            <span>Replying to a message</span>
-            <button className="btn" type="button" onClick={() => setReplyToId(null)} style={{ padding:'2px 8px', height:24 }}>
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* Composer */}
         <form onSubmit={handleSend} style={composer}>
           <textarea
             ref={inputRef}
             rows={1}
+            placeholder={convoId ? 'Type a message…' : 'Open a conversation to chat'}
+            disabled={!convoId}
             value={text}
             onChange={(e) => { setText(e.target.value); sendTyping() }}
-            onKeyDown={onKeyDown}
-            placeholder={replyToId ? 'Write a reply…' : 'Type a message…'}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+            }}
             style={ta}
           />
           <button className="btn btn-primary" type="submit" disabled={!canSend}>Send</button>
         </form>
       </div>
-
-      {/* Hovercard */}
-      <ProfileHoverCard
-        userId={cardTarget.userId}
-        handle={cardTarget.handle}
-        anchorRect={cardTarget.rect}
-        open={cardOpen}
-        onClose={() => setCardOpen(false)}
-        onMessage={(uid) => {
-          // optional: could open a convo with this uid if different
-          setCardOpen(false)
-        }}
-      />
     </div>
   )
 }
 
-/* util */
-function totalReacts(reactions) {
-  if (!reactions || typeof reactions !== 'object') return 0
-  return Object.values(reactions).reduce((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0)
-}
-function scrollToMessage(id, listRef) {
-  const el = document.getElementById(`msg-${id}`)
-  if (el && listRef.current) {
-    const container = listRef.current
-    const top = el.offsetTop - 12
-    container.scrollTo({ top, behavior: 'smooth' })
-    el.animate([{ transform:'scale(1)', background:'#fff' }, { transform:'scale(1.02)', background:'#fffbe6' }, { transform:'scale(1)', background:'#fff' }], { duration: 900 })
-  }
-}
-
-/* tiny typing dots */
-function TypingDots() {
-  return (
-    <span style={{ display:'inline-flex', gap:3 }}>
-      <Dot delay="0ms" /><Dot delay="120ms" /><Dot delay="240ms" />
-      <style>{`
-        @keyframes bump { 0% { transform: translateY(0); opacity:.5 } 50% { transform: translateY(-3px); opacity:1 } 100% { transform: translateY(0); opacity:.5 } }
-      `}</style>
-    </span>
-  )
-}
-function Dot({ delay }) {
-  return <span style={{ width:6, height:6, borderRadius:6, background:'var(--muted)', display:'inline-block', animation:`bump 900ms ${delay} infinite` }} />
-}
-
-/* layout */
 const wrap = { position:'fixed', right:16, bottom:16, zIndex:50 }
 const dock = {
   width:360, maxHeight:'70vh', background:'#fff', border:'1px solid var(--border)',
   borderRadius:14, overflow:'hidden', boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
-  display:'grid', gridTemplateRows:'auto 1fr auto auto'
+  display:'grid', gridTemplateRows:'auto 1fr auto'
 }
 const head = { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)', background:'#fafafa' }
 const list = { overflowY:'auto', padding:'8px 4px' }
