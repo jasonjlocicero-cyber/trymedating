@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 
@@ -17,39 +17,31 @@ import ChatAlerts from './components/ChatAlerts'
 export default function App() {
   return (
     <BrowserRouter>
-      <Shell />
+      <ErrorBoundary>
+        <Shell />
+      </ErrorBoundary>
     </BrowserRouter>
   )
 }
 
 function Shell() {
-  const nav = useNavigate()
   const [me, setMe] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  // Chat dock state
   const [chatOpen, setChatOpen] = useState(false)
   const [activeConvoId, setActiveConvoId] = useState(null)
   const [activePeer, setActivePeer] = useState(null)
-
-  // Recent known convos for this user (used by ChatAlerts)
-  const recentKey = me?.id ? `recentConvos:${me.id}` : null
   const [recentConvoIds, setRecentConvoIds] = useState([])
 
-  // Bootstrap auth
+  // auth boot
   useEffect(() => {
-    let alive = true
-    ;(async () => {
+    (async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!alive) return
       setMe(user || null)
-      setLoading(false)
     })()
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setMe(s?.user || null))
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  // Load stored recent convos
+  const recentKey = me?.id ? `recentConvos:${me.id}` : null
   useEffect(() => {
     if (!recentKey) return
     try {
@@ -59,31 +51,19 @@ function Shell() {
     } catch {}
   }, [recentKey])
 
-  // Persist recent convos
   function rememberConvo(id) {
     if (!recentKey || id == null) return
     setRecentConvoIds(prev => {
-      const s = new Set(prev.map(String))
-      s.add(String(id))
+      const s = new Set(prev.map(String)); s.add(String(id))
       const arr = Array.from(s)
       try { localStorage.setItem(recentKey, JSON.stringify(arr)) } catch {}
       return arr
     })
   }
-
-  // Open chat helper (used by alerts + pages)
   function openChat(convoId, peer) {
-    setActiveConvoId(convoId)
-    setActivePeer(peer || null)
-    setChatOpen(true)
-    rememberConvo(convoId)
+    setActiveConvoId(convoId); setActivePeer(peer || null); setChatOpen(true); rememberConvo(convoId)
   }
-
-  // Close chat
-  function closeChat() {
-    setChatOpen(false)
-  }
-
+  function closeChat() { setChatOpen(false) }
   const authed = !!me?.id
 
   return (
@@ -99,10 +79,11 @@ function Shell() {
           <Route path="/settings" element={<SettingsPage me={me} />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          {/* Fallback */}
+          <Route path="*" element={<div className="container" style={{padding:'24px'}}>Not found</div>} />
         </Routes>
       </main>
 
-      {/* Footer stays same */}
       <footer className="footer">
         <div className="container" style={{ padding: '14px 0' }}>
           <div className="footer-links">
@@ -113,7 +94,6 @@ function Shell() {
         </div>
       </footer>
 
-      {/* Global new-message alerts */}
       {authed && (
         <ChatAlerts
           me={me}
@@ -123,8 +103,6 @@ function Shell() {
           onOpenChat={openChat}
         />
       )}
-
-      {/* Chat dock */}
       {chatOpen && (
         <ChatDock
           me={me}
@@ -139,9 +117,7 @@ function Shell() {
 }
 
 function Header({ me, onOpenChat }) {
-  const nav = useNavigate()
   const authed = !!me?.id
-
   return (
     <header className="header">
       <div className="container header-inner">
@@ -160,6 +136,33 @@ function Header({ me, onOpenChat }) {
       </div>
     </header>
   )
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('App crashed:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="container" style={{ padding: '24px' }}>
+          <h2>Something went wrong.</h2>
+          <pre style={{ whiteSpace:'pre-wrap', background:'#fffbe6', border:'1px solid #f59e0b', padding:10, borderRadius:8 }}>
+            {String(this.state.error)}
+          </pre>
+          <p className="muted">Check the browser console for details.</p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 
