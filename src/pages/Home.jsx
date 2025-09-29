@@ -11,29 +11,29 @@ export default function Home({ me, onOpenChat }) {
         className="card"
         style={{
           display: "grid",
-          gap: 10,
+          gap: 12,
           padding: "28px",
           background:
             "linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)",
           color: "#fff",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 32, lineHeight: 1.1 }}>
+        <h1 style={{ margin: 0, fontSize: 34, lineHeight: 1.1, letterSpacing: 0.2 }}>
           Welcome to{" "}
-          <span style={{ fontWeight: 800, color: "var(--primary)", background: "#fff", padding: "0 6px", borderRadius: 6 }}>
-            Try
-          </span>
-          <span style={{ fontWeight: 800, color: "var(--primary)", background: "#fff", padding: "0 6px", borderRadius: 6, marginLeft: 4 }}>
-            ME
+          <span style={{ fontWeight: 900, color: "var(--primary)", background: "#ffffffe6", padding: "0 6px", borderRadius: 6, boxShadow: "0 0 0 2px #ffffff40 inset" }}>
+            TryME
           </span>{" "}
-          <span style={{ fontWeight: 800, color: "#fff" }}>Dating</span>
+          <span style={{ fontWeight: 900, color: "var(--secondary)" }}>
+            Dating
+          </span>
         </h1>
-        <p style={{ margin: 0, opacity: 0.96 }}>
+
+        <p style={{ margin: 0, opacity: 0.96, maxWidth: 760 }}>
           Invite-first dating. Share your personal QR code with people you’ve actually met.
           No cold DMs from strangers.
         </p>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
           {authed ? (
             <>
               <Link to="/profile" className="btn" style={{ background: "#fff", color: "#111" }}>
@@ -68,7 +68,7 @@ export default function Home({ me, onOpenChat }) {
         <div className="card" style={{ padding: 16 }}>
           <h3 style={{ marginTop: 0 }}>Private by default</h3>
           <p className="muted" style={{ marginBottom: 0 }}>
-            Keep your profile private or go public—switch anytime.
+            Keep your profile private or go public — switch anytime.
           </p>
         </div>
         <div className="card" style={{ padding: 16 }}>
@@ -88,3 +88,4 @@ export default function Home({ me, onOpenChat }) {
     </div>
   );
 }
+
