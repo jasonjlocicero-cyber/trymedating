@@ -1,12 +1,13 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import ProfileHoverCard from './ProfileHoverCard'
 
 /**
- * Props expected (adjust if your names differ):
+ * Props:
  * - me: { id, email, handle? }
- * - convoId: string
- * - peer: { id, handle? }
+ * - convoId: string|number
+ * - peer: { id, handle?, avatar_url? }
  * - open: boolean
  * - onClose: () => void
  */
@@ -23,13 +24,19 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
   // Delivery/read
   const [deliveredMap, setDeliveredMap] = useState({})
 
-  // Reply & UI state
+  // Threaded replies + reactions (from your last version)
   const [replyToId, setReplyToId] = useState(null)
   const [hoverMsgId, setHoverMsgId] = useState(null)
   const [reactPickerFor, setReactPickerFor] = useState(null)
 
   const listRef = useRef(null)
   const inputRef = useRef(null)
+
+  // Hovercard state
+  const [cardOpen, setCardOpen] = useState(false)
+  const [cardTarget, setCardTarget] = useState({ userId: null, handle: null, rect: null })
+
+  const EMOJIS = ['👍','❤️','😂','😮','🙌']
 
   const canSend = useMemo(
     () => me?.id && convoId && text.trim().length > 0 && !sending,
@@ -51,7 +58,7 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
           console.error('load messages error', error)
         } else {
           setMessages(data || [])
-          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior: 'smooth' }), 50)
+          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior:'smooth' }), 50)
           markAllIncomingRead()
         }
       }
@@ -60,38 +67,28 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, me?.id, convoId])
 
-  // ========= Realtime INSERT + UPDATE (read_at / reactions / parent) =========
+  // ========= Realtime INSERT + UPDATE =========
   useEffect(() => {
     if (!open || !convoId) return
     const ch = supabase
       .channel(`msgs:${convoId}`)
-      // New messages
       .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `convo_id=eq.${convoId}` },
+        { event:'INSERT', schema:'public', table:'messages', filter:`convo_id=eq.${convoId}` },
         (payload) => {
           const m = payload.new
           setMessages(prev => [...prev, m])
-          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior: 'smooth' }), 10)
-
-          // If this INSERT is from the other user -> delivered ack + mark read
-          if (m.sender_id !== me?.id) {
-            broadcastDelivered(m.id)
-            markIncomingRead([m.id])
-          }
+          setTimeout(() => listRef.current?.scrollTo({ top: 9e9, behavior:'smooth' }), 10)
+          if (m.sender_id !== me?.id) { broadcastDelivered(m.id); markIncomingRead([m.id]) }
         }
       )
-      // Updates: read_at / reactions etc
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `convo_id=eq.${convoId}` },
+        { event:'UPDATE', schema:'public', table:'messages', filter:`convo_id=eq.${convoId}` },
         (payload) => {
           const updated = payload.new
-          setMessages(prev =>
-            prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m))
-          )
+          setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m))
         }
       )
       .subscribe()
-
     return () => { supabase.removeChannel(ch) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, convoId, me?.id])
@@ -99,16 +96,14 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
   // ========= Typing indicator (broadcast) =========
   useEffect(() => {
     if (!open || !convoId) return
-    const channel = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self: false } } })
-
-    channel.on('broadcast', { event: 'typing' }, (payload) => {
+    const channel = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
+    channel.on('broadcast', { event:'typing' }, (payload) => {
       const { user_id, handle } = payload?.payload || {}
       if (!user_id || user_id === me?.id) return
       setTypingFrom(handle || 'Someone')
       if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
       typingClearTimer.current = setTimeout(() => setTypingFrom(null), 3000)
     })
-
     channel.subscribe()
     return () => {
       if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
@@ -120,31 +115,29 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     const now = Date.now()
     if (now - lastTypingSentAt.current < 2000) return
     lastTypingSentAt.current = now
-    supabase.channel(`typing:${convoId}`, { config: { broadcast: { self: false } } })
-      .send({ type: 'broadcast', event: 'typing', payload: { user_id: me?.id, handle: me?.handle || me?.email || 'Someone' } })
-      .catch(() => {})
+    supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
+      .send({ type:'broadcast', event:'typing', payload:{ user_id: me?.id, handle: me?.handle || me?.email || 'Someone' } })
+      .catch(()=>{})
   }
 
   // ========= Delivery acks (broadcast) =========
   useEffect(() => {
     if (!open || !convoId) return
-    const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self: false } } })
-
-    ch.on('broadcast', { event: 'delivered' }, (payload) => {
+    const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
+    ch.on('broadcast', { event:'delivered' }, (payload) => {
       const { message_id, from_user } = payload?.payload || {}
       if (!message_id) return
       if (from_user && from_user === me?.id) return
       setDeliveredMap(prev => ({ ...prev, [message_id]: true }))
     })
-
     ch.subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [open, convoId, me?.id])
 
   function broadcastDelivered(messageId) {
-    supabase.channel(`acks:${convoId}`, { config: { broadcast: { self: false } } })
-      .send({ type: 'broadcast', event: 'delivered', payload: { message_id: messageId, from_user: me?.id } })
-      .catch(() => {})
+    supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
+      .send({ type:'broadcast', event:'delivered', payload:{ message_id: messageId, from_user: me?.id } })
+      .catch(()=>{})
   }
 
   // ========= Read receipts =========
@@ -160,7 +153,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
       if (error) console.error('markIncomingRead error', error)
     } catch (e) { console.error('markIncomingRead exception', e) }
   }
-
   async function markAllIncomingRead() {
     try {
       const unread = (messages || []).filter(m => m.sender_id !== me?.id && !m.read_at).map(m => m.id)
@@ -174,7 +166,6 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
       if (error) console.error('markAllIncomingRead error', error)
     } catch (e) { console.error('markAllIncomingRead exception', e) }
   }
-
   useEffect(() => {
     if (!open) return
     const onFocus = () => markAllIncomingRead()
@@ -193,86 +184,56 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
     try {
       const insertPayload = { convo_id: convoId, sender_id: me.id, body }
       if (replyToId) insertPayload.parent_id = replyToId
-
-      const { error } = await supabase
-        .from('messages')
-        .insert(insertPayload)
-
+      const { error } = await supabase.from('messages').insert(insertPayload)
       if (error) throw error
-      setText('')
-      setReplyToId(null)
-      inputRef.current?.focus()
+      setText(''); setReplyToId(null); inputRef.current?.focus()
     } catch (err) {
-      console.error('send error', err)
-      alert('Could not send message. Please try again.')
-    } finally {
-      setSending(false)
-    }
+      console.error('send error', err); alert('Could not send message. Please try again.')
+    } finally { setSending(false) }
   }
 
   // ========= Reactions =========
-  const EMOJIS = ['👍','❤️','😂','😮','🙌']
-
   async function toggleReaction(messageId, emoji) {
     try {
       const msg = messages.find(m => m.id === messageId)
       if (!msg) return
       const current = msg.reactions || {}
-      // current shape: { "👍": ["user1","user2"], "❤️": ["user3"] }
       const arr = Array.isArray(current[emoji]) ? [...current[emoji]] : []
       const idx = arr.indexOf(me.id)
       if (idx >= 0) arr.splice(idx, 1); else arr.push(me.id)
       const next = { ...current, [emoji]: arr }
-
-      const { error } = await supabase
-        .from('messages')
+      const { error } = await supabase.from('messages')
         .update({ reactions: next })
-        .eq('id', messageId)
-        .eq('convo_id', convoId)
-
+        .eq('id', messageId).eq('convo_id', convoId)
       if (error) throw error
-      // optimistic update (realtime UPDATE will also arrive)
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions: next } : m))
-    } catch (e) {
-      console.error('toggleReaction error', e)
-    } finally {
-      setReactPickerFor(null)
-    }
+    } catch (e) { console.error('toggleReaction error', e) } finally { setReactPickerFor(null) }
   }
 
-  function totalReacts(reactions) {
-    if (!reactions || typeof reactions !== 'object') return 0
-    return Object.values(reactions).reduce((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0)
-  }
-
-  // ========= Keyboard: Enter=send, Shift+Enter=newline =========
+  // ========= Keyboard =========
   function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
   }
-
-  // ========= Helpers =========
   function computeStatus(m, mine) {
-    if (!mine) return { icon: null, read: false }
-    if (m.read_at) return { icon: '✓✓', read: true }
-    if (deliveredMap[m.id]) return { icon: '✓✓', read: false }
-    return { icon: '✓', read: false }
+    if (!mine) return { icon: null, read:false }
+    if (m.read_at) return { icon:'✓✓', read:true }
+    if (deliveredMap[m.id]) return { icon:'✓✓', read:false }
+    return { icon:'✓', read:false }
   }
 
-  function sendTypingMaybe() {
-    sendTyping()
+  // ========= Hovercard helpers =========
+  function openCardForPeer(e) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCardTarget({ userId: peer?.id || null, handle: peer?.handle || null, rect })
+    setCardOpen(true)
   }
-
-  function scrollToMessage(id) {
-    const el = document.getElementById(`msg-${id}`)
-    if (el && listRef.current) {
-      const container = listRef.current
-      const top = el.offsetTop - 12
-      container.scrollTo({ top, behavior: 'smooth' })
-      el.animate([{ transform:'scale(1)', background:'#fff' }, { transform:'scale(1.02)', background:'#fffbe6' }, { transform:'scale(1)', background:'#fff' }], { duration: 900 })
-    }
+  function openCardForMessage(e, msg) {
+    // only for other person's messages
+    if (msg.sender_id === me?.id) return
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCardTarget({ userId: msg.sender_id, handle: null, rect })
+    setCardOpen(true)
   }
 
   // ========= UI =========
@@ -284,7 +245,19 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
         <div style={head}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             <strong>Messages</strong>
-            {peer?.handle && <span className="muted">@{peer.handle}</span>}
+            {peer?.handle && (
+              <button
+                type="button"
+                className="linklike"
+                onMouseEnter={openCardForPeer}
+                onFocus={openCardForPeer}
+                onClick={openCardForPeer}
+                style={{ color:'var(--muted)' }}
+                title={`@${peer.handle}`}
+              >
+                @{peer.handle}
+              </button>
+            )}
           </div>
           <button className="btn" onClick={onClose}>Close</button>
         </div>
@@ -309,6 +282,8 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
                 style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}
                 onMouseEnter={() => setHoverMsgId(m.id)}
                 onMouseLeave={() => { if (reactPickerFor !== m.id) setHoverMsgId(null) }}
+                onContextMenu={(e) => openCardForMessage(e, m)} // right-click to preview sender
+                onTouchStart={(e) => openCardForMessage(e, m)} // long-press (mobile will treat as touchstart)
               >
                 <div style={{
                   maxWidth: '78%',
@@ -329,7 +304,7 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
                   {parent && (
                     <button
                       type="button"
-                      onClick={() => scrollToMessage(parent.id)}
+                      onClick={() => scrollToMessage(parent.id, listRef)}
                       title="Go to quoted message"
                       style={{
                         display:'block',
@@ -351,10 +326,10 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
                     </button>
                   )}
 
-                  {/* Message body */}
+                  {/* Body */}
                   {m.body}
 
-                  {/* Status (my messages) */}
+                  {/* Status */}
                   {mine && (
                     <span style={{
                       position:'absolute', right: 8, bottom: -16, fontSize: 12,
@@ -364,11 +339,9 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
                     </span>
                   )}
 
-                  {/* Reactions row */}
+                  {/* Reactions */}
                   {reactsCount > 0 && (
-                    <div style={{
-                      display:'flex', gap:6, marginTop:6, flexWrap:'wrap'
-                    }}>
+                    <div style={{ display:'flex', gap:6, marginTop:6, flexWrap:'wrap' }}>
                       {Object.entries(m.reactions || {}).map(([emoji, arr]) => {
                         const count = Array.isArray(arr) ? arr.length : 0
                         if (!count) return null
@@ -380,85 +353,40 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
                             onClick={() => toggleReaction(m.id, emoji)}
                             title={mineReacted ? 'Remove reaction' : 'Add reaction'}
                             style={{
-                              display:'inline-flex',
-                              alignItems:'center',
-                              gap:6,
-                              padding:'2px 6px',
-                              borderRadius:999,
-                              border: '1px solid var(--border)',
+                              display:'inline-flex', alignItems:'center', gap:6,
+                              padding:'2px 6px', borderRadius:999, border:'1px solid var(--border)',
                               background: mineReacted ? 'color-mix(in oklab, var(--secondary), #ffffff 80%)' : '#fff',
-                              color:'#111',
-                              fontSize:13,
-                              lineHeight:1
+                              color:'#111', fontSize:13, lineHeight:1
                             }}
                           >
-                            <span>{emoji}</span>
-                            <span style={{ fontWeight:700 }}>{count}</span>
+                            <span>{emoji}</span><span style={{ fontWeight:700 }}>{count}</span>
                           </button>
                         )
                       })}
                     </div>
                   )}
 
-                  {/* Hover actions: Reply / React */}
+                  {/* Hover actions */}
                   {(hoverMsgId === m.id || reactPickerFor === m.id) && (
-                    <div style={{
-                      position:'absolute',
-                      top:-26,
-                      right: mine ? 6 : 'auto',
-                      left: mine ? 'auto' : 6,
-                      display:'flex',
-                      gap:6
-                    }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => setReplyToId(m.id)}
-                        title="Reply"
-                        style={{ padding:'2px 8px', height:22 }}
-                      >
+                    <div style={{ position:'absolute', top:-26, right: mine ? 6 : 'auto', left: mine ? 'auto' : 6, display:'flex', gap:6 }}>
+                      <button type="button" className="btn" onClick={() => setReplyToId(m.id)} title="Reply" style={{ padding:'2px 8px', height:22 }}>
                         ↩ Reply
                       </button>
                       <div style={{ position:'relative' }}>
-                        <button
-                          type="button"
-                          className="btn"
-                          onClick={() => setReactPickerFor(prev => prev === m.id ? null : m.id)}
-                          title="React"
-                          style={{ padding:'2px 8px', height:22 }}
-                        >
+                        <button type="button" className="btn" onClick={() => setReactPickerFor(prev => prev === m.id ? null : m.id)} title="React" style={{ padding:'2px 8px', height:22 }}>
                           🙂
                         </button>
-
                         {reactPickerFor === m.id && (
                           <div
                             onMouseLeave={() => { setReactPickerFor(null); setHoverMsgId(null) }}
                             style={{
-                              position:'absolute',
-                              top:-42, left:0,
-                              background:'#fff',
-                              border:'1px solid var(--border)',
-                              borderRadius:12,
-                              padding:'6px 8px',
-                              boxShadow:'0 10px 24px rgba(0,0,0,0.12)',
-                              display:'flex',
-                              gap:6,
-                              zIndex:10
+                              position:'absolute', top:-42, left:0,
+                              background:'#fff', border:'1px solid var(--border)', borderRadius:12, padding:'6px 8px',
+                              boxShadow:'0 10px 24px rgba(0,0,0,0.12)', display:'flex', gap:6, zIndex:10
                             }}
                           >
                             {EMOJIS.map(e => (
-                              <button
-                                key={e}
-                                type="button"
-                                onClick={() => toggleReaction(m.id, e)}
-                                style={{
-                                  fontSize:18,
-                                  background:'transparent',
-                                  border:'none',
-                                  cursor:'pointer'
-                                }}
-                                title={`React ${e}`}
-                              >
+                              <button key={e} type="button" onClick={() => toggleReaction(m.id, e)} style={{ fontSize:18, background:'transparent', border:'none', cursor:'pointer' }} title={`React ${e}`}>
                                 {e}
                               </button>
                             ))}
@@ -472,7 +400,7 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
             )
           })}
 
-          {/* Typing indicator */}
+          {/* Typing */}
           {typingFrom && (
             <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', color:'var(--muted)' }}>
               <TypingDots /> <span>{typingFrom} is typing…</span>
@@ -480,18 +408,9 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
           )}
         </div>
 
-        {/* Reply composer banner */}
+        {/* Reply banner */}
         {replyToId && (
-          <div style={{
-            borderTop:'1px dashed var(--border)',
-            padding:'6px 10px',
-            background:'#fafafa',
-            fontSize: 13,
-            display:'flex',
-            alignItems:'center',
-            justifyContent:'space-between',
-            gap:10
-          }}>
+          <div style={{ borderTop:'1px dashed var(--border)', padding:'6px 10px', background:'#fafafa', fontSize:13, display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
             <span>Replying to a message</span>
             <button className="btn" type="button" onClick={() => setReplyToId(null)} style={{ padding:'2px 8px', height:24 }}>
               Cancel
@@ -505,87 +424,72 @@ export default function ChatDock({ me, convoId, peer, open, onClose }) {
             ref={inputRef}
             rows={1}
             value={text}
-            onChange={(e) => { setText(e.target.value); sendTypingMaybe() }}
+            onChange={(e) => { setText(e.target.value); sendTyping() }}
             onKeyDown={onKeyDown}
             placeholder={replyToId ? 'Write a reply…' : 'Type a message…'}
             style={ta}
           />
-          <button className="btn btn-primary" type="submit" disabled={!canSend}>
-            Send
-          </button>
+          <button className="btn btn-primary" type="submit" disabled={!canSend}>Send</button>
         </form>
       </div>
+
+      {/* Hovercard */}
+      <ProfileHoverCard
+        userId={cardTarget.userId}
+        handle={cardTarget.handle}
+        anchorRect={cardTarget.rect}
+        open={cardOpen}
+        onClose={() => setCardOpen(false)}
+        onMessage={(uid) => {
+          // optional: could open a convo with this uid if different
+          setCardOpen(false)
+        }}
+      />
     </div>
   )
 }
 
-/* ========== Tiny typing dots ========== */
+/* util */
+function totalReacts(reactions) {
+  if (!reactions || typeof reactions !== 'object') return 0
+  return Object.values(reactions).reduce((sum, v) => sum + (Array.isArray(v) ? v.length : 0), 0)
+}
+function scrollToMessage(id, listRef) {
+  const el = document.getElementById(`msg-${id}`)
+  if (el && listRef.current) {
+    const container = listRef.current
+    const top = el.offsetTop - 12
+    container.scrollTo({ top, behavior: 'smooth' })
+    el.animate([{ transform:'scale(1)', background:'#fff' }, { transform:'scale(1.02)', background:'#fffbe6' }, { transform:'scale(1)', background:'#fff' }], { duration: 900 })
+  }
+}
+
+/* tiny typing dots */
 function TypingDots() {
   return (
     <span style={{ display:'inline-flex', gap:3 }}>
       <Dot delay="0ms" /><Dot delay="120ms" /><Dot delay="240ms" />
       <style>{`
-        @keyframes bump {
-          0% { transform: translateY(0); opacity: 0.5 }
-          50% { transform: translateY(-3px); opacity: 1 }
-          100% { transform: translateY(0); opacity: 0.5 }
-        }
+        @keyframes bump { 0% { transform: translateY(0); opacity:.5 } 50% { transform: translateY(-3px); opacity:1 } 100% { transform: translateY(0); opacity:.5 } }
       `}</style>
     </span>
   )
 }
 function Dot({ delay }) {
-  return (
-    <span style={{
-      width: 6, height: 6, borderRadius: 6, background: 'var(--muted)',
-      display:'inline-block', animation: `bump 900ms ${delay} infinite`
-    }} />
-  )
+  return <span style={{ width:6, height:6, borderRadius:6, background:'var(--muted)', display:'inline-block', animation:`bump 900ms ${delay} infinite` }} />
 }
 
-/* ========== Styles ========== */
-const wrap = {
-  position:'fixed',
-  right: 16,
-  bottom: 16,
-  zIndex: 50
-}
+/* layout */
+const wrap = { position:'fixed', right:16, bottom:16, zIndex:50 }
 const dock = {
-  width: 360,
-  maxHeight: '70vh',
-  background:'#fff',
-  border:'1px solid var(--border)',
-  borderRadius: 14,
-  overflow:'hidden',
-  boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
-  display:'grid',
-  gridTemplateRows:'auto 1fr auto auto'
+  width:360, maxHeight:'70vh', background:'#fff', border:'1px solid var(--border)',
+  borderRadius:14, overflow:'hidden', boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
+  display:'grid', gridTemplateRows:'auto 1fr auto auto'
 }
-const head = {
-  display:'flex',
-  alignItems:'center',
-  justifyContent:'space-between',
-  padding:'10px 12px',
-  borderBottom:'1px solid var(--border)',
-  background:'#fafafa'
-}
-const list = {
-  overflowY:'auto',
-  padding:'8px 4px'
-}
-const composer = {
-  display:'flex',
-  gap:8,
-  padding:'10px',
-  borderTop:'1px solid var(--border)',
-  background:'#fff'
-}
-const ta = {
-  flex:1,
-  minHeight: 38,
-  maxHeight: 120,
-  resize:'vertical'
-}
+const head = { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)', background:'#fafafa' }
+const list = { overflowY:'auto', padding:'8px 4px' }
+const composer = { display:'flex', gap:8, padding:'10px', borderTop:'1px solid var(--border)', background:'#fff' }
+const ta = { flex:1, minHeight:38, maxHeight:120, resize:'vertical' }
 
 
 
