@@ -1,177 +1,164 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import ChatDock from './components/ChatDock'
-import AppGuard from './components/AppGuard'
-import UserBadge from './components/UserBadge'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
-import { pageview } from './lib/analytics'
-import FeedbackModal from './components/FeedbackModal'
-import EventsDebugPanel from './components/EventsDebugPanel' // ✅ NEW
 
-// Pages
+import Home from './pages/Home'
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
-import SettingsPage from './pages/SettingsPage'
 import PublicProfile from './pages/PublicProfile'
+import SettingsPage from './pages/SettingsPage'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
-import Contact from './pages/Contact'
-import Safety from './pages/Safety'
-import InviteQR from './pages/InviteQR'
-import Connect from './pages/Connect'
-import Network from './pages/Network'
 import Onboarding from './pages/Onboarding'
+import ChatDock from './components/ChatDock'
+import ChatAlerts from './components/ChatAlerts'
 
-function Home() {
+export default function App() {
   return (
-    <section style={{
-      padding: '80px 16px',
-      textAlign: 'center',
-      background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%)'
-    }}>
-      <div className="container" style={{ maxWidth: 720 }}>
-        <h1 style={{ fontSize: '2.5rem', marginBottom: 16 }}>
-          Welcome to{' '}
-          <span style={{ fontWeight: 800, color: 'var(--secondary)' }}>TryMe</span>
-          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>Dating</span>
-        </h1>
-        <p style={{ fontSize: '1.25rem', marginBottom: 32, color: 'var(--muted)' }}>
-          Meet new people, create real connections, and find the right match for you.
-        </p>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <Link className="btn btn-primary" style={{ minWidth: 140 }} to="/auth">Sign Up Free</Link>
-          <Link className="btn btn-secondary" style={{ minWidth: 140 }} to="/auth">Sign In</Link>
-        </div>
-      </div>
-    </section>
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
   )
 }
 
-export default function App() {
-  const { pathname } = useLocation()
-  const isPublicProfile = pathname.startsWith('/u/')
-  const [signedIn, setSignedIn] = useState(false)
-  const [showFeedback, setShowFeedback] = useState(false)
+function Shell() {
+  const nav = useNavigate()
+  const [me, setMe] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  // analytics per route change
-  useEffect(() => { pageview() }, [pathname])
+  // Chat dock state
+  const [chatOpen, setChatOpen] = useState(false)
+  const [activeConvoId, setActiveConvoId] = useState(null)
+  const [activePeer, setActivePeer] = useState(null)
 
-  // auth state for header
+  // Recent known convos for this user (used by ChatAlerts)
+  const recentKey = me?.id ? `recentConvos:${me.id}` : null
+  const [recentConvoIds, setRecentConvoIds] = useState([])
+
+  // Bootstrap auth
   useEffect(() => {
     let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (alive) setSignedIn(!!user)
+      if (!alive) return
+      setMe(user || null)
+      setLoading(false)
     })()
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setSignedIn(!!session?.user)
-    })
-    return () => { alive = false; sub.subscription.unsubscribe() }
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setMe(s?.user || null))
+    return () => sub.subscription.unsubscribe()
   }, [])
 
+  // Load stored recent convos
+  useEffect(() => {
+    if (!recentKey) return
+    try {
+      const raw = localStorage.getItem(recentKey)
+      const ids = raw ? JSON.parse(raw) : []
+      setRecentConvoIds(Array.isArray(ids) ? ids : [])
+    } catch {}
+  }, [recentKey])
+
+  // Persist recent convos
+  function rememberConvo(id) {
+    if (!recentKey || id == null) return
+    setRecentConvoIds(prev => {
+      const s = new Set(prev.map(String))
+      s.add(String(id))
+      const arr = Array.from(s)
+      try { localStorage.setItem(recentKey, JSON.stringify(arr)) } catch {}
+      return arr
+    })
+  }
+
+  // Open chat helper (used by alerts + pages)
+  function openChat(convoId, peer) {
+    setActiveConvoId(convoId)
+    setActivePeer(peer || null)
+    setChatOpen(true)
+    rememberConvo(convoId)
+  }
+
+  // Close chat
+  function closeChat() {
+    setChatOpen(false)
+  }
+
+  const authed = !!me?.id
+
   return (
-    <>
-      <AppGuard />
-
-      {/* Header */}
-      <header style={{
-        borderBottom: '1px solid #eee',
-        padding: '10px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        background: 'color-mix(in oklab, var(--bg), #fff 20%)',
-        backdropFilter: 'saturate(1.2) blur(6px)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Link to="/" style={{ fontWeight: 800, textDecoration: 'none', fontSize: '1.25rem', lineHeight: 1 }}>
-            <span style={{ color: 'var(--secondary)' }}>TryMe</span>
-            <span style={{ color: 'var(--primary)' }}>Dating</span>
-          </Link>
-
-          {!signedIn ? (
-            <nav style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Link to="/auth">Sign In</Link>
-              <Link to="/terms">Terms</Link>
-              <Link to="/privacy">Privacy</Link>
-              <Link to="/contact">Contact</Link>
-              <Link to="/safety">Safety</Link>
-            </nav>
-          ) : (
-            <UserBadge />
-          )}
-        </div>
-      </header>
-
-      {/* Routes */}
-      <main style={{ minHeight: 'calc(100vh - 160px)' }}>
+    <div>
+      <Header me={me} onOpenChat={openChat} />
+      <main>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Home me={me} onOpenChat={openChat} />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/u/:handle" element={<PublicProfile />} />
-
-          {/* Informational pages */}
+          <Route path="/profile" element={<ProfilePage me={me} onOpenChat={openChat} />} />
+          <Route path="/u/:handle" element={<PublicProfile me={me} onOpenChat={openChat} />} />
+          <Route path="/settings" element={<SettingsPage me={me} />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/safety" element={<Safety />} />
-
-          {/* Network/invite */}
-          <Route path="/invite" element={<InviteQR />} />
-          <Route path="/connect" element={<Connect />} />
-          <Route path="/network" element={<Network />} />
-
-          {/* 404 */}
-          <Route path="*" element={
-            <div className="container" style={{ padding: '32px 0' }}>
-              <h2>Page not found</h2>
-              <p><Link to="/">Go home</Link></p>
-            </div>
-          } />
         </Routes>
       </main>
 
-      {/* Footer (stacked center, mobile-friendly spacing) */}
-      <footer style={{ borderTop: '1px solid #eee', padding: '24px 16px' }}>
-        <div className="container" style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center',
-          gap: 16,
-        }}>
-          <div style={{ fontWeight: 800 }}>
-            <span style={{ color: 'var(--secondary)' }}>TryMe</span>
-            <span style={{ color: 'var(--primary)' }}>Dating</span> &nbsp;© {new Date().getFullYear()}
-          </div>
-          <nav
-            style={{
-              display: 'flex',
-              gap: 20,
-              flexWrap: 'wrap',
-              justifyContent: 'center',
-              maxWidth: '90%',
-            }}
-          >
-            <a href="#" onClick={(e)=>{ e.preventDefault(); setShowFeedback(true); }}>Feedback</a>
+      {/* Footer stays same */}
+      <footer className="footer">
+        <div className="container" style={{ padding: '14px 0' }}>
+          <div className="footer-links">
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
-            <Link to="/contact">Contact</Link>
-            <Link to="/safety">Safety</Link>
-          </nav>
+            <a href="mailto:support@trymedating.com">Contact</a>
+          </div>
         </div>
       </footer>
 
-      {/* Global widgets */}
-      {!isPublicProfile && <ChatDock />}
-      <FeedbackModal open={showFeedback} onClose={()=>setShowFeedback(false)} />
-      <EventsDebugPanel /> {/* ✅ Mounted globally; shows only with ?debug=1 or localStorage flag */}
-    </>
+      {/* Global new-message alerts */}
+      {authed && (
+        <ChatAlerts
+          me={me}
+          isChatOpen={chatOpen}
+          activeConvoId={activeConvoId}
+          recentConvoIds={recentConvoIds}
+          onOpenChat={openChat}
+        />
+      )}
+
+      {/* Chat dock */}
+      {chatOpen && (
+        <ChatDock
+          me={me}
+          convoId={activeConvoId}
+          peer={activePeer}
+          open={chatOpen}
+          onClose={closeChat}
+        />
+      )}
+    </div>
+  )
+}
+
+function Header({ me, onOpenChat }) {
+  const nav = useNavigate()
+  const authed = !!me?.id
+
+  return (
+    <header className="header">
+      <div className="container header-inner">
+        <Link to="/" className="brand">TryMeDating</Link>
+        <nav className="nav">
+          {authed ? (
+            <>
+              <Link to="/profile" className="nav-link">Profile</Link>
+              <Link to="/settings" className="nav-link">Settings</Link>
+              <button className="btn" onClick={() => onOpenChat(null)}>Messages</button>
+            </>
+          ) : (
+            <Link to="/auth" className="btn btn-primary">Sign in</Link>
+          )}
+        </nav>
+      </div>
+    </header>
   )
 }
 
