@@ -7,12 +7,13 @@ import Home from './pages/Home'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import AuthPage from './pages/AuthPage'
+import ProfilePage from './pages/ProfilePage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   const [me, setMe] = useState(null)
   const [authReady, setAuthReady] = useState(false)
 
-  // Initialize Supabase auth + subscribe to changes
   useEffect(() => {
     let unsub = () => {}
     ;(async () => {
@@ -24,7 +25,6 @@ export default function App() {
       } finally {
         setAuthReady(true)
       }
-
       const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
         setMe(session?.user || null)
       })
@@ -40,13 +40,14 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home me={me} />} />
           <Route path="/auth" element={<AuthPage />} />
+          <Route path="/profile" element={<ProfilePage me={me} />} />
+          <Route path="/settings" element={<SettingsPage me={me} />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<div className="container" style={{padding:24}}>Not found</div>} />
         </Routes>
       </main>
       <Footer />
-
       {!authReady && (
         <div className="container" style={{ padding: 8, fontSize: 12, color: 'var(--muted)' }}>
           Initializing…
@@ -62,7 +63,7 @@ function Header({ me }) {
 
   async function handleSignOut() {
     try { await supabase.auth.signOut() } catch {}
-    nav('/') // send back home after sign-out
+    nav('/')
   }
 
   return (
@@ -71,6 +72,8 @@ function Header({ me }) {
         <Link to="/" className="brand">TryMeDating</Link>
         <nav className="nav">
           <Link to="/" className="nav-link">Home</Link>
+          {authed && <Link to="/profile" className="nav-link">Profile</Link>}
+          {authed && <Link to="/settings" className="nav-link">Settings</Link>}
           <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
           {authed ? (
             <button className="btn" onClick={handleSignOut}>Sign out</button>
