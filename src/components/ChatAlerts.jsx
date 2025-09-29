@@ -3,13 +3,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * Push-style message alerts.
+ * Push-style message alerts with a soft chime.
  *
  * Props:
  * - me: { id, email, handle? }
  * - isChatOpen: boolean
- * - activeConvoId: string | number | null
- * - recentConvoIds: (string|number)[]   // known convos for this user (we only alert for these)
+ * - activeConvoId: string|number|null
+ * - recentConvoIds: (string|number)[]
  * - onOpenChat: (convoId: string|number, peer?: { id, handle?: string, avatar_url?: string }) => void
  */
 export default function ChatAlerts({
@@ -19,15 +19,54 @@ export default function ChatAlerts({
   recentConvoIds,
   onOpenChat
 }) {
-  const [queue, setQueue] = useState([]) // [{ id, convo_id, sender_id, body, created_at, sender }]
-  const [visible, setVisible] = useState(null) // current toast item
+  const [queue, setQueue] = useState([])   // toast queue
+  const [visible, setVisible] = useState(null) // current toast
   const hideTimer = useRef(null)
-  const profileCache = useRef(new Map()) // sender_id -> { handle, avatar_url }
+  const profileCache = useRef(new Map())
+
+  // === Sound prefs (persisted) ===
+  const PREF_KEY = 'chatSoundEnabled'
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    try {
+      const raw = localStorage.getItem(PREF_KEY)
+      return raw == null ? true : JSON.parse(raw) === true
+    } catch { return true }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(!!soundEnabled)) } catch {}
+  }, [soundEnabled])
+
+  // === Audio context (lazy) ===
+  const audioCtxRef = useRef(null)
+  function ensureAudioCtx() {
+    if (audioCtxRef.current) return audioCtxRef.current
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (!Ctx) return null
+      audioCtxRef.current = new Ctx()
+      return audioCtxRef.current
+    } catch { return null }
+  }
+  // “Unlock” on first user interaction (helps with mobile autoplay policies)
+  useEffect(() => {
+    function unlock() {
+      const ctx = ensureAudioCtx()
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{})
+      window.removeEventListener('click', unlock)
+      window.removeEventListener('touchstart', unlock)
+    }
+    window.addEventListener('click', unlock, { once: true })
+    window.addEventListener('touchstart', unlock, { once: true })
+    return () => {
+      window.removeEventListener('click', unlock)
+      window.removeEventListener('touchstart', unlock)
+    }
+  }, [])
 
   const myId = me?.id
   const convoSet = useMemo(() => new Set((recentConvoIds || []).map(String)), [recentConvoIds])
 
-  // Subscribe to new messages globally; filter client-side to convos we care about
+  // Subscribe to new messages globally; filter client-side
   useEffect(() => {
     if (!myId) return
     const ch = supabase
@@ -36,18 +75,14 @@ export default function ChatAlerts({
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           const m = payload.new
-          // Only alert if:
-          // - not from me
-          // - convo is one we know (recentConvoIds)
-          // - and either chat is closed or it’s a different convo
           if (!m || m.sender_id === myId) return
           if (!convoSet.has(String(m.convo_id))) return
           if (isChatOpen && String(activeConvoId) === String(m.convo_id)) return
 
-          // Enrich with sender profile (handle/avatar)
+          // Fetch sender mini-profile (cached)
           let sender = profileCache.current.get(m.sender_id)
           if (!sender) {
-            const { data, error } = await supabase
+            const { data } = await supabase
               .from('profiles')
               .select('handle, avatar_url')
               .eq('user_id', m.sender_id)
@@ -57,7 +92,7 @@ export default function ChatAlerts({
               handle: data?.handle || (m.sender_id || '').slice(0, 6),
               avatar_url: data?.avatar_url || ''
             }
-            if (!error) profileCache.current.set(m.sender_id, sender)
+            profileCache.current.set(m.sender_id, sender)
           }
 
           const item = { ...m, sender }
@@ -69,17 +104,23 @@ export default function ChatAlerts({
     return () => { supabase.removeChannel(ch) }
   }, [myId, convoSet, isChatOpen, activeConvoId])
 
-  // Show one toast at a time
+  // Show one toast at a time; play a soft chime
   useEffect(() => {
     if (visible || queue.length === 0) return
     const [next, ...rest] = queue
     setQueue(rest)
     setVisible(next)
-    // auto-hide after 5s
+
+    // Auto-hide after 5s
     if (hideTimer.current) clearTimeout(hideTimer.current)
     hideTimer.current = setTimeout(() => setVisible(null), 5000)
+
+    // Play sound (best effort)
+    if (soundEnabled) {
+      playChime(ensureAudioCtx())
+    }
     return () => { if (hideTimer.current) clearTimeout(hideTimer.current) }
-  }, [queue, visible])
+  }, [queue, visible, soundEnabled])
 
   if (!visible) return null
 
@@ -90,7 +131,6 @@ export default function ChatAlerts({
       avatar_url: visible.sender.avatar_url
     } : undefined
     onOpenChat?.(visible.convo_id, peer)
-    // hide immediately
     if (hideTimer.current) clearTimeout(hideTimer.current)
     setVisible(null)
   }
@@ -100,31 +140,99 @@ export default function ChatAlerts({
     setVisible(null)
   }
 
+  const toggleSound = () => {
+    setSoundEnabled(prev => !prev)
+    // attempt to resume context when enabling
+    if (!soundEnabled) {
+      const ctx = ensureAudioCtx()
+      if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{})
+    }
+  }
+
   return (
     <div style={wrap}>
       <div style={card}>
-        <div style={{ display:'flex', gap:10 }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:10 }}>
           <Avatar url={visible.sender?.avatar_url} />
           <div style={{ flex:1, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 14, display:'flex', alignItems:'center', gap:6 }}>
-              <span>{visible.sender?.handle ? `@${visible.sender.handle}` : 'New message'}</span>
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>• now</span>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, display:'flex', alignItems:'center', gap:6, minWidth:0 }}>
+                <span style={{ whiteSpace:'nowrap', textOverflow:'ellipsis', overflow:'hidden' }}>
+                  {visible.sender?.handle ? `@${visible.sender.handle}` : 'New message'}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--muted)' }}>• now</span>
+              </div>
+              <button
+                type="button"
+                onClick={toggleSound}
+                title={soundEnabled ? 'Mute sound' : 'Unmute sound'}
+                style={iconBtn}
+              >
+                {soundEnabled ? '🔔' : '🔕'}
+              </button>
             </div>
+
             <div style={{
               fontSize: 13, color: '#111', marginTop: 2,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260
             }}>
               {visible.body}
             </div>
+
             <div style={{ display:'flex', gap:8, marginTop: 8 }}>
-              <button className="btn btn-primary" onClick={openNow} style={{ padding:'4px 10px', height:28 }}>Open</button>
-              <button className="btn" onClick={dismiss} style={{ padding:'4px 10px', height:28 }}>Dismiss</button>
+              <button className="btn btn-primary" onClick={openNow} style={{ padding:'4px 10px', height:28 }}>
+                Open
+              </button>
+              <button className="btn" onClick={dismiss} style={{ padding:'4px 10px', height:28 }}>
+                Dismiss
+              </button>
             </div>
           </div>
         </div>
       </div>
     </div>
   )
+}
+
+/* ===== Soft chime (Web Audio API) =====
+   Two mellow sine notes with brief envelopes. */
+function playChime(ctx) {
+  if (!ctx) return
+  try {
+    const now = ctx.currentTime
+    const master = ctx.createGain()
+    master.gain.value = 0.00001
+    master.connect(ctx.destination)
+
+    // Note helper
+    const note = (time, freq, dur = 0.22, gain = 0.6) => {
+      const osc = ctx.createOscillator()
+      const g = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(freq, time)
+      osc.connect(g)
+      g.connect(master)
+
+      // quick, soft envelope
+      g.gain.setValueAtTime(0.00001, time)
+      g.gain.exponentialRampToValueAtTime(gain, time + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.00001, time + dur)
+
+      osc.start(time)
+      osc.stop(time + dur + 0.02)
+    }
+
+    // ramp master up just for the chime, then back down
+    master.gain.setValueAtTime(0.00001, now)
+    master.gain.exponentialRampToValueAtTime(0.9, now + 0.02)
+    master.gain.exponentialRampToValueAtTime(0.00001, now + 0.8)
+
+    // Two gentle notes (A4 -> C#5)
+    note(now + 0.00, 440, 0.22, 0.5)
+    note(now + 0.18, 554.37, 0.28, 0.45)
+  } catch {
+    // ignore audio failures silently
+  }
 }
 
 function Avatar({ url }) {
@@ -152,3 +260,12 @@ const card = {
   boxShadow: '0 14px 40px rgba(0,0,0,0.18)',
   padding: 10
 }
+const iconBtn = {
+  border: '1px solid var(--border)',
+  background: '#fff',
+  borderRadius: 8,
+  padding: '2px 8px',
+  height: 28,
+  cursor: 'pointer'
+}
+
