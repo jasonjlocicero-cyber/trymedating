@@ -1,208 +1,153 @@
 // src/pages/SettingsPage.jsx
-import React, { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import AvatarUploader from '../components/AvatarUploader'
-import InterestsPicker from '../components/InterestsPicker'
-import { track } from '../lib/analytics'
 
-export default function SettingsPage() {
-  const nav = useNavigate()
-  const [me, setMe] = useState(null)
+const SOUND_PREF_KEY = 'chatSoundEnabled'
 
-  const [displayName, setDisplayName] = useState('')
-  const [location, setLocation] = useState('')
-  const [bio, setBio] = useState('')
-  const [publicProfile, setPublicProfile] = useState(true)
-  const [avatarUrl, setAvatarUrl] = useState('')
-  const [interests, setInterests] = useState([])
+export default function SettingsPage({ me }) {
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const audioCtxRef = useRef(null)
 
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
-
+  // Load setting from localStorage on mount
   useEffect(() => {
-    let alive = true
-    ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!alive) return
-      if (!user) { nav('/auth'); return }
-      setMe(user)
+    try {
+      const raw = localStorage.getItem(SOUND_PREF_KEY)
+      setSoundEnabled(raw == null ? true : JSON.parse(raw) === true)
+    } catch {
+      setSoundEnabled(true)
+    }
+  }, [])
 
-      const { data: prof, error: perr } = await supabase
-        .from('profiles')
-        .select('display_name, location, bio, public_profile, avatar_url, handle, interests')
-        .eq('user_id', user.id)
-        .maybeSingle()
+  // Persist when changed
+  useEffect(() => {
+    try { localStorage.setItem(SOUND_PREF_KEY, JSON.stringify(!!soundEnabled)) } catch {}
+  }, [soundEnabled])
 
-      if (perr) {
-        setError(perr.message)
-      } else if (prof) {
-        setDisplayName(prof.display_name || '')
-        setLocation(prof.location || '')
-        setBio(prof.bio || '')
-        setPublicProfile(!!prof.public_profile)
-        setAvatarUrl(prof.avatar_url || '')
-        setInterests(Array.isArray(prof.interests) ? prof.interests : [])
+  // Simple WebAudio chime (same vibe as the toast)
+  function ensureAudioCtx() {
+    if (audioCtxRef.current) return audioCtxRef.current
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (!Ctx) return null
+      audioCtxRef.current = new Ctx()
+      return audioCtxRef.current
+    } catch { return null }
+  }
+
+  function playChime() {
+    if (!soundEnabled) return
+    const ctx = ensureAudioCtx()
+    if (!ctx) return
+    try {
+      const now = ctx.currentTime
+      const master = ctx.createGain()
+      master.gain.value = 0.00001
+      master.connect(ctx.destination)
+
+      const note = (t, f, dur = 0.22, g = 0.6) => {
+        const osc = ctx.createOscillator()
+        const gn = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(f, t)
+        osc.connect(gn); gn.connect(master)
+        gn.gain.setValueAtTime(0.00001, t)
+        gn.gain.exponentialRampToValueAtTime(g, t + 0.02)
+        gn.gain.exponentialRampToValueAtTime(0.00001, t + dur)
+        osc.start(t); osc.stop(t + dur + 0.02)
       }
-      setLoading(false)
-    })()
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      if (!s?.user) nav('/auth')
-    })
-    return () => sub.subscription.unsubscribe()
-  }, [nav])
 
-  async function saveProfile(e) {
-    e.preventDefault()
-    setError(''); setNotice('')
-    if (!me?.id) { setError('Please sign in.'); return }
+      master.gain.setValueAtTime(0.00001, now)
+      master.gain.exponentialRampToValueAtTime(0.9, now + 0.02)
+      master.gain.exponentialRampToValueAtTime(0.00001, now + 0.8)
 
-    setSaving(true)
-    const payload = {
-      display_name: displayName?.trim() || null,
-      location: location?.trim() || null,
-      bio: bio?.trim() || null,
-      public_profile: publicProfile,
-      avatar_url: avatarUrl || null,
-      interests: Array.isArray(interests) ? interests : []
-    }
-    const { error: upErr } = await supabase
-      .from('profiles')
-      .update(payload)
-      .eq('user_id', me.id)
-
-    if (upErr) {
-      setError(upErr.message || 'Could not save settings.')
-    } else {
-      setNotice('Settings saved.')
-      // 🔴 Custom analytics event
-      track('Settings Saved', {
-        has_avatar: !!avatarUrl,
-        interests_count: (Array.isArray(interests) ? interests.length : 0),
-        public_profile: !!publicProfile
-      })
-    }
-    setSaving(false)
+      // A4 -> C#5 two-note chime
+      note(now + 0.00, 440, 0.22, 0.5)
+      note(now + 0.18, 554.37, 0.28, 0.45)
+    } catch { /* ignore */ }
   }
 
   async function handleSignOut() {
-    await supabase.auth.signOut()
-    nav('/auth')
-  }
-
-  async function deleteAccount() {
-    const ok = confirm('Delete your account? This removes your profile and messages. This cannot be undone.')
-    if (!ok) return
-    try {
-      const res = await fetch('/api/delete-account', { method: 'POST' })
-      if (!res.ok) {
-        const txt = await res.text()
-        throw new Error(txt || 'Delete failed')
-      }
-      await supabase.auth.signOut()
-      alert('Account deleted.')
-      nav('/')
-    } catch (err) {
-      setError(err.message || 'Delete failed')
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="container" style={{ padding: '32px 0' }}>
-        <div className="card">Loading…</div>
-      </div>
-    )
+    try { await supabase.auth.signOut() } catch {}
+    window.location.href = '/'
   }
 
   return (
-    <div className="container" style={{ padding: '32px 0', maxWidth: 860 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h1 style={{ margin: 0 }}>
-          <span style={{ color: 'var(--secondary)', fontWeight: 800 }}>Account</span>{' '}
-          <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Settings</span>
-        </h1>
-        <Link className="btn" to="/profile">View Profile</Link>
-      </div>
+    <div className="container" style={{ padding: '24px 0', maxWidth: 860 }}>
+      <h1 style={{ marginTop: 0 }}>Settings</h1>
 
-      {error && (
-        <div className="card" style={{ marginTop: 12, borderLeft: '4px solid #e11d48', color: '#b91c1c' }}>
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="card" style={{ marginTop: 12, borderLeft: '4px solid var(--secondary)', color: 'var(--secondary)' }}>
-          {notice}
-        </div>
-      )}
+      {/* Notifications */}
+      <section className="card" style={{ marginTop: 12 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Notifications</h2>
+        <div style={{ display:'grid', gap:12 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>Message alert sound</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                Plays a soft chime when a new message toast appears (when chat is closed or in another thread).
+              </div>
+            </div>
+            <label style={{ display:'inline-flex', alignItems:'center', gap:8, cursor:'pointer' }}>
+              <input
+                type="checkbox"
+                checked={soundEnabled}
+                onChange={(e) => setSoundEnabled(e.target.checked)}
+              />
+              <span>{soundEnabled ? 'On' : 'Off'}</span>
+            </label>
+          </div>
 
-      {/* Avatar */}
-      <div style={{ marginTop: 16 }}>
-        <AvatarUploader me={me} initialUrl={avatarUrl} onChange={setAvatarUrl} />
-      </div>
-
-      {/* Profile details + Interests */}
-      <form onSubmit={saveProfile} className="card" style={{ marginTop: 16, display: 'grid', gap: 14 }}>
-        <div>
-          <label style={{ fontWeight: 700 }}>Display name</label>
-          <input value={displayName} onChange={(e)=>setDisplayName(e.target.value)} placeholder="How you appear" />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: 700 }}>Location</label>
-          <input value={location} onChange={(e)=>setLocation(e.target.value)} placeholder="City, State (optional)" />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: 700 }}>Short bio</label>
-          <textarea
-            rows={3}
-            maxLength={300}
-            value={bio}
-            onChange={(e)=>setBio(e.target.value)}
-            placeholder="A sentence or two (optional)"
-            style={{ resize: 'vertical' }}
-          />
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-            {bio.length > 240 ? `${bio.length}/300` : 'Up to 300 characters.'}
+          <div>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                // Try to resume audio on user gesture (mobile autoplay)
+                const ctx = ensureAudioCtx()
+                if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{})
+                playChime()
+              }}
+              disabled={!soundEnabled}
+            >
+              Test sound
+            </button>
           </div>
         </div>
+      </section>
 
-        {/* Interests editor */}
-        <InterestsPicker value={interests} onChange={setInterests} max={8} />
-
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <input
-            id="publicProfile"
-            type="checkbox"
-            checked={publicProfile}
-            onChange={(e)=>setPublicProfile(e.target.checked)}
-          />
-          <label htmlFor="publicProfile" style={{ userSelect: 'none' }}>
-            Make my profile public (anyone with my link can view)
-          </label>
+      {/* Account */}
+      <section className="card" style={{ marginTop: 12 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Account</h2>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+          Signed in as {me?.email || 'your account'}.
         </div>
+        <button className="btn" onClick={handleSignOut}>Sign out</button>
+      </section>
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" type="submit" disabled={saving}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-          <button className="btn" type="button" onClick={handleSignOut}>Sign out</button>
-        </div>
-      </form>
-
-      {/* Danger zone */}
-      <div className="card" style={{ marginTop: 16, borderLeft: '4px solid #e11d48' }}>
-        <div style={{ fontWeight: 800, marginBottom: 8 }}>Danger zone</div>
-        <p className="muted">
-          Permanently delete your account and associated data.
+      {/* Danger Zone (optional: delete account function if you wired it) */}
+      <section className="card" style={{ marginTop: 12, borderLeft: '4px solid #ef4444' }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Danger Zone</h2>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Permanently delete your account and data.
         </p>
-        <button className="btn" onClick={deleteAccount} style={{ borderColor: '#e11d48', color: '#e11d48' }}>
+        <button
+          className="btn"
+          style={{ borderColor:'#ef4444', color:'#ef4444' }}
+          onClick={async () => {
+            if (!confirm('Delete your account permanently?')) return
+            try {
+              const res = await fetch('/.netlify/functions/delete-account', { method:'POST' })
+              if (!res.ok) throw new Error('Delete failed')
+              alert('Your account was deleted.')
+              await supabase.auth.signOut()
+              window.location.href = '/'
+            } catch (e) {
+              alert('Sorry, could not delete your account.')
+            }
+          }}
+        >
           Delete account
         </button>
-      </div>
+      </section>
     </div>
   )
 }
