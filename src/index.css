@@ -6,18 +6,23 @@
 }
 html,body,#root{height:100%}
 body{margin:0;font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;background:#fafafa;color:#111}
+a{color:#0f172a;text-decoration:none}
+a:hover{text-decoration:underline}
 .container{max-width:960px;margin:0 auto;padding:0 16px}
 .card{background:#fff;border:1px solid var(--border);border-radius:12px}
 .btn{border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
 .btn-primary{background:linear-gradient(90deg, var(--primary), var(--secondary));color:#fff;border:1px solid transparent}
 .header{border-bottom:1px solid var(--border);background:#fff}
 .header-inner{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
-.brand{font-weight:800;text-decoration:none;color:#111}
-.nav .nav-link{margin-right:8px;text-decoration:none}
+.brand{font-weight:800}
+.nav{display:flex;gap:12px}
+.nav .nav-link{padding:4px 6px;border-radius:6px}
+.nav .nav-link:hover{background:#f3f4f6}
 .footer{border-top:1px solid var(--border);background:#fff;margin-top:32px}
-.footer-links{display:flex;gap:12px}
+.footer-links{display:flex;gap:16px}
 .muted{color:var(--muted)}
 .linklike{background:none;border:none;padding:0;cursor:pointer;text-decoration:underline}
+
 
 
 
