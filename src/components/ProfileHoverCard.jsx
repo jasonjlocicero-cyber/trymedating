@@ -1,153 +1,120 @@
-// src/pages/SettingsPage.jsx
+// src/components/ProfileHoverCard.jsx
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-const SOUND_PREF_KEY = 'chatSoundEnabled'
+/**
+ * Preview a user's profile on hover/tap.
+ * Props:
+ * - userId?: string
+ * - handle?: string
+ * - anchorRect: DOMRect|null
+ * - open: boolean
+ * - onClose: () => void
+ */
+export default function ProfileHoverCard({ userId, handle, anchorRect, open, onClose }) {
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const [profile, setProfile] = useState(null)
+  const wrapRef = useRef(null)
 
-export default function SettingsPage({ me }) {
-  const [soundEnabled, setSoundEnabled] = useState(true)
-  const audioCtxRef = useRef(null)
-
-  // Load setting from localStorage on mount
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SOUND_PREF_KEY)
-      setSoundEnabled(raw == null ? true : JSON.parse(raw) === true)
-    } catch {
-      setSoundEnabled(true)
+    if (!open) return
+    let cancel = false
+    ;(async () => {
+      setLoading(true); setErr('')
+      try {
+        let q = supabase.from('profiles')
+          .select('user_id, handle, display_name, bio, location, avatar_url, interests, public_profile')
+        q = userId ? q.eq('user_id', userId) : q.eq('handle', handle)
+        const { data, error } = await q.maybeSingle()
+        if (error) throw error
+        if (!cancel) setProfile(data || null)
+      } catch (e) {
+        if (!cancel) setErr(e.message || 'Failed to load profile')
+      } finally { if (!cancel) setLoading(false) }
+    })()
+    return () => { cancel = true }
+  }, [open, userId, handle])
+
+  useEffect(() => {
+    function onDoc(e) {
+      if (!open) return
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onClose?.()
     }
-  }, [])
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('touchstart', onDoc)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('touchstart', onDoc)
+    }
+  }, [open, onClose])
 
-  // Persist when changed
-  useEffect(() => {
-    try { localStorage.setItem(SOUND_PREF_KEY, JSON.stringify(!!soundEnabled)) } catch {}
-  }, [soundEnabled])
+  if (!open || !anchorRect) return null
 
-  // Simple WebAudio chime (same vibe as the toast)
-  function ensureAudioCtx() {
-    if (audioCtxRef.current) return audioCtxRef.current
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext
-      if (!Ctx) return null
-      audioCtxRef.current = new Ctx()
-      return audioCtxRef.current
-    } catch { return null }
-  }
-
-  function playChime() {
-    if (!soundEnabled) return
-    const ctx = ensureAudioCtx()
-    if (!ctx) return
-    try {
-      const now = ctx.currentTime
-      const master = ctx.createGain()
-      master.gain.value = 0.00001
-      master.connect(ctx.destination)
-
-      const note = (t, f, dur = 0.22, g = 0.6) => {
-        const osc = ctx.createOscillator()
-        const gn = ctx.createGain()
-        osc.type = 'sine'
-        osc.frequency.setValueAtTime(f, t)
-        osc.connect(gn); gn.connect(master)
-        gn.gain.setValueAtTime(0.00001, t)
-        gn.gain.exponentialRampToValueAtTime(g, t + 0.02)
-        gn.gain.exponentialRampToValueAtTime(0.00001, t + dur)
-        osc.start(t); osc.stop(t + dur + 0.02)
-      }
-
-      master.gain.setValueAtTime(0.00001, now)
-      master.gain.exponentialRampToValueAtTime(0.9, now + 0.02)
-      master.gain.exponentialRampToValueAtTime(0.00001, now + 0.8)
-
-      // A4 -> C#5 two-note chime
-      note(now + 0.00, 440, 0.22, 0.5)
-      note(now + 0.18, 554.37, 0.28, 0.45)
-    } catch { /* ignore */ }
-  }
-
-  async function handleSignOut() {
-    try { await supabase.auth.signOut() } catch {}
-    window.location.href = '/'
-  }
+  const left = Math.min(Math.max(12, anchorRect.left), window.innerWidth - 320)
+  const top = Math.max(12, anchorRect.bottom + 6)
 
   return (
-    <div className="container" style={{ padding: '24px 0', maxWidth: 860 }}>
-      <h1 style={{ marginTop: 0 }}>Settings</h1>
-
-      {/* Notifications */}
-      <section className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginTop: 0, fontSize: 18 }}>Notifications</h2>
-        <div style={{ display:'grid', gap:12 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>Message alert sound</div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                Plays a soft chime when a new message toast appears (when chat is closed or in another thread).
+    <div
+      ref={wrapRef}
+      style={{
+        position:'fixed', left, top, width:300, zIndex:70,
+        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
+        boxShadow:'0 14px 40px rgba(0,0,0,0.18)', padding:10
+      }}
+    >
+      {loading && <div className="muted">Loading…</div>}
+      {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
+      {!loading && !err && profile && (
+        <div style={{ display:'grid', gap:8 }}>
+          <div style={{ display:'flex', gap:10 }}>
+            <div style={{
+              width:48, height:48, borderRadius:10,
+              background: profile.avatar_url ? `url(${profile.avatar_url}) center/cover no-repeat` : '#f1f5f9',
+              border:'1px solid var(--border)'
+            }} />
+            <div style={{ minWidth:0 }}>
+              <div style={{ fontWeight:800, fontSize:16, lineHeight:1.1 }}>
+                {profile.display_name || profile.handle}
+              </div>
+              <div className="muted" style={{ fontSize:12, lineHeight:1.2 }}>
+                @{profile.handle}{profile.location ? ` • ${profile.location}` : ''}
               </div>
             </div>
-            <label style={{ display:'inline-flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-              <input
-                type="checkbox"
-                checked={soundEnabled}
-                onChange={(e) => setSoundEnabled(e.target.checked)}
-              />
-              <span>{soundEnabled ? 'On' : 'Off'}</span>
-            </label>
           </div>
 
-          <div>
-            <button
-              className="btn"
-              type="button"
-              onClick={() => {
-                // Try to resume audio on user gesture (mobile autoplay)
-                const ctx = ensureAudioCtx()
-                if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{})
-                playChime()
-              }}
-              disabled={!soundEnabled}
-            >
-              Test sound
-            </button>
-          </div>
-        </div>
-      </section>
+          {profile.bio && (
+            <div style={{
+              fontSize:13, color:'#111', lineHeight:1.4,
+              background:'#fafafa', border:'1px solid var(--border)', borderRadius:8, padding:'6px 8px'
+            }}>
+              {profile.bio.length > 160 ? profile.bio.slice(0,160)+'…' : profile.bio}
+            </div>
+          )}
 
-      {/* Account */}
-      <section className="card" style={{ marginTop: 12 }}>
-        <h2 style={{ marginTop: 0, fontSize: 18 }}>Account</h2>
-        <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-          Signed in as {me?.email || 'your account'}.
-        </div>
-        <button className="btn" onClick={handleSignOut}>Sign out</button>
-      </section>
+          {Array.isArray(profile.interests) && profile.interests.length > 0 && (
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+              {profile.interests.slice(0,6).map(tag => (
+                <span key={tag} style={{
+                  fontSize:12, padding:'2px 8px', borderRadius:999,
+                  border:'1px solid var(--border)', background:'#fff'
+                }}>
+                  {tag}
+                </span>
+              ))}
+              {profile.interests.length > 6 && (
+                <span className="muted" style={{ fontSize:12 }}>+{profile.interests.length - 6} more</span>
+              )}
+            </div>
+          )}
 
-      {/* Danger Zone (optional: delete account function if you wired it) */}
-      <section className="card" style={{ marginTop: 12, borderLeft: '4px solid #ef4444' }}>
-        <h2 style={{ marginTop: 0, fontSize: 18 }}>Danger Zone</h2>
-        <p className="muted" style={{ fontSize: 13 }}>
-          Permanently delete your account and data.
-        </p>
-        <button
-          className="btn"
-          style={{ borderColor:'#ef4444', color:'#ef4444' }}
-          onClick={async () => {
-            if (!confirm('Delete your account permanently?')) return
-            try {
-              const res = await fetch('/.netlify/functions/delete-account', { method:'POST' })
-              if (!res.ok) throw new Error('Delete failed')
-              alert('Your account was deleted.')
-              await supabase.auth.signOut()
-              window.location.href = '/'
-            } catch (e) {
-              alert('Sorry, could not delete your account.')
-            }
-          }}
-        >
-          Delete account
-        </button>
-      </section>
+          {profile.public_profile && (
+            <div style={{ display:'flex', justifyContent:'flex-end' }}>
+              <a href={`/u/${profile.handle}`} className="btn" style={{ textDecoration:'none' }}>View</a>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
