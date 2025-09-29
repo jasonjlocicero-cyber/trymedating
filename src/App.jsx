@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Link } from 'react-router-dom'
+import { Routes, Route, Link, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 
 import Home from './pages/Home'
@@ -12,17 +12,19 @@ export default function App() {
   const [me, setMe] = useState(null)
   const [authReady, setAuthReady] = useState(false)
 
+  // Initialize Supabase auth + subscribe to changes
   useEffect(() => {
     let unsub = () => {}
     ;(async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser()
         setMe(user || null)
-        setAuthReady(true)
       } catch (e) {
         console.error('supabase auth init error:', e)
+      } finally {
         setAuthReady(true)
       }
+
       const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
         setMe(session?.user || null)
       })
@@ -44,6 +46,7 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+
       {!authReady && (
         <div className="container" style={{ padding: 8, fontSize: 12, color: 'var(--muted)' }}>
           Initializing…
@@ -54,17 +57,23 @@ export default function App() {
 }
 
 function Header({ me }) {
+  const nav = useNavigate()
   const authed = !!me?.id
+
+  async function handleSignOut() {
+    try { await supabase.auth.signOut() } catch {}
+    nav('/') // send back home after sign-out
+  }
+
   return (
     <header className="header">
       <div className="container header-inner">
         <Link to="/" className="brand">TryMeDating</Link>
         <nav className="nav">
+          <Link to="/" className="nav-link">Home</Link>
+          <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
           {authed ? (
-            <>
-              <Link to="/" className="nav-link">Home</Link>
-              <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
-            </>
+            <button className="btn" onClick={handleSignOut}>Sign out</button>
           ) : (
             <Link to="/auth" className="btn btn-primary">Sign in</Link>
           )}
