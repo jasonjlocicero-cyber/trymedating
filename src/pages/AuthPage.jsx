@@ -1,71 +1,56 @@
 // src/pages/AuthPage.jsx
 import React, { useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import { track } from '../lib/analytics'
 
 export default function AuthPage() {
   const [email, setEmail] = useState('')
-  const [sending, setSending] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  async function handleSubmit(e) {
+  async function handleLogin(e) {
     e.preventDefault()
-    setError('')
-    setNotice('')
-    setSending(true)
-
+    setLoading(true)
+    setStatus('')
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.origin }
-      })
-
-      if (error) {
-        setError(error.message)
-      } else {
-        setNotice('Check your inbox for the magic link!')
-        track('Auth Magic Link Sent') // ✅ track event
-      }
+      const { error } = await supabase.auth.signInWithOtp({ email })
+      if (error) throw error
+      setStatus('Check your email for the sign-in link.')
+      setEmail('')
     } catch (err) {
-      setError(err.message || 'Something went wrong.')
+      setStatus(err.message)
     } finally {
-      setSending(false)
+      setLoading(false)
     }
   }
 
-  // Track sign-in after session established
-  supabase.auth.onAuthStateChange((_event, session) => {
-    if (session?.user) {
-      track('Auth Signed In') // ✅ track event
-    }
-  })
-
   return (
-    <div className="container" style={{ padding: '48px 0', maxWidth: 420 }}>
-      <h1 style={{ marginTop: 0, marginBottom: 16 }}>Sign in</h1>
-      <form onSubmit={handleSubmit} className="card" style={{ display: 'grid', gap: 12 }}>
-        <label style={{ fontWeight: 700 }}>Email</label>
+    <div className="container" style={{ padding: 24, maxWidth: 420 }}>
+      <h1>Sign in / Sign up</h1>
+      <p className="muted">Enter your email and we’ll send you a magic link.</p>
+      <form onSubmit={handleLogin} style={{ display: 'grid', gap: 12 }}>
         <input
           type="email"
           required
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          style={{
+            padding: '10px 12px',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+          }}
         />
-        <button className="btn btn-primary" type="submit" disabled={sending}>
-          {sending ? 'Sending…' : 'Send magic link'}
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={loading}
+        >
+          {loading ? 'Sending…' : 'Send Sign-in Link'}
         </button>
       </form>
-
-      {notice && (
-        <div className="card" style={{ borderLeft: '4px solid var(--secondary)', marginTop: 12 }}>
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div className="card" style={{ borderLeft: '4px solid #e11d48', color: '#b91c1c', marginTop: 12 }}>
-          {error}
+      {status && (
+        <div style={{ marginTop: 12, fontSize: 14 }}>
+          {status}
         </div>
       )}
     </div>
