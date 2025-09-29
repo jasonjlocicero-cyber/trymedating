@@ -1,4 +1,4 @@
-// src/App.jsx (FULL FILE)
+// src/App.jsx
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Link, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
@@ -13,7 +13,7 @@ import SettingsPage from './pages/SettingsPage'
 import ChatDock from './components/ChatDock'
 import ChatAlerts from './components/ChatAlerts'
 
-// IMPORT THE LOGO FROM SRC/ASSETS
+// ✅ Import the logo from src/assets
 import logoUrl from './assets/logo.png'
 
 export default function App() {
@@ -45,6 +45,7 @@ export default function App() {
     return () => unsub()
   }, [])
 
+  // persist recent convos per-user
   const recentKey = me?.id ? `recentConvos:${me.id}` : null
   useEffect(() => {
     if (!recentKey) return
@@ -53,10 +54,12 @@ export default function App() {
       setRecentConvoIds(raw ? JSON.parse(raw) : [])
     } catch {}
   }, [recentKey])
+
   function rememberConvo(id) {
     if (!recentKey || id == null) return
     setRecentConvoIds(prev => {
-      const s = new Set(prev.map(String)); s.add(String(id))
+      const s = new Set(prev.map(String))
+      s.add(String(id))
       const arr = Array.from(s)
       try { localStorage.setItem(recentKey, JSON.stringify(arr)) } catch {}
       return arr
@@ -87,6 +90,7 @@ export default function App() {
       </main>
       <Footer />
 
+      {/* Global toast alerts */}
       {!!me?.id && (
         <ChatAlerts
           me={me}
@@ -96,6 +100,8 @@ export default function App() {
           onOpenChat={openChat}
         />
       )}
+
+      {/* Chat dock */}
       {chatOpen && (
         <ChatDock
           me={me}
@@ -118,25 +124,20 @@ export default function App() {
 function Header({ me, onOpenChat }) {
   const nav = useNavigate()
   const authed = !!me?.id
-  async function handleSignOut() { try { await supabase.auth.signOut() } catch {} nav('/') }
-
-  // image onError fallback → brand text (so it never looks broken)
-  const [imgOk, setImgOk] = useState(true)
+  async function handleSignOut() {
+    try { await supabase.auth.signOut() } catch {}
+    nav('/')
+  }
 
   return (
     <header className="header">
       <div className="container header-inner" style={{ gap: 12 }}>
         <Link to="/" className="brand" aria-label="TryMeDating" style={{ display:'flex', alignItems:'center' }}>
-          {imgOk ? (
-            <img
-              src={logoUrl}
-              alt="TryMeDating"
-              style={{ display:'block', height: 36, width: 'auto', objectFit: 'contain' }}
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <strong style={{ fontSize: 18 }}>TryMeDating</strong>
-          )}
+          <img
+            src={logoUrl}
+            alt="TryMeDating"
+            style={{ display:'block', height: 36, width: 'auto', objectFit: 'contain' }}
+          />
         </Link>
 
         <nav className="nav">
