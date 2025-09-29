@@ -1,18 +1,17 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Link } from 'react-router-dom'
-import { supabase } from './lib/supabaseClient' // <- uses Vite env vars
+import { supabase } from './lib/supabaseClient'
 
 import Home from './pages/Home'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
+import AuthPage from './pages/AuthPage'
 
 export default function App() {
-  // Auth state (no UI change yet)
   const [me, setMe] = useState(null)
   const [authReady, setAuthReady] = useState(false)
 
-  // Boot Supabase auth and subscribe to changes
   useEffect(() => {
     let unsub = () => {}
     ;(async () => {
@@ -34,17 +33,17 @@ export default function App() {
 
   return (
     <div>
-      <Header />
+      <Header me={me} />
       <main>
         <Routes>
           <Route path="/" element={<Home me={me} />} />
+          <Route path="/auth" element={<AuthPage />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<div className="container" style={{padding:24}}>Not found</div>} />
         </Routes>
       </main>
       <Footer />
-      {/* dev hint (not visible to users unless you style it): */}
       {!authReady && (
         <div className="container" style={{ padding: 8, fontSize: 12, color: 'var(--muted)' }}>
           Initializing…
@@ -54,14 +53,21 @@ export default function App() {
   )
 }
 
-function Header() {
+function Header({ me }) {
+  const authed = !!me?.id
   return (
     <header className="header">
       <div className="container header-inner">
         <Link to="/" className="brand">TryMeDating</Link>
         <nav className="nav">
-          <Link to="/" className="nav-link">Home</Link>
-          <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
+          {authed ? (
+            <>
+              <Link to="/" className="nav-link">Home</Link>
+              <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
+            </>
+          ) : (
+            <Link to="/auth" className="btn btn-primary">Sign in</Link>
+          )}
         </nav>
       </div>
     </header>
@@ -81,6 +87,7 @@ function Footer() {
     </footer>
   )
 }
+
 
 
 
