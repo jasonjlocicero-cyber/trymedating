@@ -1,0 +1,5 @@
+project-root/
+  src/
+    App.jsx
+    assets/
+      logo.png   ✅ here
