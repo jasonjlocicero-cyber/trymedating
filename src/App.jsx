@@ -10,18 +10,27 @@ import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import SettingsPage from './pages/SettingsPage'
 
+import ChatDock from './components/ChatDock'
+import ChatAlerts from './components/ChatAlerts'
+
 export default function App() {
   const [me, setMe] = useState(null)
   const [authReady, setAuthReady] = useState(false)
+
+  // Chat state
+  const [chatOpen, setChatOpen] = useState(false)
+  const [activeConvoId, setActiveConvoId] = useState(null)
+  const [activePeer, setActivePeer] = useState(null)
+  const [recentConvoIds, setRecentConvoIds] = useState([])
 
   useEffect(() => {
     let unsub = () => {}
     ;(async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const { data: { user} } = await supabase.auth.getUser()
         setMe(user || null)
       } catch (e) {
-        console.error('supabase auth init error:', e)
+        console.error(e)
       } finally {
         setAuthReady(true)
       }
@@ -33,12 +42,39 @@ export default function App() {
     return () => unsub()
   }, [])
 
+  // persist recent convos per-user
+  const recentKey = me?.id ? `recentConvos:${me.id}` : null
+  useEffect(() => {
+    if (!recentKey) return
+    try {
+      const raw = localStorage.getItem(recentKey)
+      setRecentConvoIds(raw ? JSON.parse(raw) : [])
+    } catch {}
+  }, [recentKey])
+  function rememberConvo(id) {
+    if (!recentKey || id == null) return
+    setRecentConvoIds(prev => {
+      const s = new Set(prev.map(String)); s.add(String(id))
+      const arr = Array.from(s)
+      try { localStorage.setItem(recentKey, JSON.stringify(arr)) } catch {}
+      return arr
+    })
+  }
+
+  function openChat(convoId, peer) {
+    setActiveConvoId(convoId ?? null)
+    setActivePeer(peer ?? null)
+    setChatOpen(true)
+    if (convoId != null) rememberConvo(convoId)
+  }
+  function closeChat() { setChatOpen(false) }
+
   return (
     <div>
-      <Header me={me} />
+      <Header me={me} onOpenChat={() => openChat(null)} />
       <main>
         <Routes>
-          <Route path="/" element={<Home me={me} />} />
+          <Route path="/" element={<Home me={me} onOpenChat={openChat} />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/profile" element={<ProfilePage me={me} />} />
           <Route path="/settings" element={<SettingsPage me={me} />} />
@@ -48,6 +84,29 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
+
+      {/* Global toast alerts */}
+      {!!me?.id && (
+        <ChatAlerts
+          me={me}
+          isChatOpen={chatOpen}
+          activeConvoId={activeConvoId}
+          recentConvoIds={recentConvoIds}
+          onOpenChat={openChat}
+        />
+      )}
+
+      {/* Chat dock */}
+      {chatOpen && (
+        <ChatDock
+          me={me}
+          convoId={activeConvoId}
+          peer={activePeer}
+          open={chatOpen}
+          onClose={closeChat}
+        />
+      )}
+
       {!authReady && (
         <div className="container" style={{ padding: 8, fontSize: 12, color: 'var(--muted)' }}>
           Initializing…
@@ -57,14 +116,10 @@ export default function App() {
   )
 }
 
-function Header({ me }) {
+function Header({ me, onOpenChat }) {
   const nav = useNavigate()
   const authed = !!me?.id
-
-  async function handleSignOut() {
-    try { await supabase.auth.signOut() } catch {}
-    nav('/')
-  }
+  async function handleSignOut() { try { await supabase.auth.signOut() } catch {} nav('/') }
 
   return (
     <header className="header">
@@ -76,7 +131,10 @@ function Header({ me }) {
           {authed && <Link to="/settings" className="nav-link">Settings</Link>}
           <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
           {authed ? (
-            <button className="btn" onClick={handleSignOut}>Sign out</button>
+            <>
+              <button className="btn" onClick={onOpenChat}>Messages</button>
+              <button className="btn" onClick={handleSignOut}>Sign out</button>
+            </>
           ) : (
             <Link to="/auth" className="btn btn-primary">Sign in</Link>
           )}
@@ -99,6 +157,7 @@ function Footer() {
     </footer>
   )
 }
+
 
 
 
