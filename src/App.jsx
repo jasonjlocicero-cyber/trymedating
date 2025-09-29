@@ -27,7 +27,7 @@ export default function App() {
     let unsub = () => {}
     ;(async () => {
       try {
-        const { data: { user} } = await supabase.auth.getUser()
+        const { data: { user } } = await supabase.auth.getUser()
         setMe(user || null)
       } catch (e) {
         console.error(e)
@@ -123,8 +123,22 @@ function Header({ me, onOpenChat }) {
 
   return (
     <header className="header">
-      <div className="container header-inner">
-        <Link to="/" className="brand">TryMeDating</Link>
+      <div className="container header-inner" style={{ gap: 12 }}>
+        <Link to="/" className="brand" aria-label="TryMeDating">
+          {/* LOGO IMAGE */}
+          <img
+            src="/logo.png"
+            alt="TryMeDating"
+            className="brand-logo"
+            style={{
+              display: 'block',
+              height: 36,           // tweak if you want the logo larger/smaller
+              width: 'auto',
+              objectFit: 'contain'
+            }}
+          />
+        </Link>
+
         <nav className="nav">
           <Link to="/" className="nav-link">Home</Link>
           {authed && <Link to="/profile" className="nav-link">Profile</Link>}
