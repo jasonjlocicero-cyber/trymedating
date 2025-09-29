@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.jsx (FULL FILE)
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Link, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
@@ -12,6 +12,9 @@ import SettingsPage from './pages/SettingsPage'
 
 import ChatDock from './components/ChatDock'
 import ChatAlerts from './components/ChatAlerts'
+
+// IMPORT THE LOGO FROM SRC/ASSETS
+import logoUrl from './assets/logo.png'
 
 export default function App() {
   const [me, setMe] = useState(null)
@@ -42,7 +45,6 @@ export default function App() {
     return () => unsub()
   }, [])
 
-  // persist recent convos per-user
   const recentKey = me?.id ? `recentConvos:${me.id}` : null
   useEffect(() => {
     if (!recentKey) return
@@ -85,7 +87,6 @@ export default function App() {
       </main>
       <Footer />
 
-      {/* Global toast alerts */}
       {!!me?.id && (
         <ChatAlerts
           me={me}
@@ -95,8 +96,6 @@ export default function App() {
           onOpenChat={openChat}
         />
       )}
-
-      {/* Chat dock */}
       {chatOpen && (
         <ChatDock
           me={me}
@@ -121,22 +120,23 @@ function Header({ me, onOpenChat }) {
   const authed = !!me?.id
   async function handleSignOut() { try { await supabase.auth.signOut() } catch {} nav('/') }
 
+  // image onError fallback → brand text (so it never looks broken)
+  const [imgOk, setImgOk] = useState(true)
+
   return (
     <header className="header">
       <div className="container header-inner" style={{ gap: 12 }}>
-        <Link to="/" className="brand" aria-label="TryMeDating">
-          {/* LOGO IMAGE */}
-          <img
-            src="/logo.png"
-            alt="TryMeDating"
-            className="brand-logo"
-            style={{
-              display: 'block',
-              height: 36,           // tweak if you want the logo larger/smaller
-              width: 'auto',
-              objectFit: 'contain'
-            }}
-          />
+        <Link to="/" className="brand" aria-label="TryMeDating" style={{ display:'flex', alignItems:'center' }}>
+          {imgOk ? (
+            <img
+              src={logoUrl}
+              alt="TryMeDating"
+              style={{ display:'block', height: 36, width: 'auto', objectFit: 'contain' }}
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <strong style={{ fontSize: 18 }}>TryMeDating</strong>
+          )}
         </Link>
 
         <nav className="nav">
