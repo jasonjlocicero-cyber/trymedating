@@ -1,177 +1,84 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Link, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
-
-import Home from './pages/Home'
-import Terms from './pages/Terms'
-import Privacy from './pages/Privacy'
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
+import PublicProfile from './pages/PublicProfile'
 import SettingsPage from './pages/SettingsPage'
-
-import ChatDock from './components/ChatDock'
-import ChatAlerts from './components/ChatAlerts'
+import Terms from './pages/Terms'
+import Privacy from './pages/Privacy'
+import Contact from './pages/Contact'
 import AdminReports from './pages/AdminReports'
-
-// ✅ Import the logo from src/assets
-import logoUrl from './assets/tmdlogo.png'
 
 export default function App() {
   const [me, setMe] = useState(null)
-  const [authReady, setAuthReady] = useState(false)
-
-  // Chat state
-  const [chatOpen, setChatOpen] = useState(false)
-  const [activeConvoId, setActiveConvoId] = useState(null)
-  const [activePeer, setActivePeer] = useState(null)
-  const [recentConvoIds, setRecentConvoIds] = useState([])
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
-    let unsub = () => {}
-    ;(async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser()
-        setMe(user || null)
-      } catch (e) {
-        console.error(e)
-      } finally {
-        setAuthReady(true)
+    let sub = supabase.auth.onAuthStateChange(async (evt, session) => {
+      if (session?.user) {
+        setMe(session.user)
+        // Fetch profile to check admin
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('user_id', session.user.id)
+          .maybeSingle()
+        setIsAdmin(!!data?.is_admin)
+      } else {
+        setMe(null)
+        setIsAdmin(false)
       }
-      const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-        setMe(session?.user || null)
-      })
-      unsub = () => sub.subscription.unsubscribe()
-    })()
-    return () => unsub()
+    })
+    return () => sub.data?.subscription?.unsubscribe()
   }, [])
 
-  // persist recent convos per-user
-  const recentKey = me?.id ? `recentConvos:${me.id}` : null
-  useEffect(() => {
-    if (!recentKey) return
-    try {
-      const raw = localStorage.getItem(recentKey)
-      setRecentConvoIds(raw ? JSON.parse(raw) : [])
-    } catch {}
-  }, [recentKey])
-
-  function rememberConvo(id) {
-    if (!recentKey || id == null) return
-    setRecentConvoIds(prev => {
-      const s = new Set(prev.map(String))
-      s.add(String(id))
-      const arr = Array.from(s)
-      try { localStorage.setItem(recentKey, JSON.stringify(arr)) } catch {}
-      return arr
-    })
-  }
-
-  function openChat(convoId, peer) {
-    setActiveConvoId(convoId ?? null)
-    setActivePeer(peer ?? null)
-    setChatOpen(true)
-    if (convoId != null) rememberConvo(convoId)
-  }
-  function closeChat() { setChatOpen(false) }
-
   return (
-    <div>
-      <Header me={me} onOpenChat={() => openChat(null)} />
-      <main>
-        <Routes>
-          <Route path="/" element={<Home me={me} onOpenChat={openChat} />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/profile" element={<ProfilePage me={me} />} />
-          <Route path="/settings" element={<SettingsPage me={me} />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="*" element={<div className="container" style={{padding:24}}>Not found</div>} />
-          <Route path="/admin/reports" element={<AdminReports />} />
-        </Routes>
-      </main>
-      <Footer />
+    <Router>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        {/* Header */}
+        <header style={{ padding: '12px 24px', borderBottom: '1px solid var(--border)' }}>
+          <Link to="/" style={{ fontSize: 22, fontWeight: 800, textDecoration: 'none' }}>
+            TryMeDating
+          </Link>
+        </header>
 
-      {/* Global toast alerts */}
-      {!!me?.id && (
-        <ChatAlerts
-          me={me}
-          isChatOpen={chatOpen}
-          activeConvoId={activeConvoId}
-          recentConvoIds={recentConvoIds}
-          onOpenChat={openChat}
-        />
-      )}
+        {/* Main content */}
+        <main style={{ flex: 1 }}>
+          <Routes>
+            <Route path="/" element={<ProfilePage me={me} />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/profile" element={<ProfilePage me={me} />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/u/:handle" element={<PublicProfile />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/admin/reports" element={<AdminReports />} />
+          </Routes>
+        </main>
 
-      {/* Chat dock */}
-      {chatOpen && (
-        <ChatDock
-          me={me}
-          convoId={activeConvoId}
-          peer={activePeer}
-          open={chatOpen}
-          onClose={closeChat}
-        />
-      )}
-
-      {!authReady && (
-        <div className="container" style={{ padding: 8, fontSize: 12, color: 'var(--muted)' }}>
-          Initializing…
-        </div>
-      )}
-    </div>
-  )
-}
-
-function Header({ me, onOpenChat }) {
-  const nav = useNavigate()
-  const authed = !!me?.id
-  async function handleSignOut() {
-    try { await supabase.auth.signOut() } catch {}
-    nav('/')
-  }
-
-  return (
-    <header className="header">
-      <div className="container header-inner" style={{ gap: 12 }}>
-        <Link to="/" className="brand" aria-label="TryMeDating" style={{ display:'flex', alignItems:'center' }}>
-          <img
-            src={logoUrl}
-            alt="TryMeDating"
-            style={{ display:'block', height: 108, width: 'auto', maxWidth: '90%', objectFit: 'contain' }}
-          />
-        </Link>
-
-        <nav className="nav">
-          <Link to="/" className="nav-link">Home</Link>
-          {authed && <Link to="/profile" className="nav-link">Profile</Link>}
-          {authed && <Link to="/settings" className="nav-link">Settings</Link>}
-          <a className="nav-link" href="mailto:support@trymedating.com">Contact</a>
-          {authed ? (
-            <>
-              <button className="btn" onClick={onOpenChat}>Messages</button>
-              <button className="btn" onClick={handleSignOut}>Sign out</button>
-            </>
-          ) : (
-            <Link to="/auth" className="btn btn-primary">Sign in</Link>
-          )}
-        </nav>
+        {/* Footer */}
+        <footer style={{
+          padding: '16px',
+          borderTop: '1px solid var(--border)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 8
+        }}>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link to="/terms" className="btn">Terms</Link>
+            <Link to="/privacy" className="btn">Privacy</Link>
+            <Link to="/contact" className="btn">Contact</Link>
+            {isAdmin && (
+              <Link to="/admin/reports" className="btn btn-secondary">Admin Reports</Link>
+            )}
+          </div>
+        </footer>
       </div>
-    </header>
-  )
-}
-
-function Footer() {
-  return (
-    <footer className="footer">
-      <div className="container" style={{ padding: '14px 0' }}>
-        <div className="footer-links">
-          <Link to="/terms">Terms</Link>
-          <Link to="/privacy">Privacy</Link>
-          <a href="mailto:support@trymedating.com">Contact</a>
-        </div>
-      </div>
-    </footer>
+    </Router>
   )
 }
 
