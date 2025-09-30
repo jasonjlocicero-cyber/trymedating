@@ -166,7 +166,7 @@ function Header({ me, isAdmin, onOpenChat }) {
       <div className="container header-inner" style={{ gap: 12 }}>
         <Link to="/" className="brand" aria-label="TryMeDating" style={{ display:'flex', alignItems:'center' }}>
           <img
-            src={tmdlogoUrl}
+            src={logoUrl}
             alt="TryMeDating"
             style={{ display:'block', height: 108, width: 'auto', objectFit: 'contain', maxWidth:'90%' }}
           />
