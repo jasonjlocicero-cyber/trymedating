@@ -12,6 +12,7 @@ import SettingsPage from './pages/SettingsPage'
 
 import ChatDock from './components/ChatDock'
 import ChatAlerts from './components/ChatAlerts'
+import AdminReports from './pages/AdminReports'
 
 // ✅ Import the logo from src/assets
 import logoUrl from './assets/tmdlogo.png'
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="*" element={<div className="container" style={{padding:24}}>Not found</div>} />
+          <Route path="/admin/reports" element={<AdminReports />} />
         </Routes>
       </main>
       <Footer />
