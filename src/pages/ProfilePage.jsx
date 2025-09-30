@@ -18,7 +18,6 @@ export default function ProfilePage({ me }) {
   const [avatarUrl, setAvatarUrl] = useState(null)
 
   const needsOnboarding = useMemo(() => {
-    // treat “missing handle or display name” as onboarding not complete
     return authed && (!handle || !displayName)
   }, [authed, handle, displayName])
 
@@ -107,7 +106,7 @@ export default function ProfilePage({ me }) {
           {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
           {ok && <div style={{ color:'#166534' }}>{ok}</div>}
 
-          {/* Avatar */}
+          {/* Avatar (with crop + compression) */}
           <div>
             <div style={{ fontWeight: 800, marginBottom: 8 }}>Photo</div>
             <AvatarUploader
@@ -115,6 +114,9 @@ export default function ProfilePage({ me }) {
               value={avatarUrl}
               onChange={setAvatarUrl}
             />
+            <div className="muted" style={{ fontSize:12, marginTop:6 }}>
+              Square crop • auto-compress to load fast (recommended 320×320+).
+            </div>
           </div>
 
           {/* Display name */}
@@ -192,6 +194,7 @@ const input = {
   border: '1px solid var(--border)',
   background: '#fff'
 }
+
 
 
 
