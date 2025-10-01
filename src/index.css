@@ -4,49 +4,36 @@
   --brand-teal:  #008080;   /* TryME */
   --brand-coral: #FF6F61;   /* Dating */
 
-  /* UI tokens (already used around your app) */
+  /* UI tokens */
   --text:   #0f172a;
   --muted:  #64748b;
   --border: #e2e8f0;
   --bg:     #ffffff;
 
-  /* Buttons (optional; you can tune) */
+  /* Buttons base */
   --btn-bg: var(--brand-teal);
   --btn-fg: #fff;
   --btn-bg-secondary: #f3f4f6;
   --btn-fg-secondary: #111827;
 }
 
-/* Base */
+/* Base reset-ish */
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body {
-  margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
-  color: var(--text); background: var(--bg);
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
 }
 
+/* Layout helpers */
 .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
-
 .muted { color: var(--muted); }
-
-/* Cards */
 .card {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 12px;
-}
-
-/* Buttons */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border);
-  background: var(--btn-bg-secondary); color: var(--btn-fg-secondary); text-decoration: none; cursor: pointer;
-}
-.btn:hover { filter: brightness(0.98); }
-.btn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.btn-primary {
-  background: var(--btn-bg); color: var(--btn-fg); border: none;
 }
 
 /* Inputs */
@@ -59,7 +46,57 @@ input, textarea, select {
   color: var(--text);
 }
 
-/* ===== Brand Tag Utilities ===== */
+/* Base button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--btn-bg-secondary);
+  color: var(--btn-fg-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+.btn:hover { filter: brightness(0.98); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Primary (generic) */
+.btn-primary {
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border: none;
+}
+.btn-primary:hover { filter: brightness(0.95); }
+
+/* === Header buttons (teal) === */
+.btn-header {
+  background: var(--brand-teal);
+  color: #fff;
+  border: none;
+}
+.btn-header:hover { filter: brightness(0.92); }
+
+/* === Footer buttons (coral) === */
+.btn-footer {
+  background: var(--brand-coral);
+  color: #fff;
+  border: none;
+}
+.btn-footer:hover { filter: brightness(0.92); }
+
+/* === Neutral buttons (content) === */
+.btn-neutral {
+  background: var(--btn-bg-secondary);
+  color: var(--btn-fg-secondary);
+  border: 1px solid var(--border);
+}
+.btn-neutral:hover { filter: brightness(0.98); }
+
+/* Brand tags for interests */
 .tag {
   display: inline-block;
   border-radius: 20px;
@@ -71,38 +108,13 @@ input, textarea, select {
 .tag--teal  { background: var(--brand-teal); }
 .tag--coral { background: var(--brand-coral); }
 
-/* index.css */
-
-/* Existing base + primary/secondary are still valid */
-
-/* === Header Buttons === */
-.btn-header {
-  background: var(--brand-teal);
-  color: #fff;
-  border: none;
-}
-.btn-header:hover {
-  filter: brightness(0.92);
-}
-
-/* === Footer Buttons === */
-.btn-footer {
-  background: var(--brand-coral);
-  color: #fff;
-  border: none;
-}
-.btn-footer:hover {
-  filter: brightness(0.92);
-}
-
-/* === Neutral Buttons (inside content) === */
-.btn-neutral {
-  background: var(--btn-bg-secondary);
-  color: var(--btn-fg-secondary);
-  border: 1px solid var(--border);
-}
-.btn-neutral:hover {
-  filter: brightness(0.98);
+/* Sticky header helper (the component also sets these inline) */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
 }
 
 
