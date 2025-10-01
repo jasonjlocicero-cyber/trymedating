@@ -1,6 +1,6 @@
 // src/components/Header.jsx
 import { Link, useLocation } from 'react-router-dom'
-import logo from '../assets/tmdlogo.png' // ensure this file exists
+import tmdlogo from '../assets/tmdlogo.png' // ← always this filename
 
 export default function Header({ me, onSignOut }) {
   const loc = useLocation()
@@ -29,44 +29,27 @@ export default function Header({ me, onSignOut }) {
           paddingBottom: 12
         }}
       >
-        {/* Left: brand logo (image) */}
+        {/* Left: brand logo */}
         <Link to="/" aria-label="TryMeDating home" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <img
-            src={logo}
+            src={tmdlogo}
             alt="TryMeDating"
             style={{ height: 36, width: 'auto', objectFit: 'contain' }}
           />
         </Link>
 
-        {/* Center: primary nav (separated + tidy) */}
-        <nav
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: 8,
-            flexWrap: 'wrap'
-          }}
-        >
-          <Link to="/" className="btn btn-neutral" aria-current={loc.pathname === '/' ? 'page' : undefined}>
-            Home
-          </Link>
+        {/* Center: primary nav */}
+        <nav style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Link to="/" className="btn btn-neutral" aria-current={loc.pathname === '/' ? 'page' : undefined}>Home</Link>
           {authed && (
             <>
-              <Link to="/profile" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/profile') ? 'page' : undefined}>
-                Profile
-              </Link>
-              <Link to="/settings" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/settings') ? 'page' : undefined}>
-                Settings
-              </Link>
+              <Link to="/profile" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/profile') ? 'page' : undefined}>Profile</Link>
+              <Link to="/settings" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/settings') ? 'page' : undefined}>Settings</Link>
             </>
           )}
-          <Link to="/contact" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/contact') ? 'page' : undefined}>
-            Contact
-          </Link>
+          <Link to="/contact" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/contact') ? 'page' : undefined}>Contact</Link>
           {isAdmin && (
-            <Link to="/admin" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/admin') ? 'page' : undefined}>
-              Admin
-            </Link>
+            <Link to="/admin" className="btn btn-neutral" aria-current={loc.pathname.startsWith('/admin') ? 'page' : undefined}>Admin</Link>
           )}
         </nav>
 
@@ -74,12 +57,7 @@ export default function Header({ me, onSignOut }) {
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
           <Link to="/messages" className="btn btn-header">Messages</Link>
           {authed ? (
-            <button
-              type="button"
-              className="btn btn-neutral"
-              onClick={onSignOut}
-              title="Sign out"
-            >
+            <button type="button" className="btn btn-neutral" onClick={onSignOut} title="Sign out">
               Sign out
             </button>
           ) : (
