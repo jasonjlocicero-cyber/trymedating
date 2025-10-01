@@ -1,5 +1,5 @@
 // src/pages/ProfilePage.jsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import AvatarUploader from '../components/AvatarUploader'
 import QRCode from 'react-qr-code'
@@ -20,19 +20,32 @@ export default function ProfilePage({ me }) {
   const [publicProfile, setPublicProfile] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState(null)
 
+  // handle validation state
+  const [handleMsg, setHandleMsg] = useState('')           // message shown under the input
+  const [handleOk, setHandleOk] = useState(null)           // true = green, false = red, null = neutral
+  const [checkingHandle, setCheckingHandle] = useState(false)
+
   // derived
   const needsOnboarding = useMemo(
     () => authed && (!displayName || !handle),
     [authed, displayName, handle]
   )
 
-  // Load current profile
+  // Small reserved list (expand as needed)
+  const RESERVED = useRef(new Set([
+    'admin','administrator','support','moderator',
+    'help','root','system','trymedating','api','www','null'
+  ]))
+
+  // Normalize/clean handle
+  function normalizeHandle(v) {
+    return v.toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 32)
+  }
+
+  // ---- Load current profile
   useEffect(() => {
     let cancel = false
-    if (!authed) {
-      setLoading(false)
-      return
-    }
+    if (!authed) { setLoading(false); return }
     ;(async () => {
       setLoading(true); setErr(''); setOk('')
       try {
@@ -58,19 +71,87 @@ export default function ProfilePage({ me }) {
     return () => { cancel = true }
   }, [authed, me?.id])
 
-  // helpers
-  function normalizeHandle(v) {
-    return v.toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 32)
+  // ---- Live handle validation (debounced server check)
+  useEffect(() => {
+    if (!authed) return
+    const value = handle?.trim() || ''
+
+    // Instant client rules first
+    const local = validateHandleLocal(value, RESERVED.current)
+    if (!local.ok) {
+      setHandleOk(false)
+      setHandleMsg(local.msg)
+      return
+    }
+
+    // If no change or empty, neutral state
+    if (!value) {
+      setHandleOk(null); setHandleMsg(''); return
+    }
+
+    // Debounce server check
+    setCheckingHandle(true)
+    setHandleMsg('Checking availability…')
+    setHandleOk(null)
+    const t = setTimeout(async () => {
+      try {
+        // Is there another row using this handle?
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id')
+          .eq('handle', value)
+          .neq('user_id', me.id)               // allow your own current handle
+          .maybeSingle()
+        if (error) throw error
+        if (data) {
+          setHandleOk(false)
+          setHandleMsg('That handle is already taken.')
+        } else {
+          setHandleOk(true)
+          setHandleMsg('Handle is available ✓')
+        }
+      } catch (e) {
+        setHandleOk(null)
+        setHandleMsg('Could not verify handle right now.')
+      } finally {
+        setCheckingHandle(false)
+      }
+    }, 350)
+
+    return () => clearTimeout(t)
+  }, [handle, authed, me?.id])
+
+  function validateHandleLocal(v, reservedSet) {
+    const clean = v.toLowerCase()
+    if (!clean) return { ok: false, msg: 'Handle is required when public.' }
+    if (clean.length < 3) return { ok: false, msg: 'Minimum 3 characters.' }
+    if (clean.length > 32) return { ok: false, msg: 'Maximum 32 characters.' }
+    if (!/^[a-z0-9-_]+$/.test(clean)) return { ok: false, msg: 'Use lowercase letters, numbers, - or _ only.' }
+    if (reservedSet.has(clean)) return { ok: false, msg: 'That handle is reserved.' }
+    return { ok: true, msg: '' }
   }
 
+  // ---- Save
   async function saveProfile(e) {
     e?.preventDefault?.()
     if (!authed) return
     setSaving(true); setErr(''); setOk('')
     try {
-      if (publicProfile && !handle.trim()) {
-        throw new Error('Handle is required when your profile is public.')
+      // If going public, enforce handle rules
+      if (publicProfile) {
+        const local = validateHandleLocal(handle.trim(), RESERVED.current)
+        if (!local.ok) throw new Error(local.msg)
+
+        // Final server check (guard against race)
+        const { data: dupe } = await supabase
+          .from('profiles')
+          .select('user_id')
+          .eq('handle', handle.trim())
+          .neq('user_id', me.id)
+          .maybeSingle()
+        if (dupe) throw new Error('That handle is already taken.')
       }
+
       const payload = {
         user_id: me.id,
         display_name: displayName || null,
@@ -100,29 +181,22 @@ export default function ProfilePage({ me }) {
     )
   }
 
-  // build URLs used in hints/QR
+  // URLs used in hints/QR
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const publicUrl = handle ? `${origin}/u/${handle}` : ''
-  const inviteUrl = `${origin}/auth?invite=${encodeURIComponent(me.id)}` // placeholder invite; adapt when you add real accept flow
+  const inviteUrl = `${origin}/auth?invite=${encodeURIComponent(me.id)}` // placeholder
 
   return (
     <div className="container" style={{ padding: 24, maxWidth: 860 }}>
       <h1>Profile</h1>
 
-      {/* Private reminder banner */}
+      {/* Private reminder */}
       {!publicProfile && (
-        <div
-          className="card"
-          style={{
-            padding: 12,
-            marginBottom: 12,
-            background: '#fff8e1',
-            border: '1px solid #f6ce52',
-            borderLeft: '4px solid #f59e0b',
-            color: '#5b4b1e'
-          }}
-        >
-          Your profile is currently <strong>private</strong>. Others can’t view it unless you make it public.
+        <div className="card" style={{
+          padding: 12, marginBottom: 12, background: '#fff8e1',
+          border: '1px solid #f6ce52', borderLeft: '4px solid #f59e0b', color: '#5b4b1e'
+        }}>
+          Your profile is <strong>private</strong>. Others can’t view it unless you make it public.
         </div>
       )}
 
@@ -160,19 +234,27 @@ export default function ProfilePage({ me }) {
             />
           </label>
 
-          {/* Handle */}
+          {/* Handle (with live validation) */}
           <label>
             <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
             <input
               value={handle}
               onChange={(e)=>setHandle(normalizeHandle(e.target.value))}
               placeholder="your-handle"
-              style={input}
+              style={{
+                ...input,
+                borderColor: handleOk === false ? '#b91c1c'
+                  : handleOk === true ? '#16a34a'
+                  : 'var(--border)'
+              }}
             />
-            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            <div style={{ fontSize:12, marginTop:4,
+              color: handleOk === false ? '#b91c1c'
+                : handleOk === true ? '#166534'
+                : 'var(--muted)' }}>
               {publicProfile
-                ? <>Public URL: <code>/u/{handle || 'your-handle'}</code></>
-                : <>Handle is optional until you go public.</>
+                ? (handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle'))
+                : (handleMsg || 'Handle is optional until you go public.')
               }
             </div>
           </label>
@@ -201,7 +283,12 @@ export default function ProfilePage({ me }) {
 
           {/* Actions */}
           <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-            <button className="btn btn-primary" type="submit" disabled={saving}>
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={saving || (publicProfile && (handleOk === false || checkingHandle))}
+              title={publicProfile && checkingHandle ? 'Waiting for handle check…' : undefined}
+            >
               {saving ? 'Saving…' : 'Save profile'}
             </button>
             {publicProfile && handle && (
@@ -211,7 +298,7 @@ export default function ProfilePage({ me }) {
             )}
           </div>
 
-          {/* Invite QR — profile-only (not shown on public profile page) */}
+          {/* Invite QR — profile-only */}
           <section className="card" style={{ padding:12, marginTop: 4 }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
               <div>
