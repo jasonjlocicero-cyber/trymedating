@@ -18,7 +18,7 @@ import ChatDock from './components/ChatDock'
 import ChatAlerts from './components/ChatAlerts'
 
 // Assets
-import logoUrl from './assets/logo.png'
+import logoUrl from './assets/tmdlogo.png'
 
 export default function App() {
   const [me, setMe] = useState(null)
