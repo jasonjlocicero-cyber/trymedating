@@ -448,59 +448,9 @@ export default function ProfilePage({ me }) {
                 </div>
               </div>
             </section>
+
             {/* ================== End Edit Form ================== */}
           </form>
-
-          {/* ================== Public Preview ================== */}
-          <div className="card" style={{ padding:16, marginTop:16 }}>
-            <div style={{ textAlign:'center', marginBottom: 16 }}>
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={displayName || handle}
-                  style={{ width: 100, height: 100, borderRadius: '50%', objectFit: 'cover', border:'2px solid var(--border)' }}
-                />
-              ) : (
-                <div style={{
-                  width:100,height:100,borderRadius:'50%',background:'#ddd',
-                  display:'flex',alignItems:'center',justifyContent:'center',
-                  margin:'0 auto',fontSize:32,fontWeight:700
-                }}>
-                  {(displayName?.[0] || handle?.[0] || '?').toUpperCase()}
-                </div>
-              )}
-              <h2 style={{ marginTop: 10 }}>{displayName || handle || 'Your Name'}</h2>
-              {handle && <div className="muted">@{handle}</div>}
-            </div>
-
-            <div style={{ textAlign:'center', marginBottom: 12 }}>
-              {location && <span style={{ marginRight: 8 }}>📍 {location}</span>}
-              {age && <span>🎂 {age}</span>}
-            </div>
-
-            {bio && (
-              <div style={{ marginBottom: 12, textAlign:'center', whiteSpace:'pre-line' }}>
-                {bio}
-              </div>
-            )}
-
-            {interestsArray.length > 0 && (
-              <>
-                <h3 style={{ marginTop: 8, marginBottom: 8, textAlign:'left' }}>Interests</h3>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-                  {interestsArray.map((tag, i) => (
-                    <span
-                      key={`${tag}-${i}`}
-                      className={`tag ${i % 2 === 0 ? 'tag--teal' : 'tag--coral'}`}
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          {/* ================== End Public Preview ================== */}
         </>
       )}
 
