@@ -34,7 +34,7 @@ export default function Header({ me, onSignOut }) {
           <img
             src={tmdlogo}
             alt="TryMeDating"
-            style={{ height: 36, width: 'auto', objectFit: 'contain' }}
+            style={{ height: 108, width: 'auto', objectFit: 'contain' }}
           />
         </Link>
 
