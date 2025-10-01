@@ -33,7 +33,6 @@ export default function PublicProfile() {
     return () => { cancel = true }
   }, [handle])
 
-  // compute age
   function calcAge(birthdate) {
     if (!birthdate) return ''
     const d = new Date(birthdate + 'T00:00:00')
@@ -91,20 +90,29 @@ export default function PublicProfile() {
         </div>
       )}
 
-      {/* Interests as tags */}
+      {/* Interests as brand-colored tags */}
       {Array.isArray(interests) && interests.length > 0 && (
         <div style={{ marginTop: 16 }}>
           <h3 style={{ marginBottom: 8 }}>Interests</h3>
           <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-            {interests.map((tag, i) => (
-              <span key={i} style={{
-                background: '#f1f5f9',
-                border: '1px solid #e2e8f0',
-                borderRadius: 20,
-                padding: '4px 12px',
-                fontSize: 14
-              }}>{tag}</span>
-            ))}
+            {interests.map((tag, i) => {
+              const isEven = i % 2 === 0
+              return (
+                <span
+                  key={i}
+                  style={{
+                    background: isEven ? '#008080' : '#FF6F61', // teal / coral
+                    color: '#fff',
+                    borderRadius: 20,
+                    padding: '6px 14px',
+                    fontSize: 14,
+                    fontWeight: 500
+                  }}
+                >
+                  {tag}
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
