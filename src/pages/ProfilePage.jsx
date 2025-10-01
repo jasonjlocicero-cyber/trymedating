@@ -246,9 +246,46 @@ export default function ProfilePage({ me }) {
   const publicUrl = handle ? `${origin}/u/${handle}` : ''
   const inviteUrl = `${origin}/auth?invite=${encodeURIComponent(me.id)}`
 
+  // ---------- completeness ----------
+  const completenessItems = [
+    { key: 'displayName', label: 'Display name', done: !!displayName?.trim() },
+    { key: 'handle',      label: 'Handle',        done: !!handle?.trim() },
+    { key: 'avatarUrl',   label: 'Photo',         done: !!avatarUrl },
+    { key: 'bio',         label: 'Bio',           done: (bio?.trim()?.length || 0) >= 10 },
+    { key: 'location',    label: 'Location',      done: !!location?.trim() },
+    { key: 'birthdate',   label: 'Birthdate',     done: !!birthdate },
+    { key: 'interests',   label: 'Interests',     done: (interestsArray.length > 0) },
+  ]
+  const completeCount = completenessItems.filter(i => i.done).length
+  const completePct = Math.round((completeCount / completenessItems.length) * 100)
+
   return (
     <main className="container" style={{ padding: 24, maxWidth: 860 }}>
-      <h1 style={{ marginBottom: 12 }}>Profile</h1>
+      <h1 style={{ marginBottom: 8 }}>Profile</h1>
+
+      {/* Completeness */}
+      <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap: 12, flexWrap:'wrap' }}>
+          <div style={{ fontWeight: 700 }}>Profile completeness: {completePct}%</div>
+          <div style={{ minWidth: 180, flex: 1 }}>
+            <div className="progress">
+              <div className="progress__bar" style={{ width: `${completePct}%` }} />
+            </div>
+          </div>
+        </div>
+        <div className="checklist">
+          {completenessItems.map(item => (
+            <span
+              key={item.key}
+              className={`checklist__item ${item.done ? 'checklist__item--done' : ''}`}
+              title={item.done ? 'Completed' : 'Not yet'}
+            >
+              {item.done ? <span className="checkmark">✓</span> : <span style={{ width:16 }} />}
+              {item.label}
+            </span>
+          ))}
+        </div>
+      </div>
 
       {!publicProfile && (
         <div
