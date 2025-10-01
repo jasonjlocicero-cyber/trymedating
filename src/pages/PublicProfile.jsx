@@ -15,22 +15,21 @@ export default function PublicProfile() {
     let cancel = false
     ;(async () => {
       try {
-        // Current user
+        // current user
         const { data: { user } } = await supabase.auth.getUser()
         if (!cancel) setMe(user || null)
 
-        // Public profile by handle
+        // fetch profile by handle (no public filter yet)
         const { data, error } = await supabase
           .from('profiles')
-          .select('id, user_id, display_name, handle, bio, public_profile, avatar_url')
+          .select('user_id, display_name, handle, bio, public_profile, avatar_url')
           .eq('handle', handle)
-          .eq('public_profile', true)
           .maybeSingle()
         if (error) throw error
         if (!cancel) setProfile(data || null)
 
-        // Block state check (either direction), only if both sides known
-        const targetId = data?.user_id ?? data?.id // support either column name
+        // If both sides known, check block either direction
+        const targetId = data?.user_id
         if (user?.id && targetId) {
           const [{ data: b1 }, { data: b2 }] = await Promise.all([
             supabase.from('blocks')
@@ -58,7 +57,6 @@ export default function PublicProfile() {
   }, [handle])
 
   function handleBlockedChange(nowBlocked) {
-    // Reflect immediate toggle; a fresh load will verify both directions
     setBlockedEitherWay(!!nowBlocked)
   }
 
@@ -75,8 +73,23 @@ export default function PublicProfile() {
     )
   }
 
-  const targetUserId = profile.user_id ?? profile.id
+  const targetUserId = profile.user_id
   const isMe = me?.id && me.id === targetUserId
+  const visibleToViewer = isMe || !!profile.public_profile
+
+  if (!visibleToViewer) {
+    return (
+      <div className="container" style={{ padding:24 }}>
+        <h1>Private profile</h1>
+        <p className="muted">This profile is private and not visible to the public.</p>
+        {isMe ? (
+          <Link to="/profile" className="btn">Edit my profile</Link>
+        ) : (
+          <Link to="/" className="btn">Back home</Link>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="container" style={{ padding:24, maxWidth:860 }}>
@@ -99,11 +112,11 @@ export default function PublicProfile() {
             <Link to="/" className="btn">Home</Link>
             {isMe && <Link to="/profile" className="btn">Edit my profile</Link>}
 
-            {/* You intentionally removed messaging from public profiles.
-                If you reintroduce it later, guard with !blockedEitherWay. */}
+            {/* Messaging is intentionally removed on public profiles.
+               If you re-add later, wrap with: !blockedEitherWay */}
             {/* {!isMe && !blockedEitherWay && <button className="btn btn-primary">Message</button>} */}
 
-            {/* Block / Unblock (not visible on own profile) */}
+            {/* Block / Unblock */}
             {!isMe && me?.id && (
               <BlockButton
                 me={me}
