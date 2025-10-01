@@ -1,39 +1,75 @@
-:root{
-  --primary:#16a085; /* teal */
-  --secondary:#ff6f61; /* coral */
-  --border:#e5e7eb;
-  --muted:#6b7280;
-}
-html,body,#root{height:100%}
-body{margin:0;font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;background:#fafafa;color:#111}
-a{color:#0f172a;text-decoration:none}
-a:hover{text-decoration:underline}
-.container{max-width:960px;margin:0 auto;padding:0 16px}
-.card{background:#fff;border:1px solid var(--border);border-radius:12px}
-.btn{border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer}
-.btn-primary{background:linear-gradient(90deg, var(--primary), var(--secondary));color:#fff;border:1px solid transparent}
-.header{border-bottom:1px solid var(--border);background:#fff}
-.header-inner{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
-.brand{font-weight:800}
-.nav{display:flex;gap:12px}
-.nav .nav-link{padding:4px 6px;border-radius:6px}
-.nav .nav-link:hover{background:#f3f4f6}
-.footer{border-top:1px solid var(--border);background:#fff;margin-top:32px}
-.footer-links{display:flex;gap:16px}
-.muted{color:var(--muted)}
-.linklike{background:none;border:none;padding:0;cursor:pointer;text-decoration:underline}
-.brand-logo {
-  /* ensures sharp display on standard & retina screens */
-  image-rendering: -webkit-optimize-contrast;
-  vertical-align: middle;
+/* src/index.css */
+:root {
+  /* Brand */
+  --brand-teal:  #008080;   /* TryME */
+  --brand-coral: #FF6F61;   /* Dating */
+
+  /* UI tokens (already used around your app) */
+  --text:   #0f172a;
+  --muted:  #64748b;
+  --border: #e2e8f0;
+  --bg:     #ffffff;
+
+  /* Buttons (optional; you can tune) */
+  --btn-bg: var(--brand-teal);
+  --btn-fg: #fff;
+  --btn-bg-secondary: #f3f4f6;
+  --btn-fg-secondary: #111827;
 }
 
-.header-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 0; /* slightly tighter once the logo is in */
+/* Base */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+  color: var(--text); background: var(--bg);
 }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+
+.muted { color: var(--muted); }
+
+/* Cards */
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--btn-bg-secondary); color: var(--btn-fg-secondary); text-decoration: none; cursor: pointer;
+}
+.btn:hover { filter: brightness(0.98); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--btn-bg); color: var(--btn-fg); border: none;
+}
+
+/* Inputs */
+input, textarea, select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+}
+
+/* ===== Brand Tag Utilities ===== */
+.tag {
+  display: inline-block;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+.tag--teal  { background: var(--brand-teal); }
+.tag--coral { background: var(--brand-coral); }
 
 
 
