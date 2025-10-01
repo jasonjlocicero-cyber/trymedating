@@ -1,4 +1,3 @@
-// src/components/BlockButton.jsx
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
@@ -12,13 +11,13 @@ export default function BlockButton({ me, targetUserId, onBlockedChange }) {
     let cancel = false
     if (!authed || !targetUserId) return setIsBlocked(false)
     ;(async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('blocks')
-        .select('user_id, blocked_user_id')
+        .select('user_id')
         .eq('user_id', me.id)
         .eq('blocked_user_id', targetUserId)
         .maybeSingle()
-      if (!cancel) setIsBlocked(!!data && !error)
+      if (!cancel) setIsBlocked(!!data)
     })()
     return () => { cancel = true }
   }, [authed, me?.id, targetUserId])
@@ -60,11 +59,11 @@ export default function BlockButton({ me, targetUserId, onBlockedChange }) {
   if (!authed || !targetUserId || isSelf) return null
 
   return isBlocked ? (
-    <button className="btn" onClick={unblock} disabled={loading} title="Unblock this user">
+    <button className="btn" onClick={unblock} disabled={loading}>
       {loading ? 'Working…' : 'Unblock'}
     </button>
   ) : (
-    <button className="btn btn-secondary" onClick={block} disabled={loading} title="Block this user">
+    <button className="btn btn-secondary" onClick={block} disabled={loading}>
       {loading ? 'Working…' : 'Block'}
     </button>
   )
