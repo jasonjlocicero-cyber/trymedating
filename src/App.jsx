@@ -1,7 +1,7 @@
 // src/pages/Home.jsx
 import React from 'react'
 import { Link } from 'react-router-dom'
-import logo from '../assets/logo.png' // make sure this exists
+import logo from '../assets/tmdlogo.png' // make sure this exists
 
 export default function Home() {
   const heroStyle = {
