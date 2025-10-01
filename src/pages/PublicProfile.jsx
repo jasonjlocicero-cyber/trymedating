@@ -50,7 +50,7 @@ export default function PublicProfile() {
     return <div className="container"><h1>Profile not found</h1><p>This user may be private or does not exist.</p></div>
   }
 
-  const { display_name, bio, avatar_url, location, pronouns, birthdate, interests } = profile
+  const { display_name, bio, avatar_url, location, pronouns, birthdate, interests, handle: userHandle } = profile
   const age = calcAge(birthdate)
 
   return (
@@ -60,7 +60,7 @@ export default function PublicProfile() {
         {avatar_url ? (
           <img
             src={avatar_url}
-            alt={display_name || handle}
+            alt={display_name || userHandle}
             style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)' }}
           />
         ) : (
@@ -69,11 +69,11 @@ export default function PublicProfile() {
             background: '#ddd', display: 'flex', alignItems:'center', justifyContent:'center',
             margin: '0 auto', fontSize: 40, fontWeight: 700
           }}>
-            {display_name?.[0] || handle?.[0]}
+            {display_name?.[0] || userHandle?.[0]}
           </div>
         )}
-        <h1 style={{ marginTop: 12 }}>{display_name || handle}</h1>
-        <div className="muted">@{handle}</div>
+        <h1 style={{ marginTop: 12 }}>{display_name || userHandle}</h1>
+        <div className="muted">@{userHandle}</div>
       </div>
 
       {/* Pronouns, location, age */}
@@ -99,7 +99,7 @@ export default function PublicProfile() {
               const isEven = i % 2 === 0
               return (
                 <span
-                  key={i}
+                  key={`${tag}-${i}`}
                   style={{
                     background: isEven ? '#008080' : '#FF6F61', // teal / coral
                     color: '#fff',
