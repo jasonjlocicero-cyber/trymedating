@@ -24,8 +24,12 @@ export default function ProfilePage({ me }) {
 
   // extra fields
   const [location, setLocation] = useState('')
-  const [birthdate, setBirthdate] = useState('') // 'YYYY-MM-DD'
-  const [interestsStr, setInterestsStr] = useState('')
+  const [birthdate, setBirthdate] = useState('') // YYYY-MM-DD
+
+  // interests as chips
+  const [interests, setInterests] = useState([])      // array of strings
+  const [interestInput, setInterestInput] = useState('') // current input text
+  const MAX_INTERESTS = 12
 
   // validation helpers
   const [birthErr, setBirthErr] = useState('')
@@ -69,11 +73,6 @@ export default function ProfilePage({ me }) {
     return a
   }, [birthdate])
 
-  const interestsArray = useMemo(() => {
-    const arr = interestsStr.split(',').map(s => s.trim()).filter(Boolean)
-    return Array.from(new Set(arr)).slice(0, 12)
-  }, [interestsStr])
-
   // Load profile from Supabase
   useEffect(() => {
     let cancel = false
@@ -99,7 +98,7 @@ export default function ProfilePage({ me }) {
           setLocation(data.location || '')
           setBirthdate(data.birthdate || '')
           const arr = Array.isArray(data.interests) ? data.interests : []
-          setInterestsStr(arr.join(', '))
+          setInterests(arr.slice(0, MAX_INTERESTS))
         }
       } catch (e) {
         if (!cancel) setErr(e.message || 'Failed to load profile')
@@ -178,6 +177,38 @@ export default function ProfilePage({ me }) {
     return () => clearTimeout(t)
   }, [handle, authed, me?.id])
 
+  // interests helpers
+  function addInterestFromInput() {
+    const raw = interestInput.trim()
+    if (!raw) return
+    // allow comma-separated quick add
+    const parts = raw.split(',').map(s => s.trim()).filter(Boolean)
+    let next = [...interests]
+    for (const p of parts) {
+      if (next.length >= MAX_INTERESTS) break
+      const clean = p.slice(0, 32)
+      if (!next.includes(clean)) next.push(clean)
+    }
+    setInterests(next)
+    setInterestInput('')
+  }
+
+  function removeInterest(i) {
+    setInterests(interests.filter((_, idx) => idx !== i))
+  }
+
+  function onInterestKeyDown(e) {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addInterestFromInput()
+    }
+    // backspace to delete last chip when input empty
+    if (e.key === 'Backspace' && !interestInput && interests.length) {
+      e.preventDefault()
+      setInterests(interests.slice(0, -1))
+    }
+  }
+
   // save profile
   async function saveProfile(e) {
     e?.preventDefault?.()
@@ -198,8 +229,7 @@ export default function ProfilePage({ me }) {
         if (dupe) throw new Error('That handle is already taken.')
       }
 
-      const interestsArr = interestsStr.split(',').map(s => s.trim()).filter(Boolean)
-      const sanitizedInterests = Array.from(new Set(interestsArr)).slice(0, 12)
+      const sanitizedInterests = Array.from(new Set(interests.map(s => s.trim()).filter(Boolean))).slice(0, MAX_INTERESTS)
 
       const payload = {
         user_id: me.id,
@@ -263,7 +293,7 @@ export default function ProfilePage({ me }) {
     { key: 'bio',         label: 'Bio',           done: (bio?.trim()?.length || 0) >= 10 },
     { key: 'location',    label: 'Location',      done: !!location?.trim() },
     { key: 'birthdate',   label: 'Birthdate',     done: !!birthdate },
-    { key: 'interests',   label: 'Interests',     done: (interestsArray.length > 0) },
+    { key: 'interests',   label: 'Interests',     done: (interests.length > 0) },
   ]
   const completeCount = completenessItems.filter(i => i.done).length
   const completePct = Math.round((completeCount / completenessItems.length) * 100)
@@ -449,18 +479,49 @@ export default function ProfilePage({ me }) {
               )}
             </label>
 
-            {/* Interests */}
-            <label>
-              <div className="field-label">Interests</div>
-              <input
-                value={interestsStr}
-                onChange={(e)=>setInterestsStr(e.target.value)}
-                placeholder="hiking, live music, sushi, travel"
-              />
-              <div className="helper-muted">
-                Separate with commas. We’ll show them as tags on your public profile. (Max 12)
+            {/* Interests (chips) */}
+            <section>
+              <div className="field-label">
+                Interests
+                <span className="helper-inline">({interests.length}/{MAX_INTERESTS})</span>
               </div>
-            </label>
+
+              {/* Current chips */}
+              <div className="chips">
+                {interests.map((tag, i) => (
+                  <span key={tag + i} className="chip">
+                    {tag}
+                    <button type="button" aria-label={`Remove ${tag}`} onClick={() => removeInterest(i)}>×</button>
+                  </span>
+                ))}
+                {interests.length === 0 && (
+                  <span className="helper-muted">Add a few like “hiking”, “live music”, “sushi”, “travel”.</span>
+                )}
+              </div>
+
+              {/* Input to add new interests */}
+              <div className="interest-input-wrap">
+                <input
+                  value={interestInput}
+                  onChange={(e)=>setInterestInput(e.target.value)}
+                  onKeyDown={onInterestKeyDown}
+                  placeholder="Type an interest and press Enter"
+                  disabled={interests.length >= MAX_INTERESTS}
+                />
+                <button
+                  type="button"
+                  className="btn btn-neutral"
+                  onClick={addInterestFromInput}
+                  disabled={!interestInput.trim() || interests.length >= MAX_INTERESTS}
+                >
+                  Add
+                </button>
+              </div>
+
+              <div className="helper-muted" style={{ marginTop: 4 }}>
+                Max {MAX_INTERESTS}. Press Enter or comma to add. Backspace removes the last chip when the input is empty.
+              </div>
+            </section>
 
             {/* Public toggle */}
             <label style={{ display:'flex', alignItems:'center', gap: 8 }}>
