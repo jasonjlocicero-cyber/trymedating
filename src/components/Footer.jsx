@@ -3,21 +3,17 @@ import { Link } from 'react-router-dom'
 
 export default function Footer() {
   return (
-    <footer
-      style={{
-        marginTop: 40,
-        padding: '20px',
-        borderTop: '1px solid var(--border)',
-        textAlign: 'center'
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Link to="/privacy" className="btn btn-footer">Privacy</Link>
-        <Link to="/terms" className="btn btn-footer">Terms</Link>
-        <Link to="/contact" className="btn btn-footer">Contact</Link>
-      </div>
-      <div className="muted" style={{ marginTop: 12 }}>
-        © {new Date().getFullYear()} TryME Dating
+    <footer className="site-footer">
+      <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Link to="/terms" className="btn btn-footer">Terms</Link>
+          <Link to="/privacy" className="btn btn-footer">Privacy</Link>
+          <Link to="/contact" className="btn btn-footer">Contact</Link>
+          <Link to="/feedback" className="btn btn-footer">Feedback</Link>
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 8 }}>
+          © {new Date().getFullYear()} TryMeDating. All rights reserved.
+        </div>
       </div>
     </footer>
   )
