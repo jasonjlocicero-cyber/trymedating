@@ -22,11 +22,13 @@ export default function ProfilePage({ me }) {
 
   // handle validation state
   const [handleMsg, setHandleMsg] = useState('')
-  const [handleOk, setHandleOk] = useState(null)
+  const [handleOk, setHandleOk] = useState(null)      // true | false | null
   const [checkingHandle, setCheckingHandle] = useState(false)
 
   // copy feedback
-  const [copied, setCopied] = useState(false)
+  const [copiedPublicTop, setCopiedPublicTop] = useState(false)
+  const [copiedInvite, setCopiedInvite] = useState(false)
+  const [copiedPublicQR, setCopiedPublicQR] = useState(false)
 
   // derived
   const needsOnboarding = useMemo(
@@ -109,7 +111,7 @@ export default function ProfilePage({ me }) {
           .from('profiles')
           .select('user_id')
           .eq('handle', value)
-          .neq('user_id', me.id)
+          .neq('user_id', me.id)   // your own handle is allowed
           .maybeSingle()
         if (error) throw error
         if (data) {
@@ -166,11 +168,11 @@ export default function ProfilePage({ me }) {
     }
   }
 
-  // copy function
-  function copyPublicUrl(url) {
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(()=>setCopied(false), 1500)
+  // copy helpers
+  function copyText(text, setFlag) {
+    navigator.clipboard.writeText(text)
+    setFlag(true)
+    setTimeout(()=>setFlag(false), 1500)
   }
 
   if (!authed) {
@@ -229,7 +231,7 @@ export default function ProfilePage({ me }) {
             />
           </label>
 
-          {/* Handle with validation + copy */}
+          {/* Handle with validation + copy (top) */}
           <label>
             <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
             <input
@@ -253,15 +255,14 @@ export default function ProfilePage({ me }) {
               }
             </div>
 
-            {/* Copy button (only if public + valid handle) */}
             {publicProfile && handleOk && handle && (
               <button
                 type="button"
                 className="btn"
                 style={{ marginTop:6 }}
-                onClick={() => copyPublicUrl(publicUrl)}
+                onClick={() => copyText(publicUrl, setCopiedPublicTop)}
               >
-                {copied ? 'Copied!' : 'Copy Public URL'}
+                {copiedPublicTop ? 'Copied!' : 'Copy Public URL'}
               </button>
             )}
           </label>
@@ -302,13 +303,31 @@ export default function ProfilePage({ me }) {
             )}
           </div>
 
-          {/* Invite QR */}
+          {/* Invite QR + Copy buttons */}
           <section className="card" style={{ padding:12, marginTop: 4 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center' }}>
               <div>
                 <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
                 <div className="muted" style={{ fontSize:12 }}>
                   Share in person. Scanning sends people to: <code>/auth?invite=…</code>
+                </div>
+                <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => copyText(inviteUrl, setCopiedInvite)}
+                  >
+                    {copiedInvite ? 'Copied!' : 'Copy Invite Link'}
+                  </button>
+                  {publicProfile && handleOk && handle && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => copyText(publicUrl, setCopiedPublicQR)}
+                    >
+                      {copiedPublicQR ? 'Copied!' : 'Copy Public URL'}
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{ background:'#fff', padding:8, borderRadius:12, border:'1px solid var(--border)' }}>
