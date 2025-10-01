@@ -1,33 +1,36 @@
-/* index.css */
+// src/components/Header.jsx
+import { Link } from 'react-router-dom'
 
-/* Existing base + primary/secondary are still valid */
+export default function Header() {
+  return (
+    <header
+      style={{
+        padding: '12px 20px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}
+    >
+      {/* Logo / brand */}
+      <Link
+        to="/"
+        style={{
+          fontWeight: 800,
+          fontSize: 20,
+          textDecoration: 'none',
+          color: 'var(--text)'
+        }}
+      >
+        TryME<span style={{ color: 'var(--brand-coral)' }}>Dating</span>
+      </Link>
 
-/* === Header Buttons === */
-.btn-header {
-  background: var(--brand-teal);
-  color: #fff;
-  border: none;
-}
-.btn-header:hover {
-  filter: brightness(0.92);
-}
-
-/* === Footer Buttons === */
-.btn-footer {
-  background: var(--brand-coral);
-  color: #fff;
-  border: none;
-}
-.btn-footer:hover {
-  filter: brightness(0.92);
+      {/* Nav buttons */}
+      <nav style={{ display: 'flex', gap: 10 }}>
+        <Link to="/auth" className="btn btn-header">Sign In</Link>
+        <Link to="/about" className="btn btn-neutral">About</Link>
+      </nav>
+    </header>
+  )
 }
 
-/* === Neutral Buttons (inside content) === */
-.btn-neutral {
-  background: var(--btn-bg-secondary);
-  color: var(--btn-fg-secondary);
-  border: 1px solid var(--border);
-}
-.btn-neutral:hover {
-  filter: brightness(0.98);
-}
