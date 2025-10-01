@@ -1,131 +1,100 @@
-// src/pages/Home.jsx
-import React from 'react'
-import { Link } from 'react-router-dom'
-import tmdlogo from './assets/tmdlogo.png'
+// src/App.jsx
+import React, { useEffect, useState } from 'react'
+import { Routes, Route, useNavigate } from 'react-router-dom'
+import { supabase } from './lib/supabaseClient'
 
-export default function Home() {
-  const heroStyle = {
-    display: 'grid',
-    gap: 16,
-    justifyItems: 'center',
-    textAlign: 'center',
-    padding: '36px 16px',
-    background: '#fff',
-    border: '1px solid var(--border)',
-    borderRadius: 16,
-    marginTop: 20
-  }
+// Layout
+import Header from './components/Header'
+import Footer from './components/Footer'
 
-  const brandTitle = {
-    fontSize: 'clamp(28px, 4vw, 44px)',
-    lineHeight: 1.1,
-    margin: '8px 0 6px',
-    fontWeight: 800
-  }
+// Pages
+import Home from './pages/Home'
+import AuthPage from './pages/AuthPage'
+import ProfilePage from './pages/ProfilePage'
+import SettingsPage from './pages/SettingsPage'
+import PublicProfile from './pages/PublicProfile'
+import Privacy from './pages/Privacy'
+import Terms from './pages/Terms'
+import Contact from './pages/Contact'
 
-  const sub = { color: 'var(--muted)', maxWidth: 760 }
+// Optional: placeholder for messages
+function MessagesHub() {
+  return (
+    <div className="container" style={{ padding: 24 }}>
+      <h1>Messages</h1>
+      <p>This is a placeholder route. Use the Messages button (chat bubble) to open the in-page chat dock.</p>
+    </div>
+  )
+}
 
-  const featuresGrid = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(12, 1fr)',
-    gap: 16
-  }
+export default function App() {
+  const nav = useNavigate()
+  const [me, setMe] = useState(null) // { id, email, is_admin? }
 
-  const card = {
-    gridColumn: 'span 12',
-    background: '#fff',
-    border: '1px solid var(--border)',
-    borderRadius: 12,
-    padding: 16
-  }
+  // Load current user + minimal profile
+  useEffect(() => {
+    let unsub = () => {}
 
-  const teaserStrip = {
-    marginTop: 20,
-    background: 'var(--brand-teal)',
-    color: '#fff',
-    borderRadius: 12,
-    padding: '18px 16px',
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 12,
-    justifyContent: 'space-between'
+    async function bootstrap() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.id) {
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('user_id, is_admin')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        setMe({ id: user.id, email: user.email, is_admin: !!prof?.is_admin })
+      } else {
+        setMe(null)
+      }
+
+      const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const u = session?.user
+        if (u?.id) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('user_id, is_admin')
+            .eq('user_id', u.id)
+            .maybeSingle()
+          setMe({ id: u.id, email: u.email, is_admin: !!prof?.is_admin })
+        } else {
+          setMe(null)
+        }
+      })
+      unsub = () => sub?.subscription?.unsubscribe()
+    }
+
+    bootstrap()
+    return () => unsub()
+  }, [])
+
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    setMe(null)
+    nav('/')
   }
 
   return (
-    <main className="container" style={{ maxWidth: 1100 }}>
-      {/* Hero */}
-      <section style={heroStyle}>
-        <img
-          src={logo}
-          alt="TryMeDating"
-          style={{ height: 96, width: 'auto', objectFit: 'contain' }}
-        />
-        <h1 style={brandTitle}>
-          Welcome to{' '}
-          <span style={{ color: 'var(--brand-teal)' }}>TryME</span>
-          <span style={{ color: 'var(--brand-coral)' }}>Dating</span>
-        </h1>
-        <p style={sub}>
-          Invite-only dating that starts with a real-world moment. Share your QR in person,
-          connect privately by default, and move at your own pace.
-        </p>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
-          <Link to="/auth" className="btn btn-header">Get started</Link>
-          <Link to="/privacy" className="btn btn-neutral">Privacy</Link>
-          <Link to="/terms" className="btn btn-neutral">Terms</Link>
-          <Link to="/contact" className="btn btn-neutral">Contact</Link>
-        </div>
-      </section>
+    <>
+      <Header me={me} onSignOut={handleSignOut} />
 
-      {/* Features */}
-      <section style={{ marginTop: 20 }}>
-        <div style={featuresGrid}>
-          <div style={{ ...card, display:'grid', gap:8 }}>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>
-              💬 Real conversations, not swipes
-            </div>
-            <p className="muted" style={{ margin: 0 }}>
-              You control who can reach you. Messaging opens after you’ve shared your invite QR
-              or handle in person—so every chat starts with context.
-            </p>
-          </div>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/profile" element={<ProfilePage me={me} />} />
+        <Route path="/settings" element={<SettingsPage me={me} />} />
+        <Route path="/messages" element={<MessagesHub />} />
+        <Route path="/u/:handle" element={<PublicProfile />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/contact" element={<Contact />} />
+      </Routes>
 
-          <div style={{ ...card, display:'grid', gap:8 }}>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>
-              🔒 Private by default
-            </div>
-            <p className="muted" style={{ margin: 0 }}>
-              Your profile stays private unless you decide to make it public. Toggle visibility
-              anytime. Share only what you want, when you want.
-            </p>
-          </div>
-
-          <div style={{ ...card, display:'grid', gap:8 }}>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>
-              🪪 Your invite QR
-            </div>
-            <p className="muted" style={{ margin: 0 }}>
-              Generate a personal QR right from your profile. Meet someone? Let them scan to connect.
-              No handles to type, no awkward search.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA strip */}
-      <section style={teaserStrip}>
-        <div style={{ fontWeight: 700 }}>
-          Ready to try it?
-        </div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-          <Link to="/auth" className="btn btn-header">Create your profile</Link>
-          <Link to="/u/your-handle" className="btn btn-footer">See a sample profile</Link>
-        </div>
-      </section>
-    </main>
+      <Footer />
+    </>
   )
 }
+
 
 
 
