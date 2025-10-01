@@ -157,10 +157,10 @@ export default function ProfilePage({ me }) {
         if (error) throw error
         if (data) {
           setHandleOk(false)
-          setHandleMsg('That handle is already taken.')
+          setHandleMsg('Handle already taken')
         } else {
           setHandleOk(true)
-          setHandleMsg('Handle is available ✓')
+          setHandleMsg('✓ Handle available')
         }
       } catch {
         setHandleOk(null)
@@ -318,8 +318,8 @@ export default function ProfilePage({ me }) {
         <>
           {/* ================== Edit Form ================== */}
           <form onSubmit={saveProfile} className="card profile-form">
-            {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
-            {ok && <div style={{ color:'#166534' }}>{ok}</div>}
+            {err && <div className="helper-error">{err}</div>}
+            {ok && <div className="helper-success">{ok}</div>}
 
             {/* Avatar */}
             <section>
@@ -350,19 +350,21 @@ export default function ProfilePage({ me }) {
                     : 'var(--border)'
                 }}
               />
-              <div
-                className="helper"
-                style={{
-                  color: handleOk === false ? '#b91c1c'
-                    : handleOk === true ? '#166534'
-                    : 'var(--muted)'
-                }}
-              >
-                {publicProfile
-                  ? (handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle'))
-                  : (handleMsg || 'Handle is optional until you go public.')
-                }
-              </div>
+              {publicProfile ? (
+                handleOk === true ? (
+                  <div className="helper-success">✓ Handle available</div>
+                ) : handleOk === false ? (
+                  <div className="helper-error">Handle already taken</div>
+                ) : (
+                  <div className="helper-muted">
+                    {handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle')}
+                  </div>
+                )
+              ) : (
+                <div className="helper-muted">
+                  {handleMsg || 'Handle is optional until you go public.'}
+                </div>
+              )}
 
               {publicProfile && handleOk && handle && (
                 <button
@@ -387,7 +389,7 @@ export default function ProfilePage({ me }) {
                 maxLength={300}
                 style={{ resize:'vertical' }}
               />
-              <div className="helper">
+              <div className="helper-muted">
                 {bio.length}/300 characters
               </div>
             </label>
@@ -411,9 +413,13 @@ export default function ProfilePage({ me }) {
                 onChange={(e)=>{ setBirthdate(e.target.value); setBirthErr('') }}
                 onBlur={(e)=>validateBirthdate(e.target.value)}
               />
-              <div className="helper" style={{ color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
-                {birthErr || (age ? `Age: ${age}` : 'We use this only to show your age.')}
-              </div>
+              {birthErr ? (
+                <div className="helper-error">{birthErr}</div>
+              ) : age ? (
+                <div className="helper-success">✓ Age: {age}</div>
+              ) : (
+                <div className="helper-muted">We use this only to show your age.</div>
+              )}
             </label>
 
             {/* Interests */}
@@ -424,7 +430,7 @@ export default function ProfilePage({ me }) {
                 onChange={(e)=>setInterestsStr(e.target.value)}
                 placeholder="hiking, live music, sushi, travel"
               />
-              <div className="helper">
+              <div className="helper-muted">
                 Separate with commas. We’ll show them as tags on your public profile. (Max 12)
               </div>
             </label>
@@ -458,7 +464,7 @@ export default function ProfilePage({ me }) {
               <div className="qr-row">
                 <div>
                   <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
-                  <div className="helper">
+                  <div className="helper-muted">
                     Share in person. Scanning sends people to: <code>/auth?invite=…</code>
                   </div>
                   <div className="actions-row" style={{ marginTop:8 }}>
@@ -513,6 +519,7 @@ function Toast({ msg }) {
     </div>
   )
 }
+
 
 
 
