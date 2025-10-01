@@ -1,7 +1,21 @@
 // src/pages/Home.jsx
 import React from 'react'
 import { Link } from 'react-router-dom'
-import logo from '../assets/logo.png' // make sure this file exists
+import logo from '../assets/tmdlogo.png' // make sure this file exists
+import Header from '../components/Header'
+import Footer from '../components/Footer'
+
+export default function Home() {
+  return (
+    <>
+      <Header />
+      <main className="container" style={{ maxWidth: 1100 }}>
+        {/* your hero / features / CTA */}
+      </main>
+      <Footer />
+    </>
+  )
+}
 
 export default function Home() {
   const heroStyle = {
