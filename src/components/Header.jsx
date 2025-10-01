@@ -1,6 +1,6 @@
 // src/components/Header.jsx
 import { Link, useLocation } from 'react-router-dom'
-import logo from '../assets/logo.png' // ensure this file exists
+import logo from '../assets/tmdlogo.png' // ensure this file exists
 
 export default function Header({ me, onSignOut }) {
   const loc = useLocation()
