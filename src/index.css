@@ -265,4 +265,22 @@ h1, h2, h3 {
   text-align: center;
 }
 
+/* === Inline validation polish === */
+.helper-error {
+  font-size: 12px;
+  color: #b91c1c; /* red-700 */
+  margin-top: 4px;
+}
+
+.helper-success {
+  font-size: 12px;
+  color: #166534; /* green-700 */
+  margin-top: 4px;
+}
+
+.helper-muted {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
 
