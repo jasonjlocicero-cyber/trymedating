@@ -280,19 +280,19 @@ export default function ProfilePage({ me }) {
       ) : (
         <>
           {/* ================== Edit Form ================== */}
-          <form onSubmit={saveProfile} className="card" style={{ padding: 16, display:'grid', gap: 18 }}>
+          <form onSubmit={saveProfile} className="card profile-form">
             {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
             {ok && <div style={{ color:'#166534' }}>{ok}</div>}
 
             {/* Avatar */}
             <section>
-              <div style={{ fontWeight: 800, marginBottom: 8 }}>Photo</div>
+              <div className="field-label">Photo</div>
               <AvatarUploader userId={me.id} value={avatarUrl} onChange={setAvatarUrl} />
             </section>
 
             {/* Display name */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Display name</div>
+              <div className="field-label">Display name</div>
               <input
                 value={displayName}
                 onChange={(e)=>setDisplayName(e.target.value)}
@@ -302,7 +302,7 @@ export default function ProfilePage({ me }) {
 
             {/* Handle + validation */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
+              <div className="field-label">Handle</div>
               <input
                 value={handle}
                 onChange={(e)=>setHandle(normalizeHandle(e.target.value))}
@@ -314,8 +314,8 @@ export default function ProfilePage({ me }) {
                 }}
               />
               <div
+                className="helper"
                 style={{
-                  fontSize:12, marginTop:4,
                   color: handleOk === false ? '#b91c1c'
                     : handleOk === true ? '#166534'
                     : 'var(--muted)'
@@ -341,7 +341,7 @@ export default function ProfilePage({ me }) {
 
             {/* Bio */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Bio</div>
+              <div className="field-label">Bio</div>
               <textarea
                 value={bio}
                 onChange={(e)=>setBio(e.target.value)}
@@ -350,14 +350,14 @@ export default function ProfilePage({ me }) {
                 maxLength={300}
                 style={{ resize:'vertical' }}
               />
-              <div className="muted" style={{ fontSize:12, marginTop:4 }}>
+              <div className="helper">
                 {bio.length}/300 characters
               </div>
             </label>
 
             {/* Location */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Location</div>
+              <div className="field-label">Location</div>
               <input
                 value={location}
                 onChange={(e)=>setLocation(e.target.value)}
@@ -367,27 +367,27 @@ export default function ProfilePage({ me }) {
 
             {/* Birthdate */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Birthdate</div>
+              <div className="field-label">Birthdate</div>
               <input
                 type="date"
                 value={birthdate || ''}
                 onChange={(e)=>{ setBirthdate(e.target.value); setBirthErr('') }}
                 onBlur={(e)=>validateBirthdate(e.target.value)}
               />
-              <div style={{ fontSize:12, marginTop:4, color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
+              <div className="helper" style={{ color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
                 {birthErr || (age ? `Age: ${age}` : 'We use this only to show your age.')}
               </div>
             </label>
 
             {/* Interests */}
             <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Interests</div>
+              <div className="field-label">Interests</div>
               <input
                 value={interestsStr}
                 onChange={(e)=>setInterestsStr(e.target.value)}
                 placeholder="hiking, live music, sushi, travel"
               />
-              <div className="muted" style={{ fontSize:12, marginTop:4 }}>
+              <div className="helper">
                 Separate with commas. We’ll show them as tags on your public profile. (Max 12)
               </div>
             </label>
@@ -403,7 +403,7 @@ export default function ProfilePage({ me }) {
             </label>
 
             {/* Actions */}
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <div className="actions-row">
               <button
                 className="btn btn-header"
                 type="submit"
@@ -418,13 +418,13 @@ export default function ProfilePage({ me }) {
 
             {/* Invite QR + Copy buttons */}
             <section className="card" style={{ padding:12, marginTop: 4 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center' }}>
+              <div className="qr-row">
                 <div>
                   <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
-                  <div className="muted" style={{ fontSize:12 }}>
+                  <div className="helper">
                     Share in person. Scanning sends people to: <code>/auth?invite=…</code>
                   </div>
-                  <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap' }}>
+                  <div className="actions-row" style={{ marginTop:8 }}>
                     <button
                       type="button"
                       className="btn btn-neutral"
@@ -443,7 +443,7 @@ export default function ProfilePage({ me }) {
                     )}
                   </div>
                 </div>
-                <div style={{ background:'#fff', padding:8, borderRadius:12, border:'1px solid var(--border)' }}>
+                <div className="qr-card">
                   <QRCode value={inviteUrl} size={120} />
                 </div>
               </div>
