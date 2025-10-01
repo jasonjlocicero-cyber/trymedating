@@ -11,6 +11,7 @@ export default function ProfilePage({ me }) {
   // UI state
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [justSaved, setJustSaved] = useState(false) // NEW: flash "Saved ✓"
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
 
@@ -215,6 +216,12 @@ export default function ProfilePage({ me }) {
 
       setOk('Profile saved')
       showToast('Profile saved ✓')
+
+      // NEW: Flash "Saved ✓" for 2s
+      setJustSaved(true)
+      const t = setTimeout(() => setJustSaved(false), 2000)
+      // Guard against component unmount
+      return () => clearTimeout(t)
     } catch (e) {
       setErr(e.message || 'Save failed')
     } finally {
@@ -450,9 +457,9 @@ export default function ProfilePage({ me }) {
               <button
                 className="btn btn-header"
                 type="submit"
-                disabled={saving || (publicProfile && (handleOk === false || checkingHandle))}
+                disabled={saving || justSaved || (publicProfile && (handleOk === false || checkingHandle))}
               >
-                {saving ? 'Saving…' : 'Save profile'}
+                {saving ? 'Saving…' : justSaved ? 'Saved ✓' : 'Save profile'}
               </button>
               {publicProfile && handle && (
                 <a href={`/u/${handle}`} className="btn btn-neutral">View public profile</a>
@@ -519,6 +526,7 @@ function Toast({ msg }) {
     </div>
   )
 }
+
 
 
 
