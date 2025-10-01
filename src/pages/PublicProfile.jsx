@@ -14,45 +14,52 @@ export default function PublicProfile() {
   useEffect(() => {
     let cancel = false
     ;(async () => {
-      // who am I?
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!cancel) setMe(user || null)
+      try {
+        // Current user
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!cancel) setMe(user || null)
 
-      // load public profile by handle
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('user_id, display_name, handle, bio, public_profile, avatar_url')
-        .eq('handle', handle)
-        .eq('public_profile', true)
-        .maybeSingle()
-      if (error) throw error
-      if (!cancel) setProfile(data || null)
+        // Public profile by handle
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, user_id, display_name, handle, bio, public_profile, avatar_url')
+          .eq('handle', handle)
+          .eq('public_profile', true)
+          .maybeSingle()
+        if (error) throw error
+        if (!cancel) setProfile(data || null)
 
-      // if both known, check block (either direction)
-      if (user?.id && data?.user_id) {
-        const { data: b1 } = await supabase
-          .from('blocks').select('user_id')
-          .eq('user_id', user.id)
-          .eq('blocked_user_id', data.user_id)
-          .maybeSingle()
-        const { data: b2 } = await supabase
-          .from('blocks').select('user_id')
-          .eq('user_id', data.user_id)
-          .eq('blocked_user_id', user.id)
-          .maybeSingle()
-        if (!cancel) setBlockedEitherWay(!!b1 || !!b2)
-      } else {
-        if (!cancel) setBlockedEitherWay(false)
+        // Block state check (either direction), only if both sides known
+        const targetId = data?.user_id ?? data?.id // support either column name
+        if (user?.id && targetId) {
+          const [{ data: b1 }, { data: b2 }] = await Promise.all([
+            supabase.from('blocks')
+              .select('user_id')
+              .eq('user_id', user.id)
+              .eq('blocked_user_id', targetId)
+              .maybeSingle(),
+            supabase.from('blocks')
+              .select('user_id')
+              .eq('user_id', targetId)
+              .eq('blocked_user_id', user.id)
+              .maybeSingle()
+          ])
+          if (!cancel) setBlockedEitherWay(!!b1 || !!b2)
+        } else {
+          if (!cancel) setBlockedEitherWay(false)
+        }
+      } catch (e) {
+        console.error(e)
+      } finally {
+        if (!cancel) setLoading(false)
       }
-    })().finally(() => { if (!cancel) setLoading(false) })
-
+    })()
     return () => { cancel = true }
   }, [handle])
 
   function handleBlockedChange(nowBlocked) {
-    // If I just blocked them (or unblocked), recompute flag
-    if (!me?.id || !profile?.user_id) return
-    setBlockedEitherWay(nowBlocked) // quick reflect; next page load will re-check both directions
+    // Reflect immediate toggle; a fresh load will verify both directions
+    setBlockedEitherWay(!!nowBlocked)
   }
 
   if (loading) {
@@ -68,7 +75,8 @@ export default function PublicProfile() {
     )
   }
 
-  const isMe = me?.id && me.id === profile.user_id
+  const targetUserId = profile.user_id ?? profile.id
+  const isMe = me?.id && me.id === targetUserId
 
   return (
     <div className="container" style={{ padding:24, maxWidth:860 }}>
@@ -91,14 +99,15 @@ export default function PublicProfile() {
             <Link to="/" className="btn">Home</Link>
             {isMe && <Link to="/profile" className="btn">Edit my profile</Link>}
 
-            {/* Hide any future "Message" button if blocked in either direction */}
+            {/* You intentionally removed messaging from public profiles.
+                If you reintroduce it later, guard with !blockedEitherWay. */}
             {/* {!isMe && !blockedEitherWay && <button className="btn btn-primary">Message</button>} */}
 
-            {/* Block / Unblock */}
+            {/* Block / Unblock (not visible on own profile) */}
             {!isMe && me?.id && (
               <BlockButton
                 me={me}
-                targetUserId={profile.user_id}
+                targetUserId={targetUserId}
                 onBlockedChange={handleBlockedChange}
               />
             )}
@@ -114,6 +123,7 @@ export default function PublicProfile() {
     </div>
   )
 }
+
 
 
 
