@@ -1,120 +1,148 @@
 // src/pages/Home.jsx
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { supabase } from "../lib/supabaseClient";
+import React from 'react'
+import { Link } from 'react-router-dom'
+import logo from '../assets/logo.png' // make sure this file exists
 
-export default function Home({ me, onOpenChat }) {
-  const authed = !!me?.id;
-  const [needsProfile, setNeedsProfile] = useState(false);
+export default function Home() {
+  const heroStyle = {
+    display: 'grid',
+    gap: 16,
+    justifyItems: 'center',
+    textAlign: 'center',
+    padding: '36px 16px',
+    background: '#fff',
+    border: '1px solid var(--border)',
+    borderRadius: 16,
+  }
 
-  useEffect(() => {
-    let cancel = false;
-    if (!authed) { setNeedsProfile(false); return }
-    ;(async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('display_name, handle')
-        .eq('user_id', me.id)
-        .maybeSingle()
-      if (!cancel) {
-        setNeedsProfile(!data?.display_name || !data?.handle)
-      }
-    })()
-    return () => { cancel = true }
-  }, [authed, me?.id])
+  const brandTitle = {
+    fontSize: 'clamp(28px, 4vw, 44px)',
+    lineHeight: 1.1,
+    margin: '8px 0 6px',
+    fontWeight: 800
+  }
+
+  const sub = { color: 'var(--muted)', maxWidth: 760 }
+
+  const featuresGrid = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(12, 1fr)',
+    gap: 16
+  }
+
+  const card = {
+    gridColumn: 'span 12',
+    background: '#fff',
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    padding: 16
+  }
+
+  const pill = {
+    display: 'inline-block',
+    borderRadius: 999,
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#fff',
+    background: 'var(--brand-teal)'
+  }
+
+  const teaserStrip = {
+    marginTop: 20,
+    background: 'var(--brand-teal)',
+    color: '#fff',
+    borderRadius: 12,
+    padding: '18px 16px',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 12,
+    justifyContent: 'space-between'
+  }
 
   return (
-    <div className="container" style={{ padding: "32px 0", maxWidth: 960 }}>
-      {/* HERO */}
-      <section
-        className="card"
-        style={{
-          display: "grid",
-          gap: 12,
-          padding: "28px",
-          background:
-            "linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)",
-          color: "#fff",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 34, lineHeight: 1.1, letterSpacing: 0.2 }}>
-          Welcome to{" "}
-          <span style={{ fontWeight: 900, color: "var(--primary)", background: "#ffffffe6", padding: "0 6px", borderRadius: 6, boxShadow: "0 0 0 2px #ffffff40 inset" }}>
-            TryME
-          </span>{" "}
-          <span style={{ fontWeight: 900, color: "var(--secondary)" }}>
-            Dating
-          </span>
+    <div className="container" style={{ maxWidth: 1100 }}>
+      {/* Hero */}
+      <section style={heroStyle}>
+        <img
+          src={logo}
+          alt="TryMeDating"
+          style={{ height: 96, width: 'auto', objectFit: 'contain' }}
+        />
+        <h1 style={brandTitle}>
+          Welcome to{' '}
+          <span style={{ color: 'var(--brand-teal)' }}>TryME</span>
+          <span style={{ color: 'var(--brand-coral)' }}>Dating</span>
         </h1>
-
-        <p style={{ margin: 0, opacity: 0.96, maxWidth: 760 }}>
-          Invite-first dating. Share your personal QR code with people you’ve actually met.
-          No cold DMs from strangers.
+        <p style={sub}>
+          Invite-only dating that starts with a real-world moment. Share your QR in person,
+          connect privately by default, and move at your own pace.
         </p>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          {authed ? (
-            <>
-              <Link to="/profile" className="btn" style={{ background: "#fff", color: "#111" }}>
-                Go to Profile
-              </Link>
-              <button className="btn btn-primary" onClick={() => onOpenChat?.(null)}>
-                Open Messages
-              </button>
-              <Link to="/settings" className="btn" style={{ background: "#fff", color: "#111" }}>
-                Settings
-              </Link>
-            </>
-          ) : (
-            <>
-              <Link to="/auth" className="btn btn-primary">Sign in / Sign up</Link>
-              <Link to="/privacy" className="btn" style={{ background: "#fff", color: "#111" }}>
-                Learn more
-              </Link>
-            </>
-          )}
-        </div>
-      </section>
-
-      {/* Onboarding nudge */}
-      {authed && needsProfile && (
-        <section className="card" style={{ padding: 12, marginTop: 12, borderLeft: '4px solid var(--secondary)', background: '#fffaf7' }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-            <div><strong>Complete your profile</strong> — add your name and handle to be discoverable.</div>
-            <Link to="/profile" className="btn">Edit profile</Link>
-          </div>
-        </section>
-      )}
-
-      {/* HIGHLIGHTS */}
-      <section style={{ marginTop: 16, display: "grid", gap: 12 }}>
-        <div className="card" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Invite-first connections</h3>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Share your QR with people you meet. Build from real-world chemistry.
-          </p>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Private by default</h3>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Keep your profile private or go public — switch anytime.
-          </p>
-        </div>
-        <div className="card" style={{ padding: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Simple, human messaging</h3>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            Lightweight chat with typing indicators, read receipts, replies, and reactions.
-          </p>
-        </div>
-      </section>
-
-      {!authed && (
-        <section style={{ marginTop: 16, textAlign: "center" }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
           <Link to="/auth" className="btn btn-primary">Get started</Link>
-        </section>
-      )}
+          <Link to="/privacy" className="btn">Privacy</Link>
+          <Link to="/terms" className="btn">Terms</Link>
+          <Link to="/contact" className="btn">Contact</Link>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          <span style={pill}>Private by default</span>{' '}
+          <span className="tag tag--coral" style={{ marginLeft: 8 }}>Invite-only</span>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section style={{ marginTop: 20 }}>
+        <div style={featuresGrid}>
+          <div style={{ ...card, gridColumn: 'span 12', display:'grid', gap:8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              💬 Real conversations, not swipes
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              You control who can reach you. Messaging opens after you’ve shared your invite QR
+              or handle in person—so every chat starts with context.
+            </p>
+          </div>
+
+          <div style={{ ...card, gridColumn: 'span 12', display:'grid', gap:8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              🔒 Private by default
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              Your profile stays private unless you decide to make it public. Toggle visibility
+              anytime. Share only what you want, when you want.
+            </p>
+          </div>
+
+          <div style={{ ...card, gridColumn: 'span 12', display:'grid', gap:8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>
+              🪪 Your invite QR
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              Generate a personal QR right from your profile. Meet someone? Let them scan to connect.
+              No handles to type, no awkward search.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA strip */}
+      <section style={teaserStrip}>
+        <div style={{ fontWeight: 700 }}>
+          Ready to try it?
+        </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <Link to="/auth" className="btn" style={{ background:'#fff', color:'var(--brand-teal)', border:'none' }}>
+            Create your profile
+          </Link>
+          <Link to="/u/your-handle" className="btn" style={{ background:'var(--brand-coral)', color:'#fff', border:'none' }}>
+            See a sample profile
+          </Link>
+        </div>
+      </section>
     </div>
-  );
+  )
 }
+
 
 
