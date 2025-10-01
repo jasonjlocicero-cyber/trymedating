@@ -95,24 +95,14 @@ export default function PublicProfile() {
         <div style={{ marginTop: 16 }}>
           <h3 style={{ marginBottom: 8 }}>Interests</h3>
           <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-            {interests.map((tag, i) => {
-              const isEven = i % 2 === 0
-              return (
-                <span
-                  key={`${tag}-${i}`}
-                  style={{
-                    background: isEven ? '#008080' : '#FF6F61', // teal / coral
-                    color: '#fff',
-                    borderRadius: 20,
-                    padding: '6px 14px',
-                    fontSize: 14,
-                    fontWeight: 500
-                  }}
-                >
-                  {tag}
-                </span>
-              )
-            })}
+            {interests.map((tag, i) => (
+              <span
+                key={`${tag}-${i}`}
+                className={`tag ${i % 2 === 0 ? 'tag--teal' : 'tag--coral'}`}
+              >
+                {tag}
+              </span>
+            ))}
           </div>
         </div>
       )}
