@@ -20,7 +20,7 @@ export default function ProfilePage({ me }) {
   const [publicProfile, setPublicProfile] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState(null)
 
-  // NEW model fields
+  // extra fields
   const [location, setLocation] = useState('')
   const [birthdate, setBirthdate] = useState('') // 'YYYY-MM-DD'
   const [pronouns, setPronouns] = useState('')
@@ -35,22 +35,24 @@ export default function ProfilePage({ me }) {
   // toast queue
   const [toasts, setToasts] = useState([])
 
-  // derived
+  // derived flags
   const needsOnboarding = useMemo(
     () => authed && (!displayName || !handle),
     [authed, displayName, handle]
   )
 
+  // reserved handles
   const RESERVED = useRef(new Set([
     'admin','administrator','support','moderator',
     'help','root','system','trymedating','api','www','null'
   ]))
 
+  // normalize handle
   function normalizeHandle(v) {
     return v.toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 32)
   }
 
-  // compute age from birthdate for display
+  // compute age from birthdate
   const age = useMemo(() => {
     if (!birthdate) return ''
     const d = new Date(birthdate + 'T00:00:00') // avoid TZ issues
@@ -59,11 +61,21 @@ export default function ProfilePage({ me }) {
     let a = now.getFullYear() - d.getFullYear()
     const m = now.getMonth() - d.getMonth()
     if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
-    if (a < 0 || a > 120) return '' // sanity guard
+    if (a < 0 || a > 120) return ''
     return a
   }, [birthdate])
 
-  // Load current profile (pulls new fields too)
+  // split interests for preview
+  const interestsArray = useMemo(() => {
+    const arr = interestsStr
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+    // cap at 12 for display
+    return Array.from(new Set(arr)).slice(0, 12)
+  }, [interestsStr])
+
+  // Load current profile (includes extra fields)
   useEffect(() => {
     let cancel = false
     if (!authed) { setLoading(false); return }
@@ -89,7 +101,6 @@ export default function ProfilePage({ me }) {
           setLocation(data.location || '')
           setBirthdate(data.birthdate || '')
           setPronouns(data.pronouns || '')
-          // interests as comma-separated string
           const arr = Array.isArray(data.interests) ? data.interests : []
           setInterestsStr(arr.join(', '))
         }
@@ -115,7 +126,6 @@ export default function ProfilePage({ me }) {
 
   function validateBirthdate(v) {
     if (!v) { setBirthErr(''); return true }
-    // basic YYYY-MM-DD check + plausible age
     const d = new Date(v + 'T00:00:00')
     if (isNaN(d.getTime())) { setBirthErr('Invalid date.'); return false }
     const now = new Date()
@@ -199,7 +209,6 @@ export default function ProfilePage({ me }) {
         .split(',')
         .map(s => s.trim())
         .filter(Boolean)
-      // limit to 12 to keep it tidy
       const sanitizedInterests = Array.from(new Set(interestsArr)).slice(0, 12)
 
       const payload = {
@@ -221,6 +230,7 @@ export default function ProfilePage({ me }) {
 
       if (error) throw error
       setOk('Profile saved')
+      showToast('Profile saved ✓')
     } catch (e) {
       setErr(e.message || 'Save failed')
     } finally {
@@ -274,186 +284,249 @@ export default function ProfilePage({ me }) {
       {loading ? (
         <p className="muted">Loading…</p>
       ) : (
-        <form onSubmit={saveProfile} className="card" style={{ padding: 16, display:'grid', gap: 18 }}>
-          {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
-          {ok && <div style={{ color:'#166534' }}>{ok}</div>}
+        <>
+          <form onSubmit={saveProfile} className="card" style={{ padding: 16, display:'grid', gap: 18 }}>
+            {err && <div style={{ color:'#b91c1c' }}>{err}</div>}
+            {ok && <div style={{ color:'#166534' }}>{ok}</div>}
 
-          {/* Avatar */}
-          <section>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Photo</div>
-            <AvatarUploader userId={me.id} value={avatarUrl} onChange={setAvatarUrl} />
-          </section>
+            {/* Avatar */}
+            <section>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Photo</div>
+              <AvatarUploader userId={me.id} value={avatarUrl} onChange={setAvatarUrl} />
+            </section>
 
-          {/* Display name */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Display name</div>
-            <input
-              value={displayName}
-              onChange={(e)=>setDisplayName(e.target.value)}
-              placeholder="Your name"
-              style={input}
-            />
-          </label>
+            {/* Display name */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Display name</div>
+              <input
+                value={displayName}
+                onChange={(e)=>setDisplayName(e.target.value)}
+                placeholder="Your name"
+                style={input}
+              />
+            </label>
 
-          {/* Handle with validation */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
-            <input
-              value={handle}
-              onChange={(e)=>setHandle(normalizeHandle(e.target.value))}
-              placeholder="your-handle"
-              style={{
-                ...input,
-                borderColor: handleOk === false ? '#b91c1c'
-                  : handleOk === true ? '#16a34a'
-                  : 'var(--border)'
-              }}
-            />
-            <div style={{ fontSize:12, marginTop:4,
-              color: handleOk === false ? '#b91c1c'
-                : handleOk === true ? '#166534'
-                : 'var(--muted)' }}>
-              {publicProfile
-                ? (handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle'))
-                : (handleMsg || 'Handle is optional until you go public.')
-              }
-            </div>
-            {publicProfile && handleOk && handle && (
+            {/* Handle with validation + copy */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
+              <input
+                value={handle}
+                onChange={(e)=>setHandle(normalizeHandle(e.target.value))}
+                placeholder="your-handle"
+                style={{
+                  ...input,
+                  borderColor: handleOk === false ? '#b91c1c'
+                    : handleOk === true ? '#16a34a'
+                    : 'var(--border)'
+                }}
+              />
+              <div style={{ fontSize:12, marginTop:4,
+                color: handleOk === false ? '#b91c1c'
+                  : handleOk === true ? '#166534'
+                  : 'var(--muted)' }}>
+                {publicProfile
+                  ? (handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle'))
+                  : (handleMsg || 'Handle is optional until you go public.')
+                }
+              </div>
+              {publicProfile && handleOk && handle && (
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ marginTop:6 }}
+                  onClick={() => copyText(publicUrl,'Public URL')}
+                >
+                  Copy Public URL
+                </button>
+              )}
+            </label>
+
+            {/* Bio */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Bio</div>
+              <textarea
+                value={bio}
+                onChange={(e)=>setBio(e.target.value)}
+                placeholder="A short intro…"
+                rows={4}
+                maxLength={300}
+                style={{ ...input, resize:'vertical' }}
+              />
+              <div className="muted" style={{ fontSize:12, marginTop:4 }}>
+                {bio.length}/300 characters
+              </div>
+            </label>
+
+            {/* Location */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Location</div>
+              <input
+                value={location}
+                onChange={(e)=>setLocation(e.target.value)}
+                placeholder="City, State (or City, Country)"
+                style={input}
+              />
+            </label>
+
+            {/* Birthdate */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Birthdate</div>
+              <input
+                type="date"
+                value={birthdate || ''}
+                onChange={(e)=>{ setBirthdate(e.target.value); setBirthErr('') }}
+                onBlur={(e)=>validateBirthdate(e.target.value)}
+                style={input}
+              />
+              <div style={{ fontSize:12, marginTop:4, color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
+                {birthErr || (age ? `Age: ${age}` : 'We use this only to show your age.')}
+              </div>
+            </label>
+
+            {/* Pronouns */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Pronouns</div>
+              <input
+                value={pronouns}
+                onChange={(e)=>setPronouns(e.target.value)}
+                placeholder="e.g., she/her, he/him, they/them"
+                style={input}
+              />
+            </label>
+
+            {/* Interests */}
+            <label>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>Interests</div>
+              <input
+                value={interestsStr}
+                onChange={(e)=>setInterestsStr(e.target.value)}
+                placeholder="hiking, live music, sushi, travel"
+                style={input}
+              />
+              <div className="muted" style={{ fontSize:12, marginTop:4 }}>
+                Separate with commas. We’ll show them as tags on your public profile. (Max 12)
+              </div>
+            </label>
+
+            {/* Public toggle */}
+            <label style={{ display:'flex', alignItems:'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={publicProfile}
+                onChange={(e)=>setPublicProfile(e.target.checked)}
+              />
+              <span>Make my profile public</span>
+            </label>
+
+            {/* Actions */}
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
               <button
-                type="button"
-                className="btn"
-                style={{ marginTop:6 }}
-                onClick={() => copyText(publicUrl,'Public URL')}
+                className="btn btn-primary"
+                type="submit"
+                disabled={saving || (publicProfile && (handleOk === false || checkingHandle))}
               >
-                Copy Public URL
+                {saving ? 'Saving…' : 'Save profile'}
               </button>
-            )}
-          </label>
-
-          {/* Bio */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Bio</div>
-            <textarea
-              value={bio}
-              onChange={(e)=>setBio(e.target.value)}
-              placeholder="A short intro…"
-              rows={4}
-              maxLength={300}
-              style={{ ...input, resize:'vertical' }}
-            />
-            <div className="muted" style={{ fontSize:12, marginTop:4 }}>
-              {bio.length}/300 characters
+              {publicProfile && handle && (
+                <a href={`/u/${handle}`} className="btn">View public profile</a>
+              )}
             </div>
-          </label>
 
-          {/* NEW: Location */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Location</div>
-            <input
-              value={location}
-              onChange={(e)=>setLocation(e.target.value)}
-              placeholder="City, State (or City, Country)"
-              style={input}
-            />
-          </label>
-
-          {/* NEW: Birthdate (we’ll show age) */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Birthdate</div>
-            <input
-              type="date"
-              value={birthdate || ''}
-              onChange={(e)=>{ setBirthdate(e.target.value); setBirthErr('') }}
-              onBlur={(e)=>validateBirthdate(e.target.value)}
-              style={input}
-            />
-            <div style={{ fontSize:12, marginTop:4, color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
-              {birthErr || (age ? `Age: ${age}` : 'We use this only to show your age.')}
-            </div>
-          </label>
-
-          {/* NEW: Pronouns */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Pronouns</div>
-            <input
-              value={pronouns}
-              onChange={(e)=>setPronouns(e.target.value)}
-              placeholder="e.g., she/her, he/him, they/them"
-              style={input}
-            />
-          </label>
-
-          {/* NEW: Interests (comma-separated) */}
-          <label>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Interests</div>
-            <input
-              value={interestsStr}
-              onChange={(e)=>setInterestsStr(e.target.value)}
-              placeholder="hiking, live music, sushi, travel"
-              style={input}
-            />
-            <div className="muted" style={{ fontSize:12, marginTop:4 }}>
-              Separate with commas. We’ll show them as tags on your public profile. (Max 12)
-            </div>
-          </label>
-
-          {/* Public toggle */}
-          <label style={{ display:'flex', alignItems:'center', gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={publicProfile}
-              onChange={(e)=>setPublicProfile(e.target.checked)}
-            />
-            <span>Make my profile public</span>
-          </label>
-
-          {/* Actions */}
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            <button
-              className="btn btn-primary"
-              type="submit"
-              disabled={saving || (publicProfile && (handleOk === false || checkingHandle))}
-            >
-              {saving ? 'Saving…' : 'Save profile'}
-            </button>
-            {publicProfile && handle && (
-              <a href={`/u/${handle}`} className="btn">View public profile</a>
-            )}
-          </div>
-
-          {/* Invite QR + Copy buttons */}
-          <section className="card" style={{ padding:12, marginTop: 4 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center' }}>
-              <div>
-                <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
-                <div className="muted" style={{ fontSize:12 }}>
-                  Share in person. Scanning sends people to: <code>/auth?invite=…</code>
-                </div>
-                <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => copyText(inviteUrl,'Invite link')}
-                  >
-                    Copy Invite Link
-                  </button>
-                  {publicProfile && handleOk && handle && (
+            {/* Invite QR + Copy buttons */}
+            <section className="card" style={{ padding:12, marginTop: 4 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'center' }}>
+                <div>
+                  <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
+                  <div className="muted" style={{ fontSize:12 }}>
+                    Share in person. Scanning sends people to: <code>/auth?invite=…</code>
+                  </div>
+                  <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap' }}>
                     <button
                       type="button"
                       className="btn"
-                      onClick={() => copyText(publicUrl,'Public URL')}
+                      onClick={() => copyText(inviteUrl,'Invite link')}
                     >
-                      Copy Public URL
+                      Copy Invite Link
                     </button>
-                  )}
+                    {publicProfile && handleOk && handle && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => copyText(publicUrl,'Public URL')}
+                      >
+                        Copy Public URL
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ background:'#fff', padding:8, borderRadius:12, border:'1px solid var(--border)' }}>
+                  <QRCode value={inviteUrl} size={120} />
                 </div>
               </div>
-              <div style={{ background:'#fff', padding:8, borderRadius:12, border:'1px solid var(--border)' }}>
-                <QRCode value={inviteUrl} size={120} />
-              </div>
+            </section>
+          </form>
+
+          {/* ===== Public Preview (brand-colored interest tags) ===== */}
+          <div className="card" style={{ padding:16, marginTop:16 }}>
+            <div style={{ textAlign:'center', marginBottom: 16 }}>
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={displayName || handle}
+                  style={{ width: 100, height: 100, borderRadius: '50%', objectFit: 'cover', border:'2px solid var(--border)' }}
+                />
+              ) : (
+                <div style={{
+                  width:100,height:100,borderRadius:'50%',background:'#ddd',
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  margin:'0 auto',fontSize:32,fontWeight:700
+                }}>
+                  {(displayName?.[0] || handle?.[0] || '?').toUpperCase()}
+                </div>
+              )}
+              <h2 style={{ marginTop: 10 }}>{displayName || handle || 'Your Name'}</h2>
+              {handle && <div className="muted">@{handle}</div>}
             </div>
-          </section>
-        </form>
+
+            <div style={{ textAlign:'center', marginBottom: 12, color:'var(--text)' }}>
+              {pronouns && <span style={{ marginRight: 8 }}>{pronouns}</span>}
+              {location && <span style={{ marginRight: 8 }}>📍 {location}</span>}
+              {age && <span>🎂 {age}</span>}
+            </div>
+
+            {bio && (
+              <div style={{ marginBottom: 12, textAlign:'center', whiteSpace:'pre-line' }}>
+                {bio}
+              </div>
+            )}
+
+            {interestsArray.length > 0 && (
+              <>
+                <h3 style={{ marginTop: 8, marginBottom: 8, textAlign:'left' }}>Interests</h3>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  {interestsArray.map((tag, i) => {
+                    const isEven = i % 2 === 0
+                    return (
+                      <span
+                        key={`${tag}-${i}`}
+                        style={{
+                          background: isEven ? '#008080' : '#FF6F61', // teal / coral
+                          color: '#fff',
+                          borderRadius: 20,
+                          padding: '6px 14px',
+                          fontSize: 14,
+                          fontWeight: 500
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
 
       {/* Toast container */}
