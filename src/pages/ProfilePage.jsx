@@ -270,7 +270,7 @@ export default function ProfilePage({ me }) {
 
   return (
     <main className="container profile-narrow" style={{ padding: 24 }}>
-      <h1 style={{ margin-bottom: 8, marginBottom: 8 }}>Profile</h1>
+      <h1 style={{ marginBottom: 8 }}>Profile</h1>
 
       {/* Completeness */}
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
