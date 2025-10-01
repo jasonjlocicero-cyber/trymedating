@@ -14,7 +14,7 @@ export default function ProfilePage({ me }) {
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
 
-  // model (persisted profile fields)
+  // core profile fields
   const [displayName, setDisplayName] = useState('')
   const [handle, setHandle] = useState('')
   const [bio, setBio] = useState('')
@@ -24,19 +24,18 @@ export default function ProfilePage({ me }) {
   // extra fields
   const [location, setLocation] = useState('')
   const [birthdate, setBirthdate] = useState('') // 'YYYY-MM-DD'
-  const [pronouns, setPronouns] = useState('')
-  const [interestsStr, setInterestsStr] = useState('') // UI as comma-separated
-  const [birthErr, setBirthErr] = useState('')
+  const [interestsStr, setInterestsStr] = useState('')
 
-  // handle validation state
+  // validation helpers
+  const [birthErr, setBirthErr] = useState('')
   const [handleMsg, setHandleMsg] = useState('')
-  const [handleOk, setHandleOk] = useState(null)      // true | false | null
+  const [handleOk, setHandleOk] = useState(null) // true/false/null
   const [checkingHandle, setCheckingHandle] = useState(false)
 
-  // toast queue
+  // toasts
   const [toasts, setToasts] = useState([])
 
-  // derived flags
+  // onboarding nudge
   const needsOnboarding = useMemo(
     () => authed && (!displayName || !handle),
     [authed, displayName, handle]
@@ -48,15 +47,14 @@ export default function ProfilePage({ me }) {
     'help','root','system','trymedating','api','www','null'
   ]))
 
-  // normalize handle
+  // helpers
   function normalizeHandle(v) {
     return v.toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 32)
   }
 
-  // compute age from birthdate
   const age = useMemo(() => {
     if (!birthdate) return ''
-    const d = new Date(birthdate + 'T00:00:00') // avoid TZ issues
+    const d = new Date(birthdate + 'T00:00:00')
     if (isNaN(d.getTime())) return ''
     const now = new Date()
     let a = now.getFullYear() - d.getFullYear()
@@ -66,17 +64,12 @@ export default function ProfilePage({ me }) {
     return a
   }, [birthdate])
 
-  // split interests for preview
   const interestsArray = useMemo(() => {
-    const arr = interestsStr
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-    // cap at 12 for display
+    const arr = interestsStr.split(',').map(s => s.trim()).filter(Boolean)
     return Array.from(new Set(arr)).slice(0, 12)
   }, [interestsStr])
 
-  // Load current profile (includes extra fields)
+  // Load profile from Supabase
   useEffect(() => {
     let cancel = false
     if (!authed) { setLoading(false); return }
@@ -87,7 +80,7 @@ export default function ProfilePage({ me }) {
           .from('profiles')
           .select(`
             display_name, handle, bio, public_profile, avatar_url,
-            location, birthdate, pronouns, interests
+            location, birthdate, interests
           `)
           .eq('user_id', me.id)
           .maybeSingle()
@@ -98,10 +91,8 @@ export default function ProfilePage({ me }) {
           setBio(data.bio || '')
           setPublicProfile(!!data.public_profile)
           setAvatarUrl(data.avatar_url || null)
-
           setLocation(data.location || '')
           setBirthdate(data.birthdate || '')
-          setPronouns(data.pronouns || '')
           const arr = Array.isArray(data.interests) ? data.interests : []
           setInterestsStr(arr.join(', '))
         }
@@ -114,14 +105,14 @@ export default function ProfilePage({ me }) {
     return () => { cancel = true }
   }, [authed, me?.id])
 
-  // local validation helpers
-  function validateHandleLocal(v, reservedSet) {
+  // local validators
+  function validateHandleLocal(v) {
     const clean = v.toLowerCase()
     if (!clean) return { ok: false, msg: 'Handle is required when public.' }
     if (clean.length < 3) return { ok: false, msg: 'Minimum 3 characters.' }
     if (clean.length > 32) return { ok: false, msg: 'Maximum 32 characters.' }
     if (!/^[a-z0-9-_]+$/.test(clean)) return { ok: false, msg: 'Use lowercase letters, numbers, - or _ only.' }
-    if (reservedSet.has(clean)) return { ok: false, msg: 'That handle is reserved.' }
+    if (RESERVED.current.has(clean)) return { ok: false, msg: 'That handle is reserved.' }
     return { ok: true, msg: '' }
   }
 
@@ -138,12 +129,11 @@ export default function ProfilePage({ me }) {
     return true
   }
 
-  // live handle validation + server check
+  // live handle check
   useEffect(() => {
     if (!authed) return
     const value = handle?.trim() || ''
-
-    const local = validateHandleLocal(value, RESERVED.current)
+    const local = validateHandleLocal(value)
     if (!local.ok) {
       setHandleOk(false)
       setHandleMsg(local.msg)
@@ -152,17 +142,17 @@ export default function ProfilePage({ me }) {
     if (!value) {
       setHandleOk(null); setHandleMsg(''); return
     }
-
     setCheckingHandle(true)
     setHandleMsg('Checking availability…')
     setHandleOk(null)
+
     const t = setTimeout(async () => {
       try {
         const { data, error } = await supabase
           .from('profiles')
           .select('user_id')
           .eq('handle', value)
-          .neq('user_id', me.id)   // allow your own handle
+          .neq('user_id', me.id)
           .maybeSingle()
         if (error) throw error
         if (data) {
@@ -172,29 +162,27 @@ export default function ProfilePage({ me }) {
           setHandleOk(true)
           setHandleMsg('Handle is available ✓')
         }
-      } catch (e) {
+      } catch {
         setHandleOk(null)
         setHandleMsg('Could not verify handle right now.')
       } finally {
         setCheckingHandle(false)
       }
     }, 350)
+
     return () => clearTimeout(t)
   }, [handle, authed, me?.id])
 
-  // Save
+  // save profile
   async function saveProfile(e) {
     e?.preventDefault?.()
     if (!authed) return
     setSaving(true); setErr(''); setOk('')
-
     try {
-      // birthdate validation (if provided)
       if (!validateBirthdate(birthdate)) throw new Error(birthErr || 'Invalid birthdate.')
 
-      // handle rules if going public
       if (publicProfile) {
-        const local = validateHandleLocal(handle.trim(), RESERVED.current)
+        const local = validateHandleLocal(handle.trim())
         if (!local.ok) throw new Error(local.msg)
         const { data: dupe } = await supabase
           .from('profiles')
@@ -205,11 +193,7 @@ export default function ProfilePage({ me }) {
         if (dupe) throw new Error('That handle is already taken.')
       }
 
-      // interests: split comma-separated → text[]
-      const interestsArr = interestsStr
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
+      const interestsArr = interestsStr.split(',').map(s => s.trim()).filter(Boolean)
       const sanitizedInterests = Array.from(new Set(interestsArr)).slice(0, 12)
 
       const payload = {
@@ -221,15 +205,14 @@ export default function ProfilePage({ me }) {
         avatar_url: avatarUrl || null,
         location: location || null,
         birthdate: birthdate || null,
-        pronouns: pronouns || null,
         interests: sanitizedInterests.length ? sanitizedInterests : null
       }
 
       const { error } = await supabase
         .from('profiles')
         .upsert(payload, { onConflict: 'user_id' })
-
       if (error) throw error
+
       setOk('Profile saved')
       showToast('Profile saved ✓')
     } catch (e) {
@@ -242,8 +225,8 @@ export default function ProfilePage({ me }) {
   // toasts
   function showToast(msg) {
     const id = Date.now()
-    setToasts((t)=>[...t,{id,msg}])
-    setTimeout(()=>setToasts((t)=>t.filter(x=>x.id!==id)), 2000)
+    setToasts(t => [...t, { id, msg }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2000)
   }
   function copyText(text, label) {
     navigator.clipboard.writeText(text)
@@ -268,16 +251,26 @@ export default function ProfilePage({ me }) {
       <h1 style={{ marginBottom: 12 }}>Profile</h1>
 
       {!publicProfile && (
-        <div className="card" style={{
-          padding: 12, marginBottom: 12, background: '#fff8e1',
-          border: '1px solid var(--border)', borderLeft: '4px solid #f59e0b', color: '#5b4b1e'
-        }}>
+        <div
+          className="card"
+          style={{
+            padding: 12,
+            marginBottom: 12,
+            background: '#fff8e1',
+            border: '1px solid var(--border)',
+            borderLeft: '4px solid #f59e0b',
+            color: '#5b4b1e'
+          }}
+        >
           Your profile is <strong>private</strong>. Others can’t view it unless you make it public.
         </div>
       )}
 
       {needsOnboarding && (
-        <div className="card" style={{ padding:12, borderLeft:'4px solid var(--brand-coral)', marginBottom:12, background:'#fffaf7' }}>
+        <div
+          className="card"
+          style={{ padding:12, borderLeft:'4px solid var(--brand-coral)', marginBottom:12, background:'#fffaf7' }}
+        >
           <strong>Finish your setup:</strong> add a display name and handle, and an optional photo.
         </div>
       )}
@@ -307,7 +300,7 @@ export default function ProfilePage({ me }) {
               />
             </label>
 
-            {/* Handle with validation + copy */}
+            {/* Handle + validation */}
             <label>
               <div style={{ fontWeight: 800, marginBottom: 6 }}>Handle</div>
               <input
@@ -320,15 +313,20 @@ export default function ProfilePage({ me }) {
                     : 'var(--border)'
                 }}
               />
-              <div style={{ fontSize:12, marginTop:4,
-                color: handleOk === false ? '#b91c1c'
-                  : handleOk === true ? '#166534'
-                  : 'var(--muted)' }}>
+              <div
+                style={{
+                  fontSize:12, marginTop:4,
+                  color: handleOk === false ? '#b91c1c'
+                    : handleOk === true ? '#166534'
+                    : 'var(--muted)'
+                }}
+              >
                 {publicProfile
                   ? (handleMsg || 'Public URL: ' + (handle ? `/u/${handle}` : '/u/your-handle'))
                   : (handleMsg || 'Handle is optional until you go public.')
                 }
               </div>
+
               {publicProfile && handleOk && handle && (
                 <button
                   type="button"
@@ -379,16 +377,6 @@ export default function ProfilePage({ me }) {
               <div style={{ fontSize:12, marginTop:4, color: birthErr ? '#b91c1c' : 'var(--muted)' }}>
                 {birthErr || (age ? `Age: ${age}` : 'We use this only to show your age.')}
               </div>
-            </label>
-
-            {/* Pronouns */}
-            <label>
-              <div style={{ fontWeight: 800, marginBottom: 6 }}>Pronouns</div>
-              <input
-                value={pronouns}
-                onChange={(e)=>setPronouns(e.target.value)}
-                placeholder="e.g., she/her, he/him, they/them"
-              />
             </label>
 
             {/* Interests */}
@@ -460,6 +448,7 @@ export default function ProfilePage({ me }) {
                 </div>
               </div>
             </section>
+            {/* ================== End Edit Form ================== */}
           </form>
 
           {/* ================== Public Preview ================== */}
@@ -485,7 +474,6 @@ export default function ProfilePage({ me }) {
             </div>
 
             <div style={{ textAlign:'center', marginBottom: 12 }}>
-              {pronouns && <span style={{ marginRight: 8 }}>{pronouns}</span>}
               {location && <span style={{ marginRight: 8 }}>📍 {location}</span>}
               {age && <span>🎂 {age}</span>}
             </div>
@@ -512,22 +500,27 @@ export default function ProfilePage({ me }) {
               </>
             )}
           </div>
+          {/* ================== End Public Preview ================== */}
         </>
       )}
 
       {/* Toast container */}
       <div style={{position:'fixed',top:16,right:16,display:'flex',flexDirection:'column',gap:8,zIndex:9999}}>
-        {toasts.map(t=><Toast key={t.id} msg={t.msg} />)}
+        {toasts.map(t => <Toast key={t.id} msg={t.msg} />)}
       </div>
     </main>
   )
 }
 
-function Toast({msg}) {
+function Toast({ msg }) {
   return (
     <div style={{
-      background:'#333', color:'#fff', padding:'8px 14px',
-      borderRadius:8, fontSize:14, boxShadow:'0 2px 6px rgba(0,0,0,0.25)'
+      background:'#333',
+      color:'#fff',
+      padding:'8px 14px',
+      borderRadius:8,
+      fontSize:14,
+      boxShadow:'0 2px 6px rgba(0,0,0,0.25)'
     }}>
       {msg}
     </div>
