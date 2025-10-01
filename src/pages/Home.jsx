@@ -3,7 +3,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import Header from '../components/Header'
 import Footer from '../components/Footer'
-import logo from '../assets/logo.png' // make sure this file exists
+import logo from '../assets/tmdlogo.png' // make sure this file exists
 
 export default function Home() {
   const heroStyle = {
