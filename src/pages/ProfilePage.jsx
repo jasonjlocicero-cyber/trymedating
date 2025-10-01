@@ -11,7 +11,7 @@ export default function ProfilePage({ me }) {
   // UI state
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [justSaved, setJustSaved] = useState(false) // NEW: flash "Saved ✓"
+  const [justSaved, setJustSaved] = useState(false) // flash "Saved ✓"
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
 
@@ -51,6 +51,10 @@ export default function ProfilePage({ me }) {
   // helpers
   function normalizeHandle(v) {
     return v.toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 32)
+  }
+  function initials() {
+    const s = (displayName || handle || '?').trim()
+    return s ? s[0].toUpperCase() : '?'
   }
 
   const age = useMemo(() => {
@@ -217,10 +221,8 @@ export default function ProfilePage({ me }) {
       setOk('Profile saved')
       showToast('Profile saved ✓')
 
-      // NEW: Flash "Saved ✓" for 2s
       setJustSaved(true)
       const t = setTimeout(() => setJustSaved(false), 2000)
-      // Guard against component unmount
       return () => clearTimeout(t)
     } catch (e) {
       setErr(e.message || 'Save failed')
@@ -267,8 +269,8 @@ export default function ProfilePage({ me }) {
   const completePct = Math.round((completeCount / completenessItems.length) * 100)
 
   return (
-    <main className="container" style={{ padding: 24, maxWidth: 860 }}>
-      <h1 style={{ marginBottom: 8 }}>Profile</h1>
+    <main className="container profile-narrow" style={{ padding: 24 }}>
+      <h1 style={{ margin-bottom: 8, marginBottom: 8 }}>Profile</h1>
 
       {/* Completeness */}
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
@@ -328,10 +330,28 @@ export default function ProfilePage({ me }) {
             {err && <div className="helper-error">{err}</div>}
             {ok && <div className="helper-success">{ok}</div>}
 
-            {/* Avatar */}
+            {/* Photo row: Uploader + live preview bubble */}
             <section>
-              <div className="field-label">Photo</div>
-              <AvatarUploader userId={me.id} value={avatarUrl} onChange={setAvatarUrl} />
+              <div className="section-title">Photo</div>
+              <div className="row-split">
+                <AvatarUploader userId={me.id} value={avatarUrl} onChange={setAvatarUrl} />
+                <div>
+                  <div className="avatar-frame">
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={displayName || handle || 'avatar'}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div className="avatar-initials">{initials()}</div>
+                    )}
+                  </div>
+                  <div className="helper-muted" style={{ textAlign:'center', marginTop:6 }}>
+                    Profile preview
+                  </div>
+                </div>
+              </div>
             </section>
 
             {/* Display name */}
@@ -468,9 +488,9 @@ export default function ProfilePage({ me }) {
 
             {/* Invite QR + Copy buttons */}
             <section className="card" style={{ padding:12, marginTop: 4 }}>
-              <div className="qr-row">
+              <div className="qr-wrap">
                 <div>
-                  <div style={{ fontWeight:800, marginBottom:4 }}>Your invite QR</div>
+                  <div className="section-title">Your invite QR</div>
                   <div className="helper-muted">
                     Share in person. Scanning sends people to: <code>/auth?invite=…</code>
                   </div>
@@ -493,8 +513,11 @@ export default function ProfilePage({ me }) {
                     )}
                   </div>
                 </div>
-                <div className="qr-card">
-                  <QRCode value={inviteUrl} size={120} />
+                <div>
+                  <div className="qr-card">
+                    <QRCode value={inviteUrl} size={128} />
+                  </div>
+                  <div className="qr-caption">Scan to join via your invite</div>
                 </div>
               </div>
             </section>
