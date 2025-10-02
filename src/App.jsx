@@ -16,6 +16,13 @@ import PublicProfile from './pages/PublicProfile'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 import Contact from './pages/Contact'
+import ChatLauncher from './components/ChatLauncher'
+
+// ...inside App component return:
+<>
+  {/* your header/routes/footer as-is */}
+  <ChatLauncher />
+</>
 
 // Optional: placeholder for messages
 function MessagesHub() {
