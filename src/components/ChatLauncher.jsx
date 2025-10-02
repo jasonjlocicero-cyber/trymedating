@@ -1,13 +1,15 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
 /**
- * A floating chat launcher:
- * - Shows a 💬 bubble at bottom-right
- * - Click to open your inbox picker (recent partners), or open a specific partner via window event
- * - Listens for: window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
+ * Floating chat launcher that listens to:
+ *  - window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
+ *  - window.openChat(partnerId?, partnerName?)           // global fallback helper
+ *
+ * Renders a 💬 bubble in the bottom-right. Clicking the bubble toggles open/close.
+ * When open with no partner selected, shows a small “recent chats” picker.
  */
 export default function ChatLauncher() {
   const [me, setMe] = useState(null)
@@ -15,10 +17,10 @@ export default function ChatLauncher() {
   const [partnerId, setPartnerId] = useState(null)
   const [partnerName, setPartnerName] = useState('')
   const [loadingList, setLoadingList] = useState(false)
-  const [recent, setRecent] = useState([]) // [{id, display_name, handle}]
+  const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
 
-  // Load current user once
+  // Load current user
   useEffect(() => {
     let mounted = true
     ;(async () => {
@@ -28,14 +30,40 @@ export default function ChatLauncher() {
     return () => { mounted = false }
   }, [])
 
-  // Load recent chat partners when inbox opens and we have me
+  // Register event listener + global fallback
+  useEffect(() => {
+    function openFromEvent(ev) {
+      const d = ev?.detail || {}
+      if (d.partnerId) {
+        setPartnerId(d.partnerId)
+        setPartnerName(d.partnerName || '')
+      }
+      setOpen(true)
+    }
+    window.addEventListener('open-chat', openFromEvent)
+
+    // global fallback for places where dispatch is awkward
+    window.openChat = function (pId, pName = '') {
+      if (pId) {
+        setPartnerId(pId)
+        setPartnerName(pName || '')
+      }
+      setOpen(true)
+    }
+
+    return () => {
+      window.removeEventListener('open-chat', openFromEvent)
+      // don’t delete window.openChat on unmount in case other code references it
+    }
+  }, [])
+
+  // Load recent threads when inbox opens
   useEffect(() => {
     let cancel = false
-    async function loadRecent() {
+    async function load() {
       if (!open || !me?.id) return
       setLoadingList(true); setErr('')
       try {
-        // Pull last 50 messages involving me
         const { data, error } = await supabase
           .from('messages')
           .select('sender, receiver, created_at')
@@ -44,41 +72,31 @@ export default function ChatLauncher() {
           .limit(50)
         if (error) throw error
 
-        // Build a unique set of "other user" ids by recency
         const seen = new Set()
-        const partnerIds = []
+        const orderedIds = []
         for (const m of data || []) {
-          const other =
-            m.sender === me.id ? m.receiver :
-            m.receiver === me.id ? m.sender : null
-          if (other && !seen.has(other)) {
+          const other = m.sender === me.id ? m.receiver : m.sender
+          if (!seen.has(other)) {
             seen.add(other)
-            partnerIds.push(other)
+            orderedIds.push(other)
           }
-          if (partnerIds.length >= 12) break
+          if (orderedIds.length >= 12) break
         }
-
-        if (partnerIds.length === 0) {
+        if (orderedIds.length === 0) {
           if (!cancel) setRecent([])
           return
         }
 
-        // Fetch profile display_name/handle for those ids
         const { data: profs, error: pErr } = await supabase
           .from('profiles')
           .select('user_id, display_name, handle')
-          .in('user_id', partnerIds)
+          .in('user_id', orderedIds)
         if (pErr) throw pErr
 
-        // Order results by the same recency order
-        const order = new Map(partnerIds.map((id, i) => [id, i]))
+        const rank = new Map(orderedIds.map((id, i) => [id, i]))
         const list = (profs || [])
-          .map(p => ({
-            id: p.user_id,
-            display_name: p.display_name || '',
-            handle: p.handle || ''
-          }))
-          .sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999))
+          .map(p => ({ id: p.user_id, display_name: p.display_name || '', handle: p.handle || '' }))
+          .sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999))
 
         if (!cancel) setRecent(list)
       } catch (e) {
@@ -87,32 +105,15 @@ export default function ChatLauncher() {
         if (!cancel) setLoadingList(false)
       }
     }
-    loadRecent()
+    load()
     return () => { cancel = true }
   }, [open, me?.id])
-
-  // Listen to global event: open-chat
-  useEffect(() => {
-    function handler(ev) {
-      const detail = ev.detail || {}
-      if (detail.partnerId) {
-        setPartnerId(detail.partnerId)
-        setPartnerName(detail.partnerName || '')
-        setOpen(true)
-      } else {
-        // no partner provided: just open the inbox
-        setOpen(true)
-      }
-    }
-    window.addEventListener('open-chat', handler)
-    return () => window.removeEventListener('open-chat', handler)
-  }, [])
 
   const canChat = !!(me?.id && partnerId)
 
   return (
     <>
-      {/* Floating launcher button */}
+      {/* Floating launcher */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -127,14 +128,13 @@ export default function ChatLauncher() {
           background:'#ffffff',
           boxShadow:'0 10px 24px rgba(0,0,0,0.12)',
           display:'grid', placeItems:'center',
-          zIndex: 40,
-          cursor:'pointer'
+          zIndex: 40, cursor:'pointer'
         }}
       >
         <span style={{ fontSize:24 }}>💬</span>
       </button>
 
-      {/* Inbox panel (picker) */}
+      {/* Inbox picker */}
       {open && !partnerId && (
         <div
           style={{
@@ -158,13 +158,9 @@ export default function ChatLauncher() {
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom:8 }}>
-                Pick a recent chat to open:
-              </div>
-
+              <div className="helper-muted" style={{ marginBottom:8 }}>Pick a recent chat:</div>
               {err && <div className="helper-error" style={{ marginBottom:8 }}>{err}</div>}
               {loadingList && <div className="muted">Loading…</div>}
-
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
               )}
@@ -189,9 +185,7 @@ export default function ChatLauncher() {
                           {(p.display_name || p.handle || '?').slice(0,1).toUpperCase()}
                         </div>
                         <div style={{ textAlign:'left' }}>
-                          <div style={{ fontWeight:700 }}>
-                            {p.display_name || 'Unnamed'}
-                          </div>
+                          <div style={{ fontWeight:700 }}>{p.display_name || 'Unnamed'}</div>
                           {p.handle && <div className="muted">@{p.handle}</div>}
                         </div>
                       </div>
@@ -204,22 +198,18 @@ export default function ChatLauncher() {
         </div>
       )}
 
-      {/* The actual chat dock */}
+      {/* Chat dock */}
       {open && canChat && (
         <ChatDock
           me={{ id: me.id }}
           partnerId={partnerId}
           partnerName={partnerName}
           onClose={() => {
-            // Close the dock but keep launcher visible
             setOpen(false)
-            // Keep partner selected so re-opening returns to this thread:
-            // If you prefer clearing, uncomment next line:
+            // keep partnerId to reopen same thread quickly; clear if you prefer:
             // setPartnerId(null)
           }}
-          onUnreadChange={(n) => {
-            // (Optional) could reflect on launcher badge later
-          }}
+          onUnreadChange={() => {}}
         />
       )}
     </>
