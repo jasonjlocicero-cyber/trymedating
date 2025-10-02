@@ -48,7 +48,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
           <img
             src={logo}
             alt="TryMeDating"
-            style={{ width: 44, height: 44, objectFit: 'contain' }}
+            style={{ width: 108, height: 108, objectFit: 'contain' }}
           />
           <div style={{ lineHeight: 1 }}>
             <div style={{ fontWeight: 900, fontSize: 18, color: '#0f172a' }}>TryMeDating</div>
