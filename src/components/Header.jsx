@@ -132,13 +132,21 @@ export default function Header({ me, unread = 0, onSignOut }) {
             </Link>
           ) : (
             <button
-              className="btn btn-secondary"
-              onClick={onSignOut}
-              title="Sign out"
-              aria-label="Sign out"
-            >
-              Sign out
-            </button>
+             type="button"
+             className="btn btn-header"
+             onClick={() => {
+               // Either method works now:
+               // A) Custom event:
+               window.dispatchEvent(new CustomEvent('open-chat', { detail: {} }))
+               // B) Global helper fallback:
+               if (window.openChat) window.openChat()
+            }}
+            aria-label="Open messages"
+            title="Messages"
+          >
+            Messages
+          </button>
+
           )}
         </div>
       </div>
