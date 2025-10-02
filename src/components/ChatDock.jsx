@@ -1,412 +1,359 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
-import ProfileHoverCard from './ProfileHoverCard'
 
-export default function ChatDock({ me, convoId, peer, open, onClose }) {
-  const [messages, setMessages] = useState([])
+/**
+ * EXPECTED TABLE: public.messages
+ * columns: id (uuid), sender_id (uuid), receiver_id (uuid), body (text), created_at (timestamptz), attachment_url (text, nullable)
+ * RLS: users can select messages where sender_id = auth.uid() OR receiver_id = auth.uid()
+ *
+ * PROPS:
+ * - me: { id: string } current user (required)
+ * - partnerId?: string (optional) current open conversation partner; when missing, show nothing
+ * - onClose?: () => void (optional) to close the dock in your UI
+ */
+export default function ChatDock({ me, partnerId, onClose }) {
+  const authed = !!me?.id
+  const canChat = authed && !!partnerId
+
+  const [messages, setMessages] = useState([]) // ascending by time
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
 
-  // typing / delivery
-  const [typingFrom, setTypingFrom] = useState(null)
-  const typingClearTimer = useRef(null)
-  const lastTypingSentAt = useRef(0)
-  const [deliveredMap, setDeliveredMap] = useState({})
-
-  // search state
-  const [q, setQ] = useState('')
-  const [matchIdx, setMatchIdx] = useState(0) // 0-based index across all matches
-  const matchesRef = useRef([]) // [{msgId, elId}, ...]
-
-  // hovercard
-  const [cardOpen, setCardOpen] = useState(false)
-  const [cardTarget, setCardTarget] = useState({ userId: null, handle: null, rect: null })
-
+  const scrollRef = useRef(null)
   const listRef = useRef(null)
-  const inputRef = useRef(null)
 
-  const canSend = useMemo(
-    () => open && me?.id && convoId != null && text.trim().length > 0 && !sending,
-    [open, me?.id, convoId, text, sending]
-  )
+  // formatted partner scope for queries
+  const scope = useMemo(() => {
+    if (!canChat) return null
+    return {
+      orSender: `and(sender_id.eq.${me.id},receiver_id.eq.${partnerId})`,
+      orReceiver: `and(sender_id.eq.${partnerId},receiver_id.eq.${me.id})`
+    }
+  }, [canChat, me?.id, partnerId])
 
-  // ===== Load + realtime =====
+  // helper: scroll to bottom
+  function scrollToBottom(smooth = false) {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTo({
+      top: el.scrollHeight + 1000,
+      behavior: smooth ? 'smooth' : 'auto'
+    })
+  }
+
+  // format time / day dividers
+  function dayLabel(d) {
+    const dt = new Date(d)
+    const now = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    const isSameDay = (a, b) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    const yest = new Date(now)
+    yest.setDate(now.getDate() - 1)
+    if (isSameDay(dt, now)) return 'Today'
+    if (isSameDay(dt, yest)) return 'Yesterday'
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+  }
+
+  // initial load
   useEffect(() => {
-    if (!open || !convoId) { setMessages([]); return }
     let cancel = false
-    ;(async () => {
+    async function load() {
+      if (!canChat) { setMessages([]); return }
+      setLoading(true); setErr('')
+      try {
+        const { data, error } = await supabase
+          .from('messages')
+          .select('*')
+          .or(`${scope.orSender},${scope.orReceiver}`)
+          .order('created_at', { ascending: true })
+          .limit(500)
+        if (error) throw error
+        if (!cancel) {
+          setMessages(data || [])
+          // after first paint, jump to bottom
+          setTimeout(() => scrollToBottom(false), 0)
+        }
+      } catch (e) {
+        if (!cancel) setErr(e.message || 'Failed to load messages')
+      } finally {
+        if (!cancel) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancel = true }
+  }, [canChat, scope])
+
+  // realtime inserts for this 1:1 thread
+  useEffect(() => {
+    if (!canChat) return
+    const channel = supabase.channel(`messages:${me.id}:${partnerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `or(sender_id.eq.${me.id},sender_id.eq.${partnerId})`
+        },
+        (payload) => {
+          const row = payload.new
+          // Make sure it belongs to this conversation (either direction)
+          if (
+            (row.sender_id === me.id && row.receiver_id === partnerId) ||
+            (row.sender_id === partnerId && row.receiver_id === me.id)
+          ) {
+            setMessages(prev => {
+              // avoid dupes if our own optimistic insert shows up
+              if (prev.some(m => m.id === row.id)) return prev
+              const next = [...prev, row].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
+              return next
+            })
+            // smooth scroll on incoming
+            setTimeout(() => scrollToBottom(true), 15)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [canChat, me?.id, partnerId])
+
+  // auto-scroll when local messages change (e.g., optimistic add)
+  useEffect(() => {
+    // heuristic: if user is near bottom, keep them pinned
+    const el = listRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140
+    if (nearBottom) scrollToBottom(true)
+  }, [messages])
+
+  async function sendMessage() {
+    if (!canChat) return
+    const body = text.trim()
+    if (!body) return
+    setSending(true); setErr('')
+    try {
+      // optimistic append (temporary id)
+      const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,7)}`
+      const now = new Date().toISOString()
+      const optimistic = {
+        id: tempId,
+        sender_id: me.id,
+        receiver_id: partnerId,
+        body,
+        created_at: now
+      }
+      setMessages(prev => [...prev, optimistic])
+      setText('')
+      scrollToBottom(true)
+
       const { data, error } = await supabase
         .from('messages')
-        .select('id, convo_id, sender_id, body, created_at, read_at')
-        .eq('convo_id', convoId)
-        .order('created_at', { ascending: true })
-      if (!cancel) {
-        if (error) console.error(error)
-        setMessages(data || [])
-        setTimeout(() => listRef.current?.scrollTo({ top: 9e9 }), 50)
-        markAllIncomingRead(data || [])
-      }
-    })()
-    return () => { cancel = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, convoId])
-
-  useEffect(() => {
-    if (!open || !convoId) return
-    const ch = supabase
-      .channel(`msgs:${convoId}`)
-      .on('postgres_changes',
-        { event:'INSERT', schema:'public', table:'messages', filter:`convo_id=eq.${convoId}` },
-        (payload) => {
-          const m = payload.new
-          setMessages(prev => [...prev, m])
-          setTimeout(() => listRef.current?.scrollTo({ top: 9e9 }), 10)
-          if (m.sender_id !== me?.id) { broadcastDelivered(m.id); markIncomingRead([m.id]) }
+        .insert({
+          sender_id: me.id,
+          receiver_id: partnerId,
+          body
         })
-      .on('postgres_changes',
-        { event:'UPDATE', schema:'public', table:'messages', filter:`convo_id=eq.${convoId}` },
-        (payload) => {
-          const updated = payload.new
-          setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m))
-        })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [open, convoId, me?.id])
-
-  // typing
-  useEffect(() => {
-    if (!open || !convoId) return
-    const ch = supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
-    ch.on('broadcast', { event:'typing' }, (payload) => {
-      const { user_id, handle } = payload?.payload || {}
-      if (!user_id || user_id === me?.id) return
-      setTypingFrom(handle || 'Someone')
-      if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
-      typingClearTimer.current = setTimeout(() => setTypingFrom(null), 2500)
-    })
-    ch.subscribe()
-    return () => {
-      if (typingClearTimer.current) clearTimeout(typingClearTimer.current)
-      supabase.removeChannel(ch)
-    }
-  }, [open, convoId, me?.id])
-
-  function sendTyping() {
-    const now = Date.now()
-    if (now - lastTypingSentAt.current < 1500) return
-    lastTypingSentAt.current = now
-    supabase.channel(`typing:${convoId}`, { config: { broadcast: { self:false } } })
-      .send({ type:'broadcast', event:'typing', payload:{ user_id: me?.id, handle: me?.email || 'Someone' } })
-      .catch(()=>{})
-  }
-
-  // delivery acks
-  useEffect(() => {
-    if (!open || !convoId) return
-    const ch = supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
-    ch.on('broadcast', { event:'delivered' }, (payload) => {
-      const { message_id, from_user } = payload?.payload || {}
-      if (!message_id) return
-      if (from_user && from_user === me?.id) return
-      setDeliveredMap(prev => ({ ...prev, [message_id]: true }))
-    })
-    ch.subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [open, convoId, me?.id])
-
-  function broadcastDelivered(messageId) {
-    supabase.channel(`acks:${convoId}`, { config: { broadcast: { self:false } } })
-      .send({ type:'broadcast', event:'delivered', payload:{ message_id: messageId, from_user: me?.id } })
-      .catch(()=>{})
-  }
-
-  // read receipts
-  async function markIncomingRead(ids) {
-    if (!ids?.length) return
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .in('id', ids)
-      .neq('sender_id', me.id)
-      .is('read_at', null)
-  }
-  async function markAllIncomingRead(list) {
-    const unread = (list || messages).filter(m => m.sender_id !== me?.id && !m.read_at).map(m => m.id)
-    if (unread.length) await markIncomingRead(unread)
-  }
-  useEffect(() => {
-    if (!open) return
-    const onFocus = () => markAllIncomingRead()
-    window.addEventListener('focus', onFocus)
-    const t = setInterval(markAllIncomingRead, 3000)
-    return () => { window.removeEventListener('focus', onFocus); clearInterval(t) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, messages, me?.id])
-
-  // send
-  async function handleSend(e) {
-    e?.preventDefault?.()
-    if (!canSend) return
-    setSending(true)
-    try {
-      const body = text.trim()
-      const { error } = await supabase.from('messages').insert({
-        convo_id: convoId,
-        sender_id: me.id,
-        body
-      })
+        .select('*')
+        .single()
       if (error) throw error
-      setText(''); inputRef.current?.focus()
-    } catch (e) {
-      console.error(e); alert('Could not send. Try again.')
-    } finally { setSending(false) }
-  }
 
-  function computeStatus(m, mine) {
-    if (!mine) return { icon:null, read:false }
-    if (m.read_at) return { icon:'✓✓', read:true }
-    if (deliveredMap[m.id]) return { icon:'✓✓', read:false }
-    return { icon:'✓', read:false }
-  }
-
-  // ===== Hovercard helpers =====
-  function openCardForPeer(e) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setCardTarget({ userId: peer?.id || null, handle: peer?.handle || null, rect })
-    setCardOpen(true)
-  }
-  function openCardForMessage(e, msg) {
-    if (msg.sender_id === me?.id) return
-    e.preventDefault()
-    const rect = e.currentTarget.getBoundingClientRect()
-    setCardTarget({ userId: msg.sender_id, handle: null, rect })
-    setCardOpen(true)
-  }
-
-  // ===== Search helpers =====
-  const normQ = q.trim().toLowerCase()
-  useEffect(() => {
-    // rebuild match index whenever messages or query change
-    const next = []
-    if (normQ && messages.length) {
-      messages.forEach((m) => {
-        const idxs = findAllIdxs(m.body || '', normQ)
-        idxs.forEach((_i, localIdx) => {
-          next.push({ msgId: m.id, elId: `msg-${m.id}`, localIdx })
-        })
+      // replace optimistic with real row
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === tempId)
+        if (idx === -1) return prev
+        const next = [...prev]
+        next[idx] = data
+        return next
       })
+    } catch (e) {
+      // mark optimistic bubble as failed
+      setMessages(prev => prev.map(m =>
+        m.id?.startsWith('tmp_') ? { ...m, _failed: true } : m
+      ))
+      setErr(e.message || 'Failed to send')
+    } finally {
+      setSending(false)
     }
-    matchesRef.current = next
-    if (next.length === 0) setMatchIdx(0)
-    else setMatchIdx((i) => Math.min(i, next.length - 1))
-    // scroll to current if still valid
-    setTimeout(() => {
-      if (next.length) scrollToMatch(matchesRef.current[matchIdx]?.elId, listRef)
-    }, 0)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normQ, messages])
-
-  const totalMatches = matchesRef.current.length
-  const hasMatches = totalMatches > 0
-
-  function goto(delta) {
-    if (!hasMatches) return
-    const next = (matchIdx + delta + totalMatches) % totalMatches
-    setMatchIdx(next)
-    const m = matchesRef.current[next]
-    if (m) scrollToMatch(m.elId, listRef)
   }
 
-  // ===== UI =====
-  if (!open) return null
+  function onKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (!sending) sendMessage()
+    }
+  }
+
+  // group by day
+  const threaded = useMemo(() => {
+    const out = []
+    let lastDay = ''
+    for (const m of messages) {
+      const day = dayLabel(m.created_at)
+      if (day !== lastDay) {
+        out.push({ _divider: true, label: day, _id: `divider-${day}-${out.length}` })
+        lastDay = day
+      }
+      out.push(m)
+    }
+    return out
+  }, [messages])
+
+  if (!authed || !partnerId) {
+    return null
+  }
 
   return (
-    <div style={wrap}>
-      <div style={dock}>
-        {/* Header */}
-        <div style={head}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
-            <strong>Messages</strong>
-            {peer?.handle && (
-              <button
-                type="button"
-                className="linklike"
-                onMouseEnter={openCardForPeer}
-                onFocus={openCardForPeer}
-                onClick={openCardForPeer}
-                style={{ color:'var(--muted)' }}
-                title={`@${peer.handle}`}
-              >
-                @{peer.handle}
-              </button>
-            )}
-          </div>
-          <button className="btn" onClick={onClose}>Close</button>
-        </div>
-
-        {/* Search bar */}
-        <div style={searchBar}>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search in conversation…"
-            style={searchInput}
-          />
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            <div className="muted" style={{ fontSize:12, minWidth:72, textAlign:'right' }}>
-              {normQ ? (hasMatches ? `${matchIdx+1}/${totalMatches}` : '0/0') : ''}
-            </div>
-            <button className="btn" onClick={() => goto(-1)} disabled={!hasMatches} title="Previous">Prev</button>
-            <button className="btn" onClick={() => goto(+1)} disabled={!hasMatches} title="Next">Next</button>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div ref={listRef} style={list}>
-          {!convoId && (
-            <div className="muted" style={{ padding:12, textAlign:'center' }}>
-              No conversation selected.
-            </div>
-          )}
-
-          {convoId && messages.map(m => {
-            const mine = m.sender_id === me?.id
-            const status = computeStatus(m, mine)
-            const isOther = !mine
-            return (
-              <div
-                key={m.id}
-                id={`msg-${m.id}`}
-                onContextMenu={(e) => openCardForMessage(e, m)}
-                onTouchStart={(e) => openCardForMessage(e, m)}
-                style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}
-              >
-                <div style={{
-                  maxWidth:'78%', margin:'6px 8px', padding:'8px 10px', borderRadius:12,
-                  background: mine ? 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)' : '#fff',
-                  color: mine ? '#fff' : '#111',
-                  border: mine ? '1px solid transparent' : '1px solid var(--border)',
-                  whiteSpace:'pre-wrap', wordBreak:'break-word', position:'relative'
-                }}>
-                  {renderHighlighted(m.body || '', normQ, isOther ? '#111' : '#fff')}
-                  {mine && (
-                    <span style={{
-                      position:'absolute', right:8, bottom:-16, fontSize:12,
-                      color: status.read ? 'var(--primary)' : '#9ca3af'
-                    }}>{status.icon}</span>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-
-          {typingFrom && (
-            <div className="muted" style={{ padding:'4px 10px' }}>{typingFrom} is typing…</div>
-          )}
-        </div>
-
-        {/* Composer */}
-        <form onSubmit={handleSend} style={composer}>
-          <textarea
-            ref={inputRef}
-            rows={1}
-            placeholder={convoId ? 'Type a message…' : 'Open a conversation to chat'}
-            disabled={!convoId}
-            value={text}
-            onChange={(e) => { setText(e.target.value); sendTyping() }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-            style={ta}
-          />
-          <button className="btn btn-primary" type="submit" disabled={!canSend}>Send</button>
-        </form>
+    <div
+      ref={scrollRef}
+      className="chatdock"
+      style={{
+        position:'fixed',
+        right:16, bottom:16,
+        width: 360, maxWidth:'calc(100vw - 24px)',
+        height: 520,
+        display:'flex',
+        flexDirection:'column',
+        background:'#fff',
+        border:'1px solid var(--border)',
+        borderRadius:12,
+        boxShadow:'0 12px 32px rgba(0,0,0,0.12)',
+        overflow:'hidden',
+        zIndex: 50
+      }}
+    >
+      {/* Header */}
+      <div style={{
+        padding:'10px 12px',
+        borderBottom:'1px solid var(--border)',
+        display:'flex', alignItems:'center', justifyContent:'space-between'
+      }}>
+        <div style={{ fontWeight:800 }}>Messages</div>
+        <button
+          className="btn btn-neutral"
+          onClick={onClose}
+          aria-label="Close messages"
+          style={{ padding:'4px 8px' }}
+        >
+          ✕
+        </button>
       </div>
 
-      {/* Hovercard */}
-      <ProfileHoverCard
-        userId={cardTarget.userId}
-        handle={cardTarget.handle}
-        anchorRect={cardTarget.rect}
-        open={cardOpen}
-        onClose={() => setCardOpen(false)}
-      />
+      {/* List */}
+      <div
+        ref={listRef}
+        style={{
+          flex: 1,
+          overflowY:'auto',
+          padding:'10px 12px',
+          background:'#fafafa'
+        }}
+      >
+        {loading && <div className="muted">Loading…</div>}
+        {err && <div className="helper-error" style={{ marginBottom:8 }}>{err}</div>}
+        {!loading && threaded.length === 0 && (
+          <div className="muted">Start the conversation…</div>
+        )}
+
+        {threaded.map((m, idx) => {
+          if (m._divider) {
+            return (
+              <div key={m._id} style={{ textAlign:'center', margin:'8px 0' }}>
+                <span style={{
+                  fontSize:12, color:'var(--muted)',
+                  background:'#fff', padding:'2px 8px', border:'1px solid var(--border)', borderRadius:999
+                }}>
+                  {m.label}
+                </span>
+              </div>
+            )
+          }
+          const mine = m.sender_id === me.id
+          return (
+            <div
+              key={m.id || `temp-${idx}`}
+              style={{
+                display:'flex',
+                justifyContent: mine ? 'flex-end' : 'flex-start',
+                marginBottom: 6
+              }}
+            >
+              <div style={{
+                maxWidth:'78%',
+                background: mine ? 'var(--brand-teal-50, #e6fffb)' : '#fff',
+                border: `1px solid ${mine ? 'rgba(20,184,166,0.35)' : 'var(--border)'}`,
+                padding:'8px 10px',
+                borderRadius: mine ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                fontSize:14,
+                whiteSpace:'pre-wrap',
+                wordBreak:'break-word',
+                position:'relative'
+              }}>
+                {m.body}
+                {m._failed && (
+                  <div style={{ fontSize:11, color:'#b91c1c', marginTop:4 }}>
+                    Failed to send. Check your connection.
+                  </div>
+                )}
+                <div style={{
+                  position:'absolute',
+                  bottom:-16,
+                  right: mine ? 0 : 'auto',
+                  left: mine ? 'auto' : 0,
+                  fontSize:10,
+                  color:'var(--muted)'
+                }}>
+                  {new Date(m.created_at).toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Composer */}
+      <div style={{ borderTop:'1px solid var(--border)', padding:8, background:'#fff' }}>
+        <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
+          <textarea
+            value={text}
+            onChange={(e)=>setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Type a message…  (Enter to send • Shift+Enter = newline)"
+            rows={1}
+            style={{
+              flex:1,
+              resize:'none',
+              padding:'8px 10px',
+              border:'1px solid var(--border)',
+              borderRadius:10,
+              maxHeight:120
+            }}
+          />
+          <button
+            className="btn btn-header"
+            onClick={sendMessage}
+            disabled={sending || !text.trim()}
+            aria-label="Send message"
+            title="Send (Enter)"
+          >
+            Send
+          </button>
+        </div>
+        <div className="helper-muted" style={{ marginTop:4 }}>
+          Enter to send • Shift+Enter for newline
+        </div>
+      </div>
     </div>
   )
 }
-
-/* ========== Helpers ========== */
-
-function findAllIdxs(text, qLower) {
-  const src = String(text || '')
-  if (!qLower) return []
-  const hay = src.toLowerCase()
-  const out = []
-  let pos = 0
-  while (true) {
-    const i = hay.indexOf(qLower, pos)
-    if (i === -1) break
-    out.push(i)
-    pos = i + qLower.length
-  }
-  return out
-}
-
-function renderHighlighted(text, qLower, color) {
-  if (!qLower) return text
-  const hay = String(text || '')
-  const idxs = findAllIdxs(hay, qLower)
-  if (idxs.length === 0) return hay
-  const parts = []
-  let last = 0
-  const len = qLower.length
-  for (let k = 0; k < idxs.length; k++) {
-    const i = idxs[k]
-    if (i > last) parts.push(<span key={`t-${k}-${last}`}>{hay.slice(last, i)}</span>)
-    const seg = hay.slice(i, i + len)
-    parts.push(
-      <mark key={`m-${k}-${i}`} style={{
-        background: 'rgba(255, 231, 150, 0.9)',
-        color,
-        padding: '0 2px',
-        borderRadius: 3
-      }}>{seg}</mark>
-    )
-    last = i + len
-  }
-  if (last < hay.length) parts.push(<span key={`end-${last}`}>{hay.slice(last)}</span>)
-  return <>{parts}</>
-}
-
-function scrollToMatch(elId, listRef) {
-  if (!elId) return
-  const el = document.getElementById(elId)
-  if (el && listRef.current) {
-    const container = listRef.current
-    const top = el.offsetTop - 24
-    container.scrollTo({ top, behavior: 'smooth' })
-    el.animate(
-      [{ transform:'scale(1)' }, { transform:'scale(1.02)' }, { transform:'scale(1)' }],
-      { duration: 600 }
-    )
-  }
-}
-
-/* ========== Styles ========== */
-
-const wrap = { position:'fixed', right:16, bottom:16, zIndex:50 }
-const dock = {
-  width:360, maxHeight:'70vh', background:'#fff', border:'1px solid var(--border)',
-  borderRadius:14, overflow:'hidden', boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
-  display:'grid', gridTemplateRows:'auto auto 1fr auto'
-}
-const head = { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)', background:'#fafafa' }
-const searchBar = { display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, padding:'8px 10px', borderBottom:'1px solid var(--border)', background:'#fff' }
-const searchInput = {
-  flex:1, padding:'8px 10px', borderRadius:8, border:'1px solid var(--border)', background:'#fff'
-}
-const list = { overflowY:'auto', padding:'8px 4px' }
-const composer = { display:'flex', gap:8, padding:'10px', borderTop:'1px solid var(--border)', background:'#fff' }
-const ta = { flex:1, minHeight:38, maxHeight:120, resize:'vertical' }
 
 
 
