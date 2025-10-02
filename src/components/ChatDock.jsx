@@ -9,10 +9,12 @@ import { supabase } from '../lib/supabaseClient'
  *
  * PROPS:
  * - me: { id: string } current user (required)
- * - partnerId?: string (optional) current open conversation partner; when missing, show nothing
- * - onClose?: () => void (optional) to close the dock in your UI
+ * - partnerId?: string (optional) current open conversation partner
+ * - partnerName?: string (optional) for "is typing…" label
+ * - onClose?: () => void (optional)
+ * - onUnreadChange?: (n: number) => void (optional) — get unread count updates
  */
-export default function ChatDock({ me, partnerId, onClose }) {
+export default function ChatDock({ me, partnerId, partnerName, onClose, onUnreadChange }) {
   const authed = !!me?.id
   const canChat = authed && !!partnerId
 
@@ -21,6 +23,14 @@ export default function ChatDock({ me, partnerId, onClose }) {
   const [err, setErr] = useState('')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
+
+  // typing
+  const [partnerTyping, setPartnerTyping] = useState(false)
+  const typingTimerRef = useRef(null)
+  const lastTypingSentRef = useRef(0)
+
+  // unread
+  const [unread, setUnread] = useState(0)
 
   const scrollRef = useRef(null)
   const listRef = useRef(null)
@@ -34,14 +44,17 @@ export default function ChatDock({ me, partnerId, onClose }) {
     }
   }, [canChat, me?.id, partnerId])
 
+  // helper: at-bottom check
+  function isNearBottom() {
+    const el = listRef.current
+    if (!el) return true
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }
   // helper: scroll to bottom
   function scrollToBottom(smooth = false) {
     const el = listRef.current
     if (!el) return
-    el.scrollTo({
-      top: el.scrollHeight + 1000,
-      behavior: smooth ? 'smooth' : 'auto'
-    })
+    el.scrollTo({ top: el.scrollHeight + 1000, behavior: smooth ? 'smooth' : 'auto' })
   }
 
   // format time / day dividers
@@ -64,7 +77,7 @@ export default function ChatDock({ me, partnerId, onClose }) {
   useEffect(() => {
     let cancel = false
     async function load() {
-      if (!canChat) { setMessages([]); return }
+      if (!canChat) { setMessages([]); setUnread(0); onUnreadChange?.(0); return }
       setLoading(true); setErr('')
       try {
         const { data, error } = await supabase
@@ -76,8 +89,12 @@ export default function ChatDock({ me, partnerId, onClose }) {
         if (error) throw error
         if (!cancel) {
           setMessages(data || [])
-          // after first paint, jump to bottom
-          setTimeout(() => scrollToBottom(false), 0)
+          setTimeout(() => {
+            scrollToBottom(false)
+            // you just opened the thread — clear unread
+            setUnread(0)
+            onUnreadChange?.(0)
+          }, 0)
         }
       } catch (e) {
         if (!cancel) setErr(e.message || 'Failed to load messages')
@@ -87,53 +104,124 @@ export default function ChatDock({ me, partnerId, onClose }) {
     }
     load()
     return () => { cancel = true }
-  }, [canChat, scope])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canChat, scope?.orSender, scope?.orReceiver])
 
   // realtime inserts for this 1:1 thread
   useEffect(() => {
     if (!canChat) return
-    const channel = supabase.channel(`messages:${me.id}:${partnerId}`)
+    const chanId = `messages:${me.id}:${partnerId}`
+    const channel = supabase.channel(chanId)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `or(sender_id.eq.${me.id},sender_id.eq.${partnerId})`
-        },
+        { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const row = payload.new
-          // Make sure it belongs to this conversation (either direction)
-          if (
+          // only keep if this row is for the exact 1:1
+          const isOurs =
             (row.sender_id === me.id && row.receiver_id === partnerId) ||
             (row.sender_id === partnerId && row.receiver_id === me.id)
-          ) {
-            setMessages(prev => {
-              // avoid dupes if our own optimistic insert shows up
-              if (prev.some(m => m.id === row.id)) return prev
-              const next = [...prev, row].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
-              return next
+          if (!isOurs) return
+
+          setMessages(prev => {
+            if (prev.some(m => m.id === row.id)) return prev
+            const next = [...prev, row].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
+            return next
+          })
+
+          // Unread logic: only count partner's messages
+          const mine = row.sender_id === me.id
+          const windowHidden = typeof document !== 'undefined' ? document.hidden : false
+          const away = !isNearBottom() || windowHidden
+          if (!mine && away) {
+            setUnread(u => {
+              const nu = u + 1
+              onUnreadChange?.(nu)
+              return nu
             })
-            // smooth scroll on incoming
-            setTimeout(() => scrollToBottom(true), 15)
+          }
+
+          // smooth scroll if you're already near bottom
+          if (isNearBottom()) {
+            setTimeout(() => scrollToBottom(true), 10)
           }
         }
       )
       .subscribe()
 
+    return () => { supabase.removeChannel(channel) }
+  }, [canChat, me?.id, partnerId, onUnreadChange])
+
+  // Subscribe to typing via Realtime broadcast (no DB)
+  useEffect(() => {
+    if (!canChat) return
+    const chanId = `typing:${me.id}:${partnerId}`
+    const channel = supabase.channel(chanId, { config: { broadcast: { self: false } } })
+
+    channel
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        if (payload?.from === partnerId && payload?.to === me.id) {
+          setPartnerTyping(true)
+          // clear after 3s of silence
+          if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+          typingTimerRef.current = setTimeout(() => setPartnerTyping(false), 3000)
+        }
+      })
+      .on('broadcast', { event: 'stop_typing' }, (payload) => {
+        if (payload?.from === partnerId && payload?.to === me.id) {
+          setPartnerTyping(false)
+        }
+      })
+      .subscribe()
+
     return () => {
       supabase.removeChannel(channel)
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
     }
   }, [canChat, me?.id, partnerId])
 
-  // auto-scroll when local messages change (e.g., optimistic add)
+  // send typing broadcast (throttled to 1 every 1s)
+  function sendTyping() {
+    const now = Date.now()
+    if (now - lastTypingSentRef.current < 1000) return
+    lastTypingSentRef.current = now
+    supabase.channel(`typing:${me.id}:${partnerId}`, { config: { broadcast: { self: false } } })
+      .send({ type: 'broadcast', event: 'typing', payload: { from: me.id, to: partnerId } })
+  }
+  function sendStopTyping() {
+    supabase.channel(`typing:${me.id}:${partnerId}`, { config: { broadcast: { self: false } } })
+      .send({ type: 'broadcast', event: 'stop_typing', payload: { from: me.id, to: partnerId } })
+  }
+
+  // auto-scroll when local messages change (keep pinned if near bottom)
   useEffect(() => {
-    // heuristic: if user is near bottom, keep them pinned
     const el = listRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140
-    if (nearBottom) scrollToBottom(true)
+    if (isNearBottom()) scrollToBottom(true)
   }, [messages])
+
+  // clear unread when user returns focus or scrolls to bottom
+  useEffect(() => {
+    function handleFocus() {
+      if (isNearBottom()) {
+        setUnread(0)
+        onUnreadChange?.(0)
+      }
+    }
+    function handleScroll() {
+      if (isNearBottom()) {
+        setUnread(0)
+        onUnreadChange?.(0)
+      }
+    }
+    window.addEventListener('focus', handleFocus)
+    const el = listRef.current
+    if (el) el.addEventListener('scroll', handleScroll)
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      if (el) el.removeEventListener('scroll', handleScroll)
+    }
+  }, [onUnreadChange])
 
   async function sendMessage() {
     if (!canChat) return
@@ -153,6 +241,7 @@ export default function ChatDock({ me, partnerId, onClose }) {
       }
       setMessages(prev => [...prev, optimistic])
       setText('')
+      sendStopTyping()
       scrollToBottom(true)
 
       const { data, error } = await supabase
@@ -192,7 +281,7 @@ export default function ChatDock({ me, partnerId, onClose }) {
     }
   }
 
-  // group by day
+  // group by day for dividers
   const threaded = useMemo(() => {
     const out = []
     let lastDay = ''
@@ -236,7 +325,24 @@ export default function ChatDock({ me, partnerId, onClose }) {
         borderBottom:'1px solid var(--border)',
         display:'flex', alignItems:'center', justifyContent:'space-between'
       }}>
-        <div style={{ fontWeight:800 }}>Messages</div>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ fontWeight:800 }}>Messages</div>
+          {unread > 0 && (
+            <span
+              title={`${unread} unread`}
+              style={{
+                display:'inline-block',
+                minWidth:18, height:18, lineHeight:'18px',
+                textAlign:'center',
+                fontSize:11, fontWeight:700,
+                background:'#ef4444', color:'#fff',
+                borderRadius:999, padding:'0 6px'
+              }}
+            >
+              {unread}
+            </span>
+          )}
+        </div>
         <button
           className="btn btn-neutral"
           onClick={onClose}
@@ -255,6 +361,9 @@ export default function ChatDock({ me, partnerId, onClose }) {
           overflowY:'auto',
           padding:'10px 12px',
           background:'#fafafa'
+        }}
+        onScroll={() => {
+          if (isNearBottom() && unread) { setUnread(0); onUnreadChange?.(0) }
         }}
       >
         {loading && <div className="muted">Loading…</div>}
@@ -319,13 +428,35 @@ export default function ChatDock({ me, partnerId, onClose }) {
         })}
       </div>
 
+      {/* Typing indicator */}
+      {partnerTyping && (
+        <div style={{
+          padding:'4px 12px',
+          background:'#fff',
+          color:'var(--muted)',
+          fontSize:12,
+          borderTop:'1px dashed var(--border)'
+        }}>
+          {partnerName ? `${partnerName} is typing…` : 'Typing…'}
+        </div>
+      )}
+
       {/* Composer */}
       <div style={{ borderTop:'1px solid var(--border)', padding:8, background:'#fff' }}>
         <div style={{ display:'flex', gap:8, alignItems:'flex-end' }}>
           <textarea
             value={text}
-            onChange={(e)=>setText(e.target.value)}
-            onKeyDown={onKeyDown}
+            onChange={(e)=>{ setText(e.target.value); if (e.target.value) sendTyping(); else sendStopTyping() }}
+            onBlur={sendStopTyping}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!sending) sendMessage()
+              } else {
+                // send typing on any keystroke that isn't enter
+                if (e.key !== 'Enter') sendTyping()
+              }
+            }}
             placeholder="Type a message…  (Enter to send • Shift+Enter = newline)"
             rows={1}
             style={{
@@ -354,6 +485,7 @@ export default function ChatDock({ me, partnerId, onClose }) {
     </div>
   )
 }
+
 
 
 
