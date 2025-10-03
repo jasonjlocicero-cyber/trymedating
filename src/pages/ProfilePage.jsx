@@ -1,16 +1,7 @@
 // src/pages/ProfilePage.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import QRCode from 'react-qr-code'
 import { supabase } from '../lib/supabaseClient'
-
-/**
- * Profile (restored features)
- * - Safe auth hydration (no false "sign in" prompt)
- * - Load/save profile row (display_name, handle, city, bio, public_profile)
- * - Progress bar for completion
- * - QR code for your public profile URL (shown here, not on public page)
- */
 
 export default function ProfilePage() {
   const [authLoading, setAuthLoading] = useState(true)
@@ -60,10 +51,7 @@ export default function ProfilePage() {
           .select('display_name, handle, city, bio, public_profile')
           .eq('user_id', user.id)
           .single()
-        if (error) {
-          // PGRST116 = no rows; new account — not an error
-          if (error.code !== 'PGRST116') throw error
-        }
+        if (error && error.code !== 'PGRST116') throw error
         if (!cancel && data) {
           setDisplayName(data.display_name || '')
           setHandle(data.handle || '')
@@ -85,7 +73,6 @@ export default function ProfilePage() {
     if (!user?.id) return
     setSaving(true); setSaveErr(''); setMsg('')
     try {
-      // Basic handle guard
       const cleanHandle = (handle || '').trim().toLowerCase()
       if (publicProfile && !cleanHandle) {
         throw new Error('Add a handle to make your profile public.')
@@ -113,7 +100,7 @@ export default function ProfilePage() {
     }
   }
 
-  // Progress bar — counts filled fields + public toggle
+  // Progress bar
   const progress = useMemo(() => {
     const parts = [
       displayName?.trim(),
@@ -262,7 +249,7 @@ export default function ProfilePage() {
           </form>
         </div>
 
-        {/* Right: QR & tips */}
+        {/* Right: QR & tips (image QR fallback — no extra package needed) */}
         <aside style={{
           flex:'0 0 300px',
           minWidth: 260,
@@ -280,10 +267,12 @@ export default function ProfilePage() {
           {handle && (
             <div style={{ display:'grid', placeItems:'center', marginBottom: 12 }}>
               <div style={{ background:'#fff', padding:12, border:'1px solid var(--border)', borderRadius: 8 }}>
-                <QRCode
-                  value={publicUrl}
-                  size={180}
-                  style={{ display: 'block', height: 'auto', width: '180px' }}
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(publicUrl)}`}
+                  alt="Invite QR code"
+                  width={180}
+                  height={180}
+                  style={{ display:'block' }}
                 />
               </div>
             </div>
