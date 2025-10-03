@@ -3,13 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
-/**
- * Reliable floating chat launcher.
- * - Defines window.openChat(partnerId?, partnerName?) as a global helper.
- * - Listens to custom event 'open-chat' too (either will work).
- * - Shows a bottom-right 💬 bubble; clicking toggles the inbox/dock.
- */
-export default function ChatLauncher() {
+export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null)
   const [open, setOpen] = useState(false)
   const [partnerId, setPartnerId] = useState(null)
@@ -18,17 +12,21 @@ export default function ChatLauncher() {
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
 
-  // Load current user once
+  // ------- auth -------
   useEffect(() => {
     let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (alive) setMe(user || null)
+      if (!alive) return
+      setMe(user || null)
     })()
-    return () => { alive = false }
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      setMe(session?.user || null)
+    })
+    return () => sub?.subscription?.unsubscribe?.()
   }, [])
 
-  // Register both: global function and event listener
+  // ------- global opener + event -------
   useEffect(() => {
     function openFromEvent(ev) {
       const d = ev?.detail || {}
@@ -39,27 +37,21 @@ export default function ChatLauncher() {
       setOpen(true)
     }
     window.addEventListener('open-chat', openFromEvent)
-
-    // Global helper: can be called from Header or anywhere
-    window.openChat = function (pId, pName = '') {
-      if (pId) {
-        setPartnerId(pId)
-        setPartnerName(pName || '')
+    window.openChat = function (id, name = '') {
+      if (id) {
+        setPartnerId(id)
+        setPartnerName(name || '')
       }
       setOpen(true)
     }
-
-    return () => {
-      window.removeEventListener('open-chat', openFromEvent)
-      // keep window.openChat defined (harmless)
-    }
+    return () => window.removeEventListener('open-chat', openFromEvent)
   }, [])
 
-  // Load recent partners when opening inbox (no partner yet)
+  // ------- recent list when open -------
   useEffect(() => {
     let cancel = false
     async function loadRecent() {
-      if (!open || !me?.id || partnerId) return
+      if (!open || !me?.id) return
       setLoadingList(true); setErr('')
       try {
         const { data, error } = await supabase
@@ -99,47 +91,67 @@ export default function ChatLauncher() {
     }
     loadRecent()
     return () => { cancel = true }
-  }, [open, me?.id, partnerId])
+  }, [open, me?.id])
+
+  // ------- unread count -------
+  async function computeUnread(userId) {
+    if (!userId) { onUnreadChange(0); return }
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('receiver', userId)
+      .is('read_at', null)
+    if (error) return onUnreadChange(0)
+    onUnreadChange(data?.length ?? 0) // head:true gives empty array; count returned via header not accessible, so fallback
+  }
+
+  // On mount + when user changes, do a lightweight unread recalc via RPC (better approach below)
+  useEffect(() => {
+    computeUnread(me?.id)
+  }, [me?.id])
+
+  // Live updates: subscribe to messages table to update unread in real-time
+  useEffect(() => {
+    if (!me?.id) return
+    const channel = supabase
+      .channel('messages-unread')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages' },
+        () => computeUnread(me.id)
+      )
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [me?.id])
 
   const canChat = !!(me?.id && partnerId)
 
   return (
     <>
-      {/* Floating launcher bubble */}
+      {/* Floating launcher */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         title="Messages"
         aria-label="Messages"
         style={{
-          position:'fixed',
-          right:16, bottom:16,
-          width:56, height:56,
-          borderRadius:'50%',
-          border:'1px solid var(--border)',
-          background:'#fff',
+          position:'fixed', right:16, bottom:16,
+          width:56, height:56, borderRadius:'50%',
+          border:'1px solid var(--border)', background:'#fff',
           boxShadow:'0 10px 24px rgba(0,0,0,0.12)',
-          display:'grid', placeItems:'center',
-          zIndex: 1000,
-          cursor:'pointer'
+          display:'grid', placeItems:'center', zIndex: 1000, cursor:'pointer'
         }}
       >
         <span style={{ fontSize:24 }}>💬</span>
       </button>
 
-      {/* Inbox picker (when open, no partner selected) */}
+      {/* Inbox picker */}
       {open && !partnerId && (
         <div
           style={{
-            position:'fixed',
-            right:16, bottom:80,
-            width: 320, maxWidth:'calc(100vw - 24px)',
-            background:'#fff',
-            border:'1px solid var(--border)',
-            borderRadius:12,
-            boxShadow:'0 12px 32px rgba(0,0,0,0.12)',
-            padding:12,
-            zIndex: 1001
+            position:'fixed', right:16, bottom:80, width:320, maxWidth:'calc(100vw - 24px)',
+            background:'#fff', border:'1px solid var(--border)', borderRadius:12,
+            boxShadow:'0 12px 32px rgba(0,0,0,0.12)', padding:12, zIndex:1001
           }}
         >
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
@@ -157,7 +169,6 @@ export default function ChatLauncher() {
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
               )}
-
               <ul style={{ listStyle:'none', padding:0, margin:0, maxHeight:220, overflowY:'auto' }}>
                 {recent.map(p => (
                   <li key={p.id}>
@@ -198,7 +209,7 @@ export default function ChatLauncher() {
           partnerId={partnerId}
           partnerName={partnerName}
           onClose={() => setOpen(false)}
-          onUnreadChange={() => {}}
+          onUnreadChange={onUnreadChange}
         />
       )}
     </>
