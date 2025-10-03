@@ -22,17 +22,11 @@ import Privacy from './pages/Privacy'
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
-  const [unread, setUnread] = useState(0)
 
   return (
     <div style={{ background: '#fff' }}>
       {/* HERO */}
-      <section
-        style={{
-          padding: '52px 0 36px',
-          borderBottom: '1px solid var(--border)'
-        }}
-      >
+      <section style={{ padding: '52px 0 36px', borderBottom: '1px solid var(--border)' }}>
         <div
           className="container"
           style={{
@@ -74,26 +68,17 @@ function Home({ me }) {
           >
             {!authed ? (
               <>
-                <Link className="btn btn-primary" to="/auth">
-                  Sign in / Sign up
-                </Link>
-                <a className="btn btn-neutral" href="#how-it-works">
-                  How it works
-                </a>
+                <Link className="btn btn-primary" to="/auth">Sign in / Sign up</Link>
+                <a className="btn btn-neutral" href="#how-it-works">How it works</a>
               </>
             ) : (
               <>
-                <Link className="btn btn-primary" to="/profile">
-                  Go to Profile
-                </Link>
-                <Link className="btn btn-secondary" to="/settings">
-                  Settings
-                </Link>
+                <Link className="btn btn-primary" to="/profile">Go to Profile</Link>
+                <Link className="btn btn-secondary" to="/settings">Settings</Link>
               </>
             )}
           </div>
 
-          {/* small reassurance row */}
           <div
             style={{
               display: 'flex',
@@ -124,13 +109,13 @@ function Home({ me }) {
           >
             <FeatureCard
               title="Create"
-              text="Set up a simple profile with your name, city, and a short intro. Choose if it’s public."
+              text="Set up a simple profile with your name and a short intro. Choose if it’s public."
               icon="🧩"
             />
             <FeatureCard
               title="Share"
               text="Show your personal QR code to people you’ve met in real life to invite them."
-              icon="� QR"
+              icon="🔗"
             />
             <FeatureCard
               title="Match"
@@ -186,19 +171,13 @@ function Home({ me }) {
           {!authed ? (
             <>
               <div className="muted">Ready to begin?</div>
-              <Link className="btn btn-primary" to="/auth">
-                Get started
-              </Link>
+              <Link className="btn btn-primary" to="/auth">Get started</Link>
             </>
           ) : (
             <>
               <div className="muted">Continue where you left off:</div>
-              <Link className="btn btn-primary" to="/profile">
-                Edit Profile
-              </Link>
-              <Link className="btn btn-neutral" to="/settings">
-                Review Settings
-              </Link>
+              <Link className="btn btn-primary" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-neutral" to="/settings">Review Settings</Link>
             </>
           )}
         </div>
@@ -207,7 +186,7 @@ function Home({ me }) {
   )
 }
 
-/** Small presentational card for features */
+/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -250,6 +229,9 @@ export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
 
+  // NEW: unread count for messaging badge
+  const [unread, setUnread] = useState(0)
+
   useEffect(() => {
     let mounted = true
 
@@ -273,9 +255,6 @@ export default function App() {
   async function handleSignOut() {
     await supabase.auth.signOut()
   }
-
-  // If you later wire unread badge from ChatDock, thread it here:
-  const unread = 0
 
   return (
     <>
@@ -315,12 +294,11 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble (keep exactly one instance) */}
-      <ChatLauncher />
+      {/* Bottom-right chat bubble (render once) */}
+      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </>
   )
 }
-
 
 
 
