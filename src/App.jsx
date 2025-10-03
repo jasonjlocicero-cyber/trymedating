@@ -18,10 +18,10 @@ import Terms from './pages/Terms'
 import Contact from './pages/Contact'
 import ChatLauncher from './components/ChatLauncher'
 
-// ...inside App component return:
+// ...inside your App component’s JSX:
 <>
-  {/* your header/routes/footer as-is */}
-  <ChatLauncher />
+  {/* Header, Routes, Footer ... */}
+  <ChatLauncher /> {/* one instance only */}
 </>
 
 // Optional: placeholder for messages
