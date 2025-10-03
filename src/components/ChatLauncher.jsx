@@ -4,12 +4,10 @@ import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
 /**
- * Floating chat launcher that listens to:
- *  - window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
- *  - window.openChat(partnerId?, partnerName?)           // global fallback helper
- *
- * Renders a 💬 bubble in the bottom-right. Clicking the bubble toggles open/close.
- * When open with no partner selected, shows a small “recent chats” picker.
+ * Reliable floating chat launcher.
+ * - Defines window.openChat(partnerId?, partnerName?) as a global helper.
+ * - Listens to custom event 'open-chat' too (either will work).
+ * - Shows a bottom-right 💬 bubble; clicking toggles the inbox/dock.
  */
 export default function ChatLauncher() {
   const [me, setMe] = useState(null)
@@ -20,17 +18,17 @@ export default function ChatLauncher() {
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
 
-  // Load current user
+  // Load current user once
   useEffect(() => {
-    let mounted = true
+    let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (mounted) setMe(user || null)
+      if (alive) setMe(user || null)
     })()
-    return () => { mounted = false }
+    return () => { alive = false }
   }, [])
 
-  // Register event listener + global fallback
+  // Register both: global function and event listener
   useEffect(() => {
     function openFromEvent(ev) {
       const d = ev?.detail || {}
@@ -42,7 +40,7 @@ export default function ChatLauncher() {
     }
     window.addEventListener('open-chat', openFromEvent)
 
-    // global fallback for places where dispatch is awkward
+    // Global helper: can be called from Header or anywhere
     window.openChat = function (pId, pName = '') {
       if (pId) {
         setPartnerId(pId)
@@ -53,15 +51,15 @@ export default function ChatLauncher() {
 
     return () => {
       window.removeEventListener('open-chat', openFromEvent)
-      // don’t delete window.openChat on unmount in case other code references it
+      // keep window.openChat defined (harmless)
     }
   }, [])
 
-  // Load recent threads when inbox opens
+  // Load recent partners when opening inbox (no partner yet)
   useEffect(() => {
     let cancel = false
-    async function load() {
-      if (!open || !me?.id) return
+    async function loadRecent() {
+      if (!open || !me?.id || partnerId) return
       setLoadingList(true); setErr('')
       try {
         const { data, error } = await supabase
@@ -73,30 +71,24 @@ export default function ChatLauncher() {
         if (error) throw error
 
         const seen = new Set()
-        const orderedIds = []
+        const order = []
         for (const m of data || []) {
           const other = m.sender === me.id ? m.receiver : m.sender
-          if (!seen.has(other)) {
-            seen.add(other)
-            orderedIds.push(other)
-          }
-          if (orderedIds.length >= 12) break
+          if (other && !seen.has(other)) { seen.add(other); order.push(other) }
+          if (order.length >= 12) break
         }
-        if (orderedIds.length === 0) {
-          if (!cancel) setRecent([])
-          return
-        }
+        if (!order.length) { if (!cancel) setRecent([]); return }
 
         const { data: profs, error: pErr } = await supabase
           .from('profiles')
           .select('user_id, display_name, handle')
-          .in('user_id', orderedIds)
+          .in('user_id', order)
         if (pErr) throw pErr
 
-        const rank = new Map(orderedIds.map((id, i) => [id, i]))
+        const rank = new Map(order.map((id, i) => [id, i]))
         const list = (profs || [])
           .map(p => ({ id: p.user_id, display_name: p.display_name || '', handle: p.handle || '' }))
-          .sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999))
+          .sort((a,b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999))
 
         if (!cancel) setRecent(list)
       } catch (e) {
@@ -105,15 +97,15 @@ export default function ChatLauncher() {
         if (!cancel) setLoadingList(false)
       }
     }
-    load()
+    loadRecent()
     return () => { cancel = true }
-  }, [open, me?.id])
+  }, [open, me?.id, partnerId])
 
   const canChat = !!(me?.id && partnerId)
 
   return (
     <>
-      {/* Floating launcher */}
+      {/* Floating launcher bubble */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -125,16 +117,17 @@ export default function ChatLauncher() {
           width:56, height:56,
           borderRadius:'50%',
           border:'1px solid var(--border)',
-          background:'#ffffff',
+          background:'#fff',
           boxShadow:'0 10px 24px rgba(0,0,0,0.12)',
           display:'grid', placeItems:'center',
-          zIndex: 40, cursor:'pointer'
+          zIndex: 1000,
+          cursor:'pointer'
         }}
       >
         <span style={{ fontSize:24 }}>💬</span>
       </button>
 
-      {/* Inbox picker */}
+      {/* Inbox picker (when open, no partner selected) */}
       {open && !partnerId && (
         <div
           style={{
@@ -146,7 +139,7 @@ export default function ChatLauncher() {
             borderRadius:12,
             boxShadow:'0 12px 32px rgba(0,0,0,0.12)',
             padding:12,
-            zIndex: 45
+            zIndex: 1001
           }}
         >
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
@@ -204,11 +197,7 @@ export default function ChatLauncher() {
           me={{ id: me.id }}
           partnerId={partnerId}
           partnerName={partnerName}
-          onClose={() => {
-            setOpen(false)
-            // keep partnerId to reopen same thread quickly; clear if you prefer:
-            // setPartnerId(null)
-          }}
+          onClose={() => setOpen(false)}
           onUnreadChange={() => {}}
         />
       )}
