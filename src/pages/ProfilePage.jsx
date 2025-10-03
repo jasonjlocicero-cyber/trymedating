@@ -10,7 +10,6 @@ export default function ProfilePage() {
   // form state
   const [displayName, setDisplayName] = useState('')
   const [handle, setHandle] = useState('')
-  const [city, setCity] = useState('')
   const [bio, setBio] = useState('')
   const [publicProfile, setPublicProfile] = useState(false)
 
@@ -48,14 +47,13 @@ export default function ProfilePage() {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('display_name, handle, city, bio, public_profile')
+          .select('display_name, handle, bio, public_profile')
           .eq('user_id', user.id)
           .single()
         if (error && error.code !== 'PGRST116') throw error
         if (!cancel && data) {
           setDisplayName(data.display_name || '')
           setHandle(data.handle || '')
-          setCity(data.city || '')
           setBio(data.bio || '')
           setPublicProfile(!!data.public_profile)
         }
@@ -82,7 +80,6 @@ export default function ProfilePage() {
         user_id: user.id,
         display_name: displayName || null,
         handle: cleanHandle || null,
-        city: city || null,
         bio: bio || '',
         public_profile: !!publicProfile
       }
@@ -102,16 +99,10 @@ export default function ProfilePage() {
 
   // Progress bar
   const progress = useMemo(() => {
-    const parts = [
-      displayName?.trim(),
-      handle?.trim(),
-      city?.trim(),
-      bio?.trim(),
-      publicProfile ? 'yes' : ''
-    ]
+    const parts = [displayName?.trim(), handle?.trim(), bio?.trim(), publicProfile ? 'yes' : '']
     const filled = parts.filter(Boolean).length
     return Math.round((filled / parts.length) * 100)
-  }, [displayName, handle, city, bio, publicProfile])
+  }, [displayName, handle, bio, publicProfile])
 
   const publicUrl = useMemo(() => {
     if (!handle) return ''
@@ -194,16 +185,6 @@ export default function ProfilePage() {
             </label>
 
             <label className="form-label">
-              City
-              <input
-                className="input"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="City, State"
-              />
-            </label>
-
-            <label className="form-label">
               Bio
               <textarea
                 className="input"
@@ -249,7 +230,7 @@ export default function ProfilePage() {
           </form>
         </div>
 
-        {/* Right: QR & tips (image QR fallback — no extra package needed) */}
+        {/* Right: QR */}
         <aside style={{
           flex:'0 0 300px',
           minWidth: 260,
