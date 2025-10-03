@@ -22,6 +22,7 @@ import Privacy from './pages/Privacy'
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
+  const [unread, setUnread] = useState(0)
 
   return (
     <div style={{ background: '#fff' }}>
