@@ -3,10 +3,10 @@ import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/tmdlogo.png'
 
+// Open a specific chat from anywhere (optional helper)
 export function openChatWith(partnerId, partnerName = '') {
-  // open a specific chat from anywhere
+  if (window.openChat) return window.openChat(partnerId, partnerName)
   window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
-  if (window.openChat) window.openChat(partnerId, partnerName) // fallback
 }
 
 export default function Header({ me, unread = 0, onSignOut }) {
@@ -19,7 +19,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
       <div className="container" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'10px 0' }}>
         {/* Brand */}
         <Link to="/" style={{ display:'flex', alignItems:'center', gap:10, textDecoration:'none' }} aria-label="Go to home">
-          <img src={logo} alt="TryMeDating" style={{ width:108, height:108, objectFit:'contain' }} />
+          <img src={logo} alt="TryMeDating" style={{ width:150, height:150, objectFit:'contain' }} />
           <div style={{ lineHeight:1 }}>
             <div style={{ fontWeight:900, fontSize:18, color:'#0f172a' }}>TryMeDating</div>
             <div className="muted" style={{ fontSize:12 }}>meet intentionally</div>
@@ -41,9 +41,8 @@ export default function Header({ me, unread = 0, onSignOut }) {
             type="button"
             className="btn btn-header"
             onClick={() => {
-              // open the launcher (works whether ChatLauncher caught the event or not)
-              window.dispatchEvent(new CustomEvent('open-chat', { detail: {} }))
-              if (window.openChat) window.openChat()
+              if (window.openChat) window.openChat()           // primary path
+              else window.dispatchEvent(new CustomEvent('open-chat', { detail: {} })) // fallback
             }}
             aria-label="Open messages"
             title="Messages"
@@ -76,5 +75,4 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   )
 }
-
 
