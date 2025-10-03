@@ -2,13 +2,37 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
-export default function ChatDock({ me, partnerId, partnerName = '', onClose, onUnreadChange = () => {} }) {
+/**
+ * ChatDock with:
+ * - Typing indicator via Supabase Realtime broadcast channel (no DB needed)
+ * - Send status (sending/failed retry)
+ * - Auto-mark as read for incoming messages in open thread
+ * - Enter to send, Shift+Enter for newline, Esc to close
+ */
+
+export default function ChatDock({
+  me,
+  partnerId,
+  partnerName = '',
+  onClose,
+  onUnreadChange = () => {}
+}) {
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
-  const listRef = useRef(null)
+  const [peerTyping, setPeerTyping] = useState(false)
 
-  // load initial
+  const listRef = useRef(null)
+  const inputRef = useRef(null)
+  const typingTimerRef = useRef(null)
+  const threadKey = useMemo(() => {
+    // deterministic thread key independent of who starts it
+    const a = String(me.id)
+    const b = String(partnerId)
+    return a < b ? `${a}-${b}` : `${b}-${a}`
+  }, [me.id, partnerId])
+
+  // ---- Load messages for this thread ----
   useEffect(() => {
     let cancel = false
     async function load() {
@@ -16,16 +40,14 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
       const { data, error } = await supabase
         .from('messages')
         .select('id, sender, receiver, body, created_at, read_at')
-        .or(`and(sender.eq.${me.id},receiver.eq.${partnerId}),and(sender.eq.${partnerId},receiver.eq.${me.id})`)
+        .or(
+          `and(sender.eq.${me.id},receiver.eq.${partnerId}),and(sender.eq.${partnerId},receiver.eq.${me.id})`
+        )
         .order('created_at', { ascending: true })
       if (!cancel) {
-        if (error) {
-          setMessages([])
-        } else {
-          setMessages(data || [])
-        }
+        setMessages(error ? [] : data || [])
         setLoading(false)
-        // mark unread from partner as read
+        // mark incoming as read
         markThreadRead()
       }
     }
@@ -34,28 +56,30 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, partnerId])
 
-  // realtime
+  // ---- Realtime inserts/updates for this thread ----
   useEffect(() => {
-    const ch = supabase.channel(`msg-${me.id}-${partnerId}`)
-      .on('postgres_changes',
+    const ch = supabase
+      .channel(`msg-${me.id}-${partnerId}`)
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
+        payload => {
           const m = payload.new
-          const isCurrentThread =
+          const isCurrent =
             (m.sender === me.id && m.receiver === partnerId) ||
             (m.sender === partnerId && m.receiver === me.id)
-          if (isCurrentThread) {
-            setMessages((prev) => [...prev, m])
-            // Auto-mark as read if it's to me
-            if (m.receiver === me.id && !m.read_at) {
-              markThreadRead()
-            }
+          if (!isCurrent) return
+          setMessages(prev => [...prev, m])
+          // if it's incoming to me, mark as read
+          if (m.receiver === me.id && !m.read_at) {
+            markThreadRead()
           }
-          // ask parent to recalc unread globally
+          // let parent recompute unread
           onUnreadChange && onUnreadChange()
         }
       )
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         () => onUnreadChange && onUnreadChange()
       )
@@ -64,30 +88,99 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, partnerId])
 
-  // autoscroll
+  // ---- Typing indicator via Realtime broadcast ----
+  useEffect(() => {
+    const typingChannel = supabase.channel(`typing:${threadKey}`)
+
+    typingChannel
+      .on('broadcast', { event: 'typing' }, payload => {
+        const from = payload?.payload?.from
+        // Only show if partner is typing (not me)
+        if (from && from !== me.id) {
+          setPeerTyping(true)
+          // hide after 2.5s if no more typing pings
+          window.clearTimeout(typingTimerRef.current)
+          typingTimerRef.current = window.setTimeout(() => setPeerTyping(false), 2500)
+        }
+      })
+      .subscribe()
+
+    return () => {
+      window.clearTimeout(typingTimerRef.current)
+      supabase.removeChannel(typingChannel)
+    }
+  }, [threadKey, me.id])
+
+  // helper to ping typing
+  function broadcastTyping() {
+    // small throttle via timeout on keypress below
+    supabase.channel(`typing:${threadKey}`).send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { from: me.id, at: Date.now() }
+    })
+  }
+
+  // ---- Auto-scroll ----
   useEffect(() => {
     if (!listRef.current) return
     listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [messages.length])
+  }, [messages.length, peerTyping])
 
+  // ---- Send message with optimistic UI ----
   async function send(e) {
     e?.preventDefault?.()
     const body = text.trim()
     if (!body) return
+
+    // optimistic local row
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const optimistic = {
+      id: tempId,
+      sender: me.id,
+      receiver: partnerId,
+      body,
+      created_at: new Date().toISOString(),
+      read_at: null,
+      _status: 'sending'
+    }
+    setMessages(prev => [...prev, optimistic])
     setText('')
-    const { error } = await supabase.from('messages').insert({
+
+    const { data, error } = await supabase.from('messages').insert({
       sender: me.id,
       receiver: partnerId,
       body
-    })
-    if (error) {
-      // put text back on failure
-      setText(body)
+    }).select('id, sender, receiver, body, created_at, read_at').single()
+
+    if (error || !data) {
+      // mark failed
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+    } else {
+      // replace temp with server row
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...data } : m)
+      )
     }
   }
 
+  // retry for failed optimistic messages
+  async function retrySend(failedMsg) {
+    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
+    const { data, error } = await supabase.from('messages').insert({
+      sender: me.id,
+      receiver: partnerId,
+      body: failedMsg.body
+    }).select('id, sender, receiver, body, created_at, read_at').single()
+    if (error || !data) {
+      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
+    } else {
+      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...data } : m))
+    }
+  }
+
+  // mark all incoming (partner -> me) as read
   async function markThreadRead() {
-    // mark all incoming from partner to me as read
     await supabase
       .from('messages')
       .update({ read_at: new Date().toISOString() })
@@ -97,7 +190,33 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
     onUnreadChange && onUnreadChange()
   }
 
+  // key handling: Enter to send, Shift+Enter newline, Esc close
+  function onKeyDown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onClose && onClose()
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      send()
+      return
+    }
+  }
+
+  function onInputChange(e) {
+    setText(e.target.value)
+    // very light throttle to avoid spamming channel
+    if (!typingTimerRef.current) {
+      broadcastTyping()
+      typingTimerRef.current = window.setTimeout(() => {
+        typingTimerRef.current = null
+      }, 800)
+    }
+  }
+
   const title = useMemo(() => partnerName || 'Conversation', [partnerName])
+  const canType = !!me?.id
 
   return (
     <div
@@ -124,6 +243,8 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
         {!loading && messages.length === 0 && <div className="muted">Say hi 👋</div>}
         {messages.map(m => {
           const mine = m.sender === me.id
+          const failed = m._status === 'failed'
+          const sending = m._status === 'sending'
           return (
             <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8 }}>
               <div
@@ -135,30 +256,66 @@ export default function ChatDock({ me, partnerId, partnerName = '', onClose, onU
                 }}
               >
                 <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
-                <div className="muted" style={{ fontSize:11, marginTop:4, textAlign: mine ? 'right' : 'left' }}>
-                  {new Date(m.created_at).toLocaleString()}
-                  {!mine && m.read_at && ' · read'}
+                <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                  <span>{new Date(m.created_at).toLocaleString()}</span>
+                  {mine && sending && <span>· sending…</span>}
+                  {mine && failed && (
+                    <>
+                      <span style={{ color:'#ef4444' }}>· failed</span>
+                      <button
+                        type="button"
+                        className="btn btn-neutral"
+                        style={{ padding:'0 6px', fontSize:11 }}
+                        onClick={() => retrySend(m)}
+                      >
+                        retry
+                      </button>
+                    </>
+                  )}
+                  {!mine && m.read_at && <span>· read</span>}
                 </div>
               </div>
             </div>
           )
         })}
+
+        {/* typing indicator */}
+        {peerTyping && (
+          <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
+            <div
+              style={{
+                maxWidth:'60%', padding:'6px 10px', borderRadius:12,
+                background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
+                fontSize:12
+              }}
+            >
+              typing…
+            </div>
+          </div>
+        )}
       </div>
 
       {/* composer */}
       <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
-        <input
+        <textarea
+          ref={inputRef}
           className="input"
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Type a message…"
-          style={{ flex:1 }}
+          onChange={onInputChange}
+          onKeyDown={onKeyDown}
+          placeholder={canType ? 'Type a message…' : 'Sign in to message'}
+          style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+          disabled={!canType}
         />
-        <button className="btn btn-primary" type="submit">Send</button>
+        <button className="btn btn-primary" type="submit" disabled={!canType || !text.trim()}>
+          Send
+        </button>
       </form>
     </div>
   )
 }
+
+
 
 
 
