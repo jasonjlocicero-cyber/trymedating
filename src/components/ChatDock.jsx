@@ -3,11 +3,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock with:
- * - Typing indicator via Supabase Realtime broadcast channel (no DB needed)
- * - Send status (sending/failed retry)
- * - Auto-mark as read for incoming messages in open thread
- * - Enter to send, Shift+Enter for newline, Esc to close
+ * ChatDock
+ * - Typing indicator (broadcast)
+ * - Send status (sending/failed + retry)
+ * - Auto-mark read on open + new incoming
+ * - NEW: delete own messages (with confirm)
+ * - Enter to send, Shift+Enter newline, Esc close
  */
 
 export default function ChatDock({
@@ -21,12 +22,13 @@ export default function ChatDock({
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
+  const [menuOpenFor, setMenuOpenFor] = useState(null) // message id for ⋯ menu
 
   const listRef = useRef(null)
   const inputRef = useRef(null)
   const typingTimerRef = useRef(null)
+
   const threadKey = useMemo(() => {
-    // deterministic thread key independent of who starts it
     const a = String(me.id)
     const b = String(partnerId)
     return a < b ? `${a}-${b}` : `${b}-${a}`
@@ -47,7 +49,6 @@ export default function ChatDock({
       if (!cancel) {
         setMessages(error ? [] : data || [])
         setLoading(false)
-        // mark incoming as read
         markThreadRead()
       }
     }
@@ -56,7 +57,7 @@ export default function ChatDock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, partnerId])
 
-  // ---- Realtime inserts/updates for this thread ----
+  // ---- Realtime inserts/updates/deletes ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me.id}-${partnerId}`)
@@ -70,11 +71,7 @@ export default function ChatDock({
             (m.sender === partnerId && m.receiver === me.id)
           if (!isCurrent) return
           setMessages(prev => [...prev, m])
-          // if it's incoming to me, mark as read
-          if (m.receiver === me.id && !m.read_at) {
-            markThreadRead()
-          }
-          // let parent recompute unread
+          if (m.receiver === me.id && !m.read_at) markThreadRead()
           onUnreadChange && onUnreadChange()
         }
       )
@@ -83,37 +80,41 @@ export default function ChatDock({
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         () => onUnreadChange && onUnreadChange()
       )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'messages' },
+        payload => {
+          const deletedId = payload.old?.id
+          if (!deletedId) return
+          setMessages(prev => prev.filter(m => m.id !== deletedId))
+          onUnreadChange && onUnreadChange()
+        }
+      )
       .subscribe()
     return () => supabase.removeChannel(ch)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, partnerId])
 
-  // ---- Typing indicator via Realtime broadcast ----
+  // ---- Typing indicator via broadcast ----
   useEffect(() => {
     const typingChannel = supabase.channel(`typing:${threadKey}`)
-
     typingChannel
       .on('broadcast', { event: 'typing' }, payload => {
         const from = payload?.payload?.from
-        // Only show if partner is typing (not me)
         if (from && from !== me.id) {
           setPeerTyping(true)
-          // hide after 2.5s if no more typing pings
           window.clearTimeout(typingTimerRef.current)
           typingTimerRef.current = window.setTimeout(() => setPeerTyping(false), 2500)
         }
       })
       .subscribe()
-
     return () => {
       window.clearTimeout(typingTimerRef.current)
       supabase.removeChannel(typingChannel)
     }
   }, [threadKey, me.id])
 
-  // helper to ping typing
   function broadcastTyping() {
-    // small throttle via timeout on keypress below
     supabase.channel(`typing:${threadKey}`).send({
       type: 'broadcast',
       event: 'typing',
@@ -127,13 +128,12 @@ export default function ChatDock({
     listRef.current.scrollTop = listRef.current.scrollHeight
   }, [messages.length, peerTyping])
 
-  // ---- Send message with optimistic UI ----
+  // ---- Send (optimistic) ----
   async function send(e) {
     e?.preventDefault?.()
     const body = text.trim()
     if (!body) return
 
-    // optimistic local row
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
       id: tempId,
@@ -154,17 +154,12 @@ export default function ChatDock({
     }).select('id, sender, receiver, body, created_at, read_at').single()
 
     if (error || !data) {
-      // mark failed
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
     } else {
-      // replace temp with server row
-      setMessages(prev =>
-        prev.map(m => m.id === tempId ? { ...data } : m)
-      )
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
     }
   }
 
-  // retry for failed optimistic messages
   async function retrySend(failedMsg) {
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
     const { data, error } = await supabase.from('messages').insert({
@@ -179,7 +174,24 @@ export default function ChatDock({
     }
   }
 
-  // mark all incoming (partner -> me) as read
+  // ---- Delete own message ----
+  async function deleteMessage(id) {
+    setMenuOpenFor(null)
+    if (!id) return
+    const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
+    if (!yes) return
+    // Optimistic remove
+    const prev = messages
+    setMessages(prev => prev.filter(m => m.id !== id))
+    const { error } = await supabase.from('messages').delete().eq('id', id)
+    if (error) {
+      // rollback on error
+      setMessages(prev)
+      alert(error.message || 'Failed to delete message')
+    }
+  }
+
+  // ---- Mark incoming as read ----
   async function markThreadRead() {
     await supabase
       .from('messages')
@@ -190,7 +202,7 @@ export default function ChatDock({
     onUnreadChange && onUnreadChange()
   }
 
-  // key handling: Enter to send, Shift+Enter newline, Esc close
+  // ---- keyboard helpers ----
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -206,7 +218,7 @@ export default function ChatDock({
 
   function onInputChange(e) {
     setText(e.target.value)
-    // very light throttle to avoid spamming channel
+    // lightweight throttle
     if (!typingTimerRef.current) {
       broadcastTyping()
       typingTimerRef.current = window.setTimeout(() => {
@@ -245,8 +257,9 @@ export default function ChatDock({
           const mine = m.sender === me.id
           const failed = m._status === 'failed'
           const sending = m._status === 'sending'
+          const showMenu = mine && !sending && !failed
           return (
-            <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8 }}>
+            <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
               <div
                 style={{
                   maxWidth:'78%', padding:'8px 10px', borderRadius: 12,
@@ -254,6 +267,7 @@ export default function ChatDock({
                   color: mine ? '#fff' : '#0f172a',
                   border: mine ? 'none' : '1px solid var(--border)'
                 }}
+                onMouseLeave={() => setMenuOpenFor(null)}
               >
                 <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
                 <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
@@ -274,6 +288,52 @@ export default function ChatDock({
                   )}
                   {!mine && m.read_at && <span>· read</span>}
                 </div>
+
+                {/* ⋯ menu trigger */}
+                {showMenu && (
+                  <button
+                    type="button"
+                    className="btn btn-neutral"
+                    onClick={() => setMenuOpenFor(menuOpenFor === m.id ? null : m.id)}
+                    title="More"
+                    style={{
+                      position:'absolute',
+                      top: -6,
+                      right: mine ? -6 : 'auto',
+                      left: mine ? 'auto' : -6,
+                      padding: '0 6px',
+                      fontSize: 12
+                    }}
+                  >
+                    ⋯
+                  </button>
+                )}
+
+                {/* menu */}
+                {menuOpenFor === m.id && (
+                  <div
+                    style={{
+                      position:'absolute',
+                      top: 18,
+                      right: mine ? -6 : 'auto',
+                      left: mine ? 'auto' : -6,
+                      background:'#fff',
+                      border:'1px solid var(--border)',
+                      borderRadius:8,
+                      boxShadow:'0 8px 18px rgba(0,0,0,0.12)',
+                      padding:6,
+                      zIndex: 5
+                    }}
+                  >
+                    <button
+                      className="btn btn-neutral"
+                      style={{ width: '100%' }}
+                      onClick={() => deleteMessage(m.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -298,16 +358,14 @@ export default function ChatDock({
       {/* composer */}
       <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
         <textarea
-          ref={inputRef}
           className="input"
           value={text}
           onChange={onInputChange}
           onKeyDown={onKeyDown}
-          placeholder={canType ? 'Type a message…' : 'Sign in to message'}
+          placeholder="Type a message…"
           style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
-          disabled={!canType}
         />
-        <button className="btn btn-primary" type="submit" disabled={!canType || !text.trim()}>
+        <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
           Send
         </button>
       </form>
