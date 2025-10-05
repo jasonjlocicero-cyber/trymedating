@@ -16,22 +16,48 @@ export default function Header({ me, unread = 0, onSignOut }) {
 
   return (
     <header style={{ position:'sticky', top:0, zIndex:30, background:'#fff', borderBottom:'1px solid var(--border)' }}>
-      <div className="container" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'10px 0' }}>
-        {/* Brand (single logo + tagline) */}
+      <div
+        className="container"
+        style={{
+          display:'flex',
+          alignItems:'center',
+          justifyContent:'space-between',
+          gap:12,
+          padding:'10px 0'
+        }}
+      >
+        {/* Brand: logo with large tagline underneath */}
         <Link
           to="/"
-          style={{ display:'flex', alignItems:'center', gap:10, textDecoration:'none' }}
+          style={{
+            display:'flex',
+            flexDirection:'column',
+            alignItems:'center',
+            textDecoration:'none',
+            lineHeight:1
+          }}
           aria-label="Go to home"
         >
-          {/* Use the actual logo only once (smaller, header-friendly size) */}
           <img
             src={logo}
             alt="TryMeDating"
-            style={{ height: 44, width: 'auto', objectFit:'contain', display:'block' }}
+            style={{
+              height: 80,
+              width: 'auto',
+              objectFit:'contain',
+              display:'block'
+            }}
           />
-          {/* Only the tagline (remove the duplicate 'TryMeDating' text) */}
-          <div style={{ lineHeight:1 }}>
-            <div className="muted" style={{ fontSize:12 }}>meet intentionally</div>
+          <div
+            style={{
+              fontWeight: 800,
+              fontSize: 108,
+              color:'#0f172a',
+              marginTop: 8,
+              textAlign: 'center'
+            }}
+          >
+            meet intentionally
           </div>
         </Link>
 
@@ -61,9 +87,20 @@ export default function Header({ me, unread = 0, onSignOut }) {
               <span
                 title={`${unread} unread`}
                 style={{
-                  position:'absolute', top:-6, right:-6, minWidth:18, height:18, lineHeight:'18px',
-                  textAlign:'center', fontSize:11, fontWeight:700, background:'#ef4444', color:'#fff',
-                  borderRadius:999, padding:'0 6px', boxShadow:'0 1px 3px rgba(0,0,0,0.2)'
+                  position:'absolute',
+                  top:-6,
+                  right:-6,
+                  minWidth:18,
+                  height:18,
+                  lineHeight:'18px',
+                  textAlign:'center',
+                  fontSize:11,
+                  fontWeight:700,
+                  background:'#ef4444',
+                  color:'#fff',
+                  borderRadius:999,
+                  padding:'0 6px',
+                  boxShadow:'0 1px 3px rgba(0,0,0,0.2)'
                 }}
               >
                 {unread}
@@ -74,7 +111,12 @@ export default function Header({ me, unread = 0, onSignOut }) {
           {!authed ? (
             <Link className="btn btn-primary" to="/auth" style={isActive('/auth')}>Sign in</Link>
           ) : (
-            <button className="btn btn-secondary" onClick={onSignOut} title="Sign out" aria-label="Sign out">
+            <button
+              className="btn btn-secondary"
+              onClick={onSignOut}
+              title="Sign out"
+              aria-label="Sign out"
+            >
               Sign out
             </button>
           )}
