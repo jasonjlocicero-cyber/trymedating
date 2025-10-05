@@ -17,11 +17,20 @@ export default function Header({ me, unread = 0, onSignOut }) {
   return (
     <header style={{ position:'sticky', top:0, zIndex:30, background:'#fff', borderBottom:'1px solid var(--border)' }}>
       <div className="container" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, padding:'10px 0' }}>
-        {/* Brand */}
-        <Link to="/" style={{ display:'flex', alignItems:'center', gap:10, textDecoration:'none' }} aria-label="Go to home">
-          <img src={logo} alt="TryMeDating" style={{ width:150, height:150, objectFit:'contain' }} />
+        {/* Brand (single logo + tagline) */}
+        <Link
+          to="/"
+          style={{ display:'flex', alignItems:'center', gap:10, textDecoration:'none' }}
+          aria-label="Go to home"
+        >
+          {/* Use the actual logo only once (smaller, header-friendly size) */}
+          <img
+            src={logo}
+            alt="TryMeDating"
+            style={{ height: 44, width: 'auto', objectFit:'contain', display:'block' }}
+          />
+          {/* Only the tagline (remove the duplicate 'TryMeDating' text) */}
           <div style={{ lineHeight:1 }}>
-            <div style={{ fontWeight:900, fontSize:18, color:'#0f172a' }}>TryMeDating</div>
             <div className="muted" style={{ fontSize:12 }}>meet intentionally</div>
           </div>
         </Link>
@@ -36,13 +45,12 @@ export default function Header({ me, unread = 0, onSignOut }) {
 
         {/* Right controls */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {/* SINGLE Messages button */}
           <button
             type="button"
             className="btn btn-header"
             onClick={() => {
-              if (window.openChat) window.openChat()           // primary path
-              else window.dispatchEvent(new CustomEvent('open-chat', { detail: {} })) // fallback
+              if (window.openChat) window.openChat()
+              else window.dispatchEvent(new CustomEvent('open-chat', { detail: {} }))
             }}
             aria-label="Open messages"
             title="Messages"
@@ -75,4 +83,3 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   )
 }
-
