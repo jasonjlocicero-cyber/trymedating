@@ -51,10 +51,11 @@ export default function Header({ me, unread = 0, onSignOut }) {
           <div
             style={{
               fontWeight: 700,
-              fontSize: 20,       // visually matches logo height
-              color:'#0f172a',
+              fontSize: 20,
+              color:'#f9735b',   // brand coral/orange
               marginTop: 6,
-              textAlign: 'center'
+              textAlign: 'center',
+              letterSpacing: 0.5
             }}
           >
             meet intentionally
