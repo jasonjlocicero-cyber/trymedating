@@ -26,7 +26,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
           padding:'10px 0'
         }}
       >
-        {/* Brand: logo with large tagline underneath */}
+        {/* Brand: logo with tagline underneath */}
         <Link
           to="/"
           style={{
@@ -34,7 +34,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
             flexDirection:'column',
             alignItems:'center',
             textDecoration:'none',
-            lineHeight:1
+            lineHeight:1.1
           }}
           aria-label="Go to home"
         >
@@ -50,10 +50,10 @@ export default function Header({ me, unread = 0, onSignOut }) {
           />
           <div
             style={{
-              fontWeight: 800,
-              fontSize: 108,
+              fontWeight: 700,
+              fontSize: 20,       // visually matches logo height
               color:'#0f172a',
-              marginTop: 8,
+              marginTop: 6,
               textAlign: 'center'
             }}
           >
