@@ -1,5 +1,5 @@
 // src/components/Header.jsx
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import logo from '../assets/tmdlogo.png'
 
@@ -14,6 +14,13 @@ export default function Header({ me, unread = 0, onSignOut }) {
   const authed = !!me?.id
   const isActive = (to) => (loc.pathname === to ? { opacity: 1 } : {})
 
+  // fade-in animation for tagline
+  const [fadeIn, setFadeIn] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setFadeIn(true), 200)
+    return () => clearTimeout(t)
+  }, [])
+
   return (
     <header style={{ position:'sticky', top:0, zIndex:30, background:'#fff', borderBottom:'1px solid var(--border)' }}>
       <div
@@ -26,7 +33,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
           padding:'10px 0'
         }}
       >
-        {/* Brand: logo with tagline underneath */}
+        {/* Brand: logo with animated tagline underneath */}
         <Link
           to="/"
           style={{
@@ -52,10 +59,14 @@ export default function Header({ me, unread = 0, onSignOut }) {
             style={{
               fontWeight: 700,
               fontSize: 20,
-              color:'#f9735b',   // brand coral/orange
+              color:'#f9735b',
               marginTop: 6,
               textAlign: 'center',
-              letterSpacing: 0.5
+              letterSpacing: 0.5,
+              opacity: fadeIn ? 1 : 0,
+              transform: fadeIn ? 'translateY(0px)' : 'translateY(8px)',
+              transition: 'opacity 1.4s ease, transform 1.4s ease',
+              textShadow: fadeIn ? '0 0 8px rgba(249,115,91,0.35)' : 'none'
             }}
           >
             meet intentionally
@@ -126,3 +137,4 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   )
 }
+
