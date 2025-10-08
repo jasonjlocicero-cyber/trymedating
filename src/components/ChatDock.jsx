@@ -10,13 +10,21 @@ import { supabase } from '../lib/supabaseClient'
  * - Delete own messages (with confirm)
  * - Report partner (header + ⋯ on partner messages)
  * - Pagination: loads latest 50, "Load older" for history
- * - Accept / Reject banner shown when connection pending (teal/coral)
+ * - Connection flow: none → Connect → pending_in|pending_out → accepted
  * - Composer always visible; Send disabled until accepted
- * - Header buttons: ✓ teal, Report amber, ✕ coral
+ * - Attachments: images/files uploaded to storage bucket 'chat-uploads'
+ * - Header buttons colorized: ✓ (teal), Report (amber), ✕ (coral)
  */
 
 const PAGE_SIZE = 50
 const REPORT_CATEGORIES = ['spam', 'harassment', 'fake', 'scam', 'other']
+
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_FILE_SIZE  = 25 * 1024 * 1024 // 25MB
+
+function isImage(mime) {
+  return typeof mime === 'string' && mime.startsWith('image/')
+}
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
@@ -36,11 +44,8 @@ async function reportUser({ reporterId, reportedId }) {
     category,
     details
   })
-  if (error) {
-    alert(error.message || 'Failed to submit report')
-  } else {
-    alert('Report submitted. Thank you for helping keep the community safe.')
-  }
+  if (error) alert(error.message || 'Failed to submit report')
+  else alert('Report submitted. Thank you for helping keep the community safe.')
 }
 
 export default function ChatDock({
@@ -102,6 +107,97 @@ export default function ChatDock({
     el.scrollTop = el.scrollTop + delta
   }
 
+  // ---- Upload helpers ----
+  async function uploadToStorage(file) {
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'bin'
+    const path = `${me.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const { error: upErr } = await supabase.storage
+      .from('chat-uploads')
+      .upload(path, file, { upsert: false, contentType: file.type })
+    if (upErr) throw upErr
+    const { data: pub } = supabase.storage.from('chat-uploads').getPublicUrl(path)
+    return { url: pub?.publicUrl, path }
+  }
+
+  async function sendAttachmentMessage({ file, kind }) {
+    if (!partnerId) return
+    if (kind === 'image' && file.size > MAX_IMAGE_SIZE) {
+      alert('Image too large. Max 10MB.')
+      return
+    }
+    if (kind === 'file' && file.size > MAX_FILE_SIZE) {
+      alert('File too large. Max 25MB.')
+      return
+    }
+    if (connStatus !== 'accepted') {
+      alert('You need to accept the connection before sending. Use the Accept button above.')
+      return
+    }
+
+    // optimistic bubble
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const optimistic = {
+      id: tempId,
+      sender: me.id,
+      recipient: partnerId,
+      body: '',
+      created_at: new Date().toISOString(),
+      read_at: null,
+      kind,
+      media_url: 'uploading...',
+      media_name: file.name,
+      media_mime: file.type,
+      media_size: file.size,
+      _status: 'sending'
+    }
+    setMessages(prev => [...prev, optimistic])
+
+    try {
+      const { url } = await uploadToStorage(file)
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          sender: me.id,
+          recipient: partnerId,
+          body: '',
+          kind,
+          media_url: url,
+          media_name: file.name,
+          media_mime: file.type,
+          media_size: file.size
+        })
+        .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
+        .single()
+
+      if (error || !data) {
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      } else {
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
+      }
+    } catch (err) {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      alert(err.message || 'Upload failed')
+    } finally {
+      setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)
+    }
+  }
+
+  function onPickImage(e) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const kind = isImage(f.type) ? 'image' : 'file'
+    sendAttachmentMessage({ file: f, kind })
+    e.target.value = ''
+  }
+
+  function onPickFile(e) {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const kind = isImage(f.type) ? 'image' : 'file'
+    sendAttachmentMessage({ file: f, kind })
+    e.target.value = ''
+  }
+
   // ---- Load latest messages (initial) ----
   const loadInitial = useCallback(async () => {
     if (!me?.id || !partnerId) {
@@ -114,7 +210,7 @@ export default function ChatDock({
     setLoading(true)
     const { data, error } = await supabase
       .from('messages')
-      .select('id, sender, recipient, body, created_at, read_at')
+      .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
       .or(
         `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
       )
@@ -148,7 +244,7 @@ export default function ChatDock({
 
     const { data, error } = await supabase
       .from('messages')
-      .select('id, sender, recipient, body, created_at, read_at')
+      .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
       .or(
         `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
       )
@@ -178,15 +274,18 @@ export default function ChatDock({
     loadInitial()
   }, [loadInitial])
 
-  // ---- Load connection status for this pair ----
+  // ---- Load connection status for this pair (pick newest row) ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
       if (!me?.id || !partnerId) { setConnStatus('none'); return }
       const { data, error } = await supabase
         .from('connection_requests')
-        .select('requester, recipient, status')
+        .select('requester, recipient, status, decided_at, created_at')
         .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
+        .order('decided_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
       if (cancel) return
@@ -348,6 +447,11 @@ export default function ChatDock({
       body,
       created_at: new Date().toISOString(),
       read_at: null,
+      kind: 'text',
+      media_url: null,
+      media_name: null,
+      media_mime: null,
+      media_size: null,
       _status: 'sending'
     }
     setMessages(prev => {
@@ -361,8 +465,9 @@ export default function ChatDock({
     const { data, error } = await supabase.from('messages').insert({
       sender: me.id,
       recipient: partnerId,
-      body
-    }).select('id, sender, recipient, body, created_at, read_at').single()
+      body,
+      kind: 'text'
+    }).select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size').single()
 
     if (error || !data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
@@ -381,8 +486,13 @@ export default function ChatDock({
     const { data, error } = await supabase.from('messages').insert({
       sender: me.id,
       recipient: partnerId,
-      body: failedMsg.body
-    }).select('id, sender, recipient, body, created_at, read_at').single()
+      body: failedMsg.body,
+      kind: failedMsg.kind || 'text',
+      media_url: failedMsg.media_url || null,
+      media_name: failedMsg.media_name || null,
+      media_mime: failedMsg.media_mime || null,
+      media_size: failedMsg.media_size || null
+    }).select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size').single()
     if (error || !data) {
       setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
     } else {
@@ -396,18 +506,16 @@ export default function ChatDock({
     if (!id) return
     const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
     if (!yes) return
-    // Snapshot for rollback
     const snapshot = prevSnapshotRef.current
     setMessages(prev => prev.filter(m => m.id !== id))
     const { error } = await supabase.from('messages').delete().eq('id', id)
     if (error) {
-      // rollback on error
       setMessages(snapshot)
       alert(error.message || 'Failed to delete message')
     }
   }
 
-  // ---- Accept / Reject helpers ----
+  // ---- Accept / Reject / Request helpers ----
   async function acceptConnection() {
     const { error } = await supabase
       .from('connection_requests')
@@ -416,6 +524,7 @@ export default function ChatDock({
     if (error) return alert(error.message)
     setConnStatus('accepted')
   }
+
   async function rejectConnection() {
     const { error } = await supabase
       .from('connection_requests')
@@ -423,6 +532,20 @@ export default function ChatDock({
       .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
     if (error) return alert(error.message)
     setConnStatus('none')
+  }
+
+  async function requestConnection() {
+    if (!me?.id || !partnerId) return
+    const { error } = await supabase
+      .from('connection_requests')
+      .insert({
+        requester: me.id,
+        recipient: partnerId,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      })
+    if (error) alert(error.message)
+    else setConnStatus('pending_out')
   }
 
   // ---- Mark incoming as read ----
@@ -453,7 +576,6 @@ export default function ChatDock({
 
   function onInputChange(e) {
     setText(e.target.value)
-    // lightweight throttle
     if (!typingTimerRef.current) {
       broadcastTyping()
       typingTimerRef.current = window.setTimeout(() => {
@@ -478,6 +600,21 @@ export default function ChatDock({
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontWeight:800 }}>{title}</div>
         <div style={{ display:'flex', gap:8 }}>
+          {/* Show Connect when no relationship yet */}
+          {connStatus === 'none' && partnerId && (
+            <button
+              className="btn"
+              onClick={requestConnection}
+              title="Send connection request"
+              style={{
+                background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Connect
+            </button>
+          )}
+
           {/* Teal ✓ */}
           <button
             className="btn"
@@ -618,7 +755,24 @@ export default function ChatDock({
                     }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
+                    {/* message content */}
+                    {m.kind === 'image' && m.media_url ? (
+                      <a href={m.media_url} target="_blank" rel="noreferrer" title={m.media_name} style={{ display:'inline-block' }}>
+                        <img
+                          src={m.media_url}
+                          alt={m.media_name || 'image'}
+                          style={{ maxWidth: '100%', borderRadius: 8, display: 'block' }}
+                          onLoad={() => setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)}
+                        />
+                      </a>
+                    ) : m.kind === 'file' && m.media_url ? (
+                      <a href={m.media_url} target="_blank" rel="noreferrer" className="btn btn-neutral" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                        📎 {m.media_name || 'download'} ({m.media_mime || 'file'})
+                      </a>
+                    ) : (
+                      <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
+                    )}
+
                     <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                       <span>{new Date(m.created_at).toLocaleString()}</span>
                       {mine && sending && <span>· sending…</span>}
@@ -722,7 +876,17 @@ export default function ChatDock({
 
       {/* composer — always visible so you can type, but Send is gated */}
       {(!!me?.id && partnerId) ? (
-        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
+        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)', alignItems:'center' }}>
+          {/* hidden inputs */}
+          <input type="file" accept="image/*" onChange={onPickImage} style={{ display:'none' }} id="pick-image" />
+          <input type="file" onChange={onPickFile} style={{ display:'none' }} id="pick-file" />
+
+          {/* attach controls */}
+          <div style={{ display:'flex', gap:6 }}>
+            <label htmlFor="pick-image" className="btn btn-neutral" title="Send image">🖼️</label>
+            <label htmlFor="pick-file" className="btn btn-neutral" title="Send file">📎</label>
+          </div>
+
           <textarea
             className="input"
             value={text}
