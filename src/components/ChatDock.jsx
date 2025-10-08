@@ -328,11 +328,16 @@ export default function ChatDock({
   }, [])
 
   // ---- Send (optimistic) ----
-  async function send(e) {
-    e?.preventDefault?.()
-    const body = text.trim()
-    if (!body || !partnerId) return
-    if (connStatus !== 'accepted') { alert('You must connect first.'); return }
+async function send(e) {
+  e?.preventDefault?.()
+  const body = text.trim()
+  if (!body || !partnerId) return
+  if (connStatus !== 'accepted') {
+    alert('You need to accept the connection before sending. Use the Accept button above.')
+    return
+  }
+  // ... rest of your send logic unchanged
+}
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -713,21 +718,39 @@ export default function ChatDock({
 
       {/* composer */}
       {canType && partnerId && connStatus === 'accepted' ? (
-        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
-          <textarea
-            className="input"
-            value={text}
-            onChange={onInputChange}
-            onKeyDown={onKeyDown}
-            placeholder="Type a message…"
-            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
-          />
-          <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
-            Send
-          </button>
-        </form>
-      ) : (
-        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+{/* composer — always visible so you can type, but Send is gated */}
+{(!!me?.id && partnerId) ? (
+  <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
+    <textarea
+      className="input"
+      value={text}
+      onChange={onInputChange}
+      onKeyDown={onKeyDown}
+      placeholder={
+        connStatus === 'accepted'
+          ? 'Type a message…'
+          : (connStatus === 'pending_in'
+              ? 'Respond to the request above to start messaging…'
+              : (connStatus === 'pending_out'
+                  ? 'Waiting for acceptance…'
+                  : 'Not connected yet — you can still type.'))
+      }
+      style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+    />
+    <button
+      className="btn btn-primary"
+      type="submit"
+      disabled={!text.trim() || connStatus !== 'accepted'}
+      title={connStatus === 'accepted' ? 'Send' : 'You must be connected to send'}
+    >
+      Send
+    </button>
+  </form>
+) : (
+  <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+    {me?.id ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
+  </div>
+)}
           {!canType ? 'Sign in to send messages.' :
            !partnerId ? 'Select a person to start chatting.' :
            connStatus === 'pending_out' ? 'Request sent — waiting for acceptance.' :
