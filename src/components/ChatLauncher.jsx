@@ -56,8 +56,8 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       try {
         const { data, error } = await supabase
           .from('messages')
-          .select('sender, receiver, created_at')
-          .or(`sender.eq.${me.id},receiver.eq.${me.id}`)
+          .select('sender, recipient, created_at')
+          .or(`sender.eq.${me.id},recipient.eq.${me.id}`)
           .order('created_at', { ascending: false })
           .limit(50)
         if (error) throw error
@@ -65,7 +65,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         const seen = new Set()
         const order = []
         for (const m of data || []) {
-          const other = m.sender === me.id ? m.receiver : m.sender
+          const other = m.sender === me.id ? m.recipient : m.sender
           if (other && !seen.has(other)) { seen.add(other); order.push(other) }
           if (order.length >= 12) break
         }
@@ -99,7 +99,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     const { data, error } = await supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
-      .eq('receiver', userId)
+      .eq('recipient', userId)
       .is('read_at', null)
     if (error) return onUnreadChange(0)
     onUnreadChange(data?.length ?? 0) // head:true gives empty array; count returned via header not accessible, so fallback
