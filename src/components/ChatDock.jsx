@@ -3,15 +3,16 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (paginated + safety + connection realtime)
+ * ChatDock (full)
  * - Typing indicator (broadcast)
  * - Send status (sending/failed + retry)
  * - Auto-mark read on open + new incoming
  * - Delete own messages (with confirm)
  * - Report partner (header + ⋯ on partner messages)
  * - Pagination: loads latest 50, "Load older" for history
- * - Accept / Reject banner shown when connection pending
+ * - Accept / Reject banner shown when connection pending (teal/coral)
  * - Composer gated until connection is accepted
+ * - Header buttons: ✓ teal, Report amber, ✕ coral
  */
 
 const PAGE_SIZE = 50
@@ -35,11 +36,8 @@ async function reportUser({ reporterId, reportedId }) {
     category,
     details
   })
-  if (error) {
-    alert(error.message || 'Failed to submit report')
-  } else {
-    alert('Report submitted. Thank you for helping keep the community safe.')
-  }
+  if (error) alert(error.message || 'Failed to submit report')
+  else alert('Report submitted. Thank you for helping keep the community safe.')
 }
 
 export default function ChatDock({
@@ -55,16 +53,16 @@ export default function ChatDock({
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
-  const [menuOpenFor, setMenuOpenFor] = useState(null)
+  const [menuOpenFor, setMenuOpenFor] = useState(null) // message id for ⋯ menu
   // none | pending_in | pending_out | accepted | unknown
   const [connStatus, setConnStatus] = useState('unknown')
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
-  const nearBottomRef = useRef(true)
-  const oldestTsRef = useRef(null)
-  const lastScrollHeightRef = useRef(0)
-  const prevSnapshotRef = useRef([])
+  const nearBottomRef = useRef(true) // keep auto-scroll sticky
+  const oldestTsRef = useRef(null)   // ISO string of oldest loaded created_at
+  const lastScrollHeightRef = useRef(0) // preserve scroll when prepending
+  const prevSnapshotRef = useRef([]) // rollback snapshot for delete
 
   const threadKey = useMemo(() => {
     const a = String(me?.id || '')
@@ -101,7 +99,7 @@ export default function ChatDock({
     el.scrollTop = el.scrollTop + delta
   }
 
-  // ---- Load latest messages ----
+  // ---- Load latest messages (initial) ----
   const loadInitial = useCallback(async () => {
     if (!me?.id || !partnerId) {
       setMessages([])
@@ -136,7 +134,6 @@ export default function ChatDock({
 
     // mark read on initial open
     markThreadRead()
-    // jump to bottom on first load
     setTimeout(scrollToBottom, 0)
   }, [me?.id, partnerId])
 
@@ -247,15 +244,7 @@ export default function ChatDock({
     return () => supabase.removeChannel(ch)
   }, [me?.id, partnerId])
 
-  // ---- Focus composer when accepted ----
-  useEffect(() => {
-    if (connStatus === 'accepted') {
-      const ta = document.querySelector('textarea.input')
-      if (ta) ta.focus()
-    }
-  }, [connStatus])
-
-  // ---- Realtime messages ----
+  // ---- Realtime inserts/updates/deletes for messages ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
@@ -295,10 +284,11 @@ export default function ChatDock({
         }
       )
       .subscribe()
+
     return () => supabase.removeChannel(ch)
   }, [me?.id, partnerId])
 
-  // ---- Typing indicator ----
+  // ---- Typing indicator via broadcast ----
   useEffect(() => {
     const typingChannel = supabase.channel(`typing:${threadKey}`)
     typingChannel
@@ -330,7 +320,7 @@ export default function ChatDock({
     const el = listRef.current
     if (!el) return
     const onScroll = () => {
-      setMenuOpenFor(null)
+      setMenuOpenFor(null) // close ⋯ menus when scrolling
       trackScrollNearBottom()
     }
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -354,48 +344,55 @@ export default function ChatDock({
       read_at: null,
       _status: 'sending'
     }
-    setMessages(prev => [...prev, optimistic])
+    setMessages(prev => {
+      const next = [...prev, optimistic]
+      prevSnapshotRef.current = next
+      return next
+    })
     setText('')
     setTimeout(scrollToBottom, 0)
 
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({ sender: me.id, recipient: partnerId, body })
-      .select('id, sender, recipient, body, created_at, read_at')
-      .single()
+    const { data, error } = await supabase.from('messages').insert({
+      sender: me.id,
+      recipient: partnerId,
+      body
+    }).select('id, sender, recipient, body, created_at, read_at').single()
 
     if (error || !data) {
-      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
     } else {
-      setMessages(prev => prev.map(m => (m.id === tempId ? { ...data } : m)))
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
     }
   }
 
   async function retrySend(failedMsg) {
     if (!partnerId) return
     if (connStatus !== 'accepted') { alert('You must connect first.'); return }
-    setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'sending' } : m)))
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({ sender: me.id, recipient: partnerId, body: failedMsg.body })
-      .select('id, sender, recipient, body, created_at, read_at')
-      .single()
+    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
+    const { data, error } = await supabase.from('messages').insert({
+      sender: me.id,
+      recipient: partnerId,
+      body: failedMsg.body
+    }).select('id, sender, recipient, body, created_at, read_at').single()
     if (error || !data) {
-      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
+      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
     } else {
-      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...data } : m)))
+      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...data } : m))
     }
   }
 
-  // ---- Delete ----
+  // ---- Delete own message ----
   async function deleteMessage(id) {
     setMenuOpenFor(null)
     if (!id) return
-    if (!window.confirm('Delete this message for everyone? This cannot be undone.')) return
+    const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
+    if (!yes) return
+    // Snapshot for rollback
     const snapshot = prevSnapshotRef.current
     setMessages(prev => prev.filter(m => m.id !== id))
     const { error } = await supabase.from('messages').delete().eq('id', id)
     if (error) {
+      // rollback on error
       setMessages(snapshot)
       alert(error.message || 'Failed to delete message')
     }
@@ -431,6 +428,7 @@ export default function ChatDock({
     onUnreadChange && onUnreadChange()
   }
 
+  // ---- keyboard helpers ----
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -446,9 +444,12 @@ export default function ChatDock({
 
   function onInputChange(e) {
     setText(e.target.value)
+    // lightweight throttle
     if (!typingTimerRef.current) {
       broadcastTyping()
-      typingTimerRef.current = window.setTimeout(() => { typingTimerRef.current = null }, 800)
+      typingTimerRef.current = window.setTimeout(() => {
+        typingTimerRef.current = null
+      }, 800)
     }
   }
 
@@ -456,53 +457,33 @@ export default function ChatDock({
   return (
     <div
       style={{
-        position: 'fixed',
-        right: 16,
-        bottom: 80,
-        width: 360,
-        maxWidth: 'calc(100vw - 24px)',
-        background: '#fff',
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
-        zIndex: 1002,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
+        position:'fixed', right:16, bottom:80,
+        width: 360, maxWidth:'calc(100vw - 24px)',
+        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
+        boxShadow:'0 12px 32px rgba(0,0,0,0.12)', zIndex: 1002,
+        display:'flex', flexDirection:'column', overflow:'hidden'
       }}
       onClick={() => setMenuOpenFor(null)}
     >
       {/* header */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '10px 12px',
-          borderBottom: '1px solid var(--border)'
-        }}
-      >
-        <div style={{ fontWeight: 800 }}>{title}</div>
-
-        {/* Actions: ✓, Report, ✕ — colored */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
+        <div style={{ fontWeight:800 }}>{title}</div>
+        <div style={{ display:'flex', gap:8 }}>
+          {/* Teal ✓ */}
           <button
             className="btn"
             onClick={markThreadRead}
             title="Mark read"
             aria-label="Mark read"
             style={{
-              background: '#16a34a',     // green
-              color: '#fff',
-              border: '1px solid #15803d',
-              padding: '6px 10px',
-              borderRadius: 8,
-              fontWeight: 700
+              background: '#0f766e', color:'#fff', border:'1px solid #0f766e',
+              padding:'6px 10px', borderRadius:8, fontWeight:700
             }}
           >
             ✓
           </button>
 
+          {/* Amber Report */}
           {partnerId && (
             <button
               className="btn"
@@ -510,30 +491,23 @@ export default function ChatDock({
               title="Report this user"
               aria-label="Report this user"
               style={{
-                background: '#f59e0b',   // amber
-                color: '#111827',
-                border: '1px solid #d97706',
-                padding: '6px 10px',
-                borderRadius: 8,
-                fontWeight: 700
+                background:'#f59e0b', color:'#111827', border:'1px solid #d97706',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
               Report
             </button>
           )}
 
+          {/* Coral ✕ */}
           <button
             className="btn"
             onClick={onClose}
             title="Close"
             aria-label="Close"
             style={{
-              background: '#ef4444',     // red
-              color: '#fff',
-              border: '1px solid #dc2626',
-              padding: '6px 10px',
-              borderRadius: 8,
-              fontWeight: 700
+              background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
+              padding:'6px 10px', borderRadius:8, fontWeight:700
             }}
           >
             ✕
@@ -555,8 +529,26 @@ export default function ChatDock({
             This person wants to connect with you.
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
-            <button className="btn btn-neutral" onClick={rejectConnection}>Reject</button>
-            <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
+            <button
+              className="btn"
+              onClick={rejectConnection}
+              style={{
+                background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Reject
+            </button>
+            <button
+              className="btn"
+              onClick={acceptConnection}
+              style={{
+                background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Accept
+            </button>
           </div>
         </div>
       )}
@@ -574,13 +566,16 @@ export default function ChatDock({
       )}
 
       {/* list */}
-      <div ref={listRef} style={{ padding: 12, overflowY: 'auto', maxHeight: 420 }}>
+      <div
+        ref={listRef}
+        style={{ padding:12, overflowY:'auto', maxHeight: 420 }}
+      >
         {loading && <div className="muted">Loading…</div>}
 
         {!loading && (
           <>
             {hasMore && (
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+              <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
                 <button
                   className="btn btn-neutral"
                   disabled={loadingOlder}
@@ -601,32 +596,30 @@ export default function ChatDock({
               const failed = m._status === 'failed'
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
-              const showPartnerMenu = !mine
+              const showPartnerMenu = !mine // allow report on partner's messages
 
               return (
-                <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8, position: 'relative' }}>
+                <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
                   <div
                     style={{
-                      maxWidth: '78%',
-                      padding: '8px 10px',
-                      borderRadius: 12,
+                      maxWidth:'78%', padding:'8px 10px', borderRadius: 12,
                       background: mine ? '#0f766e' : '#f8fafc',
                       color: mine ? '#fff' : '#0f172a',
                       border: mine ? 'none' : '1px solid var(--border)'
                     }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
-                    <div className="muted" style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
+                    <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                       <span>{new Date(m.created_at).toLocaleString()}</span>
                       {mine && sending && <span>· sending…</span>}
                       {mine && failed && (
                         <>
-                          <span style={{ color: '#ef4444' }}>· failed</span>
+                          <span style={{ color:'#f43f5e' }}>· failed</span>
                           <button
                             type="button"
                             className="btn btn-neutral"
-                            style={{ padding: '0 6px', fontSize: 11 }}
+                            style={{ padding:'0 6px', fontSize:11 }}
                             onClick={() => retrySend(m)}
                           >
                             retry
@@ -636,6 +629,7 @@ export default function ChatDock({
                       {!mine && m.read_at && <span>· read</span>}
                     </div>
 
+                    {/* ⋯ menu trigger */}
                     {(showMenuMine || showPartnerMenu) && (
                       <button
                         type="button"
@@ -643,7 +637,7 @@ export default function ChatDock({
                         onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }}
                         title="More"
                         style={{
-                          position: 'absolute',
+                          position:'absolute',
                           top: -6,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
@@ -655,18 +649,19 @@ export default function ChatDock({
                       </button>
                     )}
 
+                    {/* menu */}
                     {menuOpenFor === m.id && (
                       <div
                         style={{
-                          position: 'absolute',
+                          position:'absolute',
                           top: 18,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
-                          background: '#fff',
-                          border: '1px solid var(--border)',
-                          borderRadius: 8,
-                          boxShadow: '0 8px 18px rgba(0,0,0,0.12)',
-                          padding: 6,
+                          background:'#fff',
+                          border:'1px solid var(--border)',
+                          borderRadius:8,
+                          boxShadow:'0 8px 18px rgba(0,0,0,0.12)',
+                          padding:6,
                           zIndex: 5
                         }}
                         onClick={(e) => e.stopPropagation()}
@@ -698,17 +693,14 @@ export default function ChatDock({
               )
             })}
 
+            {/* typing indicator */}
             {peerTyping && (
-              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
                 <div
                   style={{
-                    maxWidth: '60%',
-                    padding: '6px 10px',
-                    borderRadius: 12,
-                    background: '#f1f5f9',
-                    border: '1px solid var(--border)',
-                    color: '#0f172a',
-                    fontSize: 12
+                    maxWidth:'60%', padding:'6px 10px', borderRadius:12,
+                    background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
+                    fontSize:12
                   }}
                 >
                   typing…
@@ -721,32 +713,44 @@ export default function ChatDock({
 
       {/* composer */}
       {canType && partnerId && connStatus === 'accepted' ? (
-        <form onSubmit={send} style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
+        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
           <textarea
             className="input"
             value={text}
             onChange={onInputChange}
             onKeyDown={onKeyDown}
             placeholder="Type a message…"
-            style={{ flex: 1, resize: 'none', minHeight: 42, maxHeight: 120 }}
+            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
           />
           <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
             Send
           </button>
         </form>
       ) : (
-        <div className="muted" style={{ padding: 12, borderTop: '1px solid var(--border)' }}>
+        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
           {!canType ? 'Sign in to send messages.' :
            !partnerId ? 'Select a person to start chatting.' :
            connStatus === 'pending_out' ? 'Request sent — waiting for acceptance.' :
            connStatus === 'pending_in' ? (
-             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                <span>This user requested to connect.</span>
-               <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
-               <button className="btn btn-neutral" onClick={rejectConnection}>Decline</button>
+               <button
+                 className="btn"
+                 onClick={acceptConnection}
+                 style={{ background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}
+               >
+                 Accept
+               </button>
+               <button
+                 className="btn"
+                 onClick={rejectConnection}
+                 style={{ background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}
+               >
+                 Decline
+               </button>
              </div>
            ) : (
-             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
                <span>Not connected yet.</span>
              </div>
            )}
