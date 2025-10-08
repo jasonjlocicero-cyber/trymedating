@@ -3,15 +3,15 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (paginated + safety + connection gating)
+ * ChatDock (paginated + safety + connection realtime)
  * - Typing indicator (broadcast)
  * - Send status (sending/failed + retry)
  * - Auto-mark read on open + new incoming
  * - Delete own messages (with confirm)
  * - Report partner (header + ⋯ on partner messages)
  * - Pagination: loads latest 50, "Load older" for history
- * - NEW: Accept/Reject connection (QR/requests) + gate composer until accepted
- * - Enter to send, Shift+Enter newline, Esc close
+ * - Accept / Reject banner shown when connection pending
+ * - Composer gated until connection is accepted
  */
 
 const PAGE_SIZE = 50
@@ -55,26 +55,22 @@ export default function ChatDock({
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
-  const [menuOpenFor, setMenuOpenFor] = useState(null) // message id for ⋯ menu
-
-  // NEW: connection gating state
-  // 'accepted' | 'pending_in' | 'pending_out' | 'none' | 'unknown'
+  const [menuOpenFor, setMenuOpenFor] = useState(null)
+  // none | pending_in | pending_out | accepted | unknown
   const [connStatus, setConnStatus] = useState('unknown')
 
   const listRef = useRef(null)
-  const inputRef = useRef(null)
   const typingTimerRef = useRef(null)
-  const nearBottomRef = useRef(true) // track if user is scrolled near bottom for auto-scroll
-
-  const oldestTsRef = useRef(null) // ISO string of oldest loaded message created_at
-  const lastScrollHeightRef = useRef(0) // to preserve scroll position on prepend
-  const prevSnapshotRef = useRef([]) // for delete rollback
+  const nearBottomRef = useRef(true)
+  const oldestTsRef = useRef(null)
+  const lastScrollHeightRef = useRef(0)
+  const prevSnapshotRef = useRef([])
 
   const threadKey = useMemo(() => {
-    const a = String(me.id)
-    const b = String(partnerId)
+    const a = String(me?.id || '')
+    const b = String(partnerId || '')
     return a < b ? `${a}-${b}` : `${b}-${a}`
-  }, [me.id, partnerId])
+  }, [me?.id, partnerId])
 
   const title = useMemo(() => partnerName || 'Conversation', [partnerName])
   const canType = !!me?.id
@@ -82,24 +78,22 @@ export default function ChatDock({
   // ---- Helpers ----
   function isInThisThread(m) {
     return (
-      (m.sender === me.id && m.receiver === partnerId) ||
-      (m.sender === partnerId && m.receiver === me.id)
+      (m.sender === me?.id && m.receiver === partnerId) ||
+      (m.sender === partnerId && m.receiver === me?.id)
     )
   }
 
   function trackScrollNearBottom() {
     if (!listRef.current) return
     const el = listRef.current
-    const threshold = 60 // px from bottom
+    const threshold = 60
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
   }
 
   function scrollToBottom() {
-    if (!listRef.current) return
-    listRef.current.scrollTop = listRef.current.scrollHeight
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
   }
 
-  // Preserve scroll after prepending older messages
   function restoreScrollAfterPrepend() {
     const el = listRef.current
     if (!el) return
@@ -107,9 +101,8 @@ export default function ChatDock({
     el.scrollTop = el.scrollTop + delta
   }
 
-  // ---- Load latest messages (initial) ----
+  // ---- Load latest messages ----
   const loadInitial = useCallback(async () => {
-    // Guard: don't query without both IDs
     if (!me?.id || !partnerId) {
       setMessages([])
       setHasMore(false)
@@ -145,7 +138,7 @@ export default function ChatDock({
     markThreadRead()
     // jump to bottom on first load
     setTimeout(scrollToBottom, 0)
-  }, [me.id, partnerId])
+  }, [me?.id, partnerId])
 
   // ---- Load older (pagination) ----
   const loadOlder = useCallback(async () => {
@@ -177,16 +170,15 @@ export default function ChatDock({
     setHasMore((data || []).length === PAGE_SIZE)
     oldestTsRef.current = batch.length ? batch[0].created_at : oldestTsRef.current
     setLoadingOlder(false)
-    // keep viewport anchored around where the user was
     restoreScrollAfterPrepend()
-  }, [me.id, partnerId])
+  }, [me?.id, partnerId])
 
   // ---- Mount / thread change ----
   useEffect(() => {
     loadInitial()
   }, [loadInitial])
 
-  // ---- Load connection status (NEW) ----
+  // ---- Load connection status for this pair ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
@@ -198,7 +190,6 @@ export default function ChatDock({
         .maybeSingle()
 
       if (cancel) return
-      // PGRST116 is "Results contain 0 rows" for maybeSingle; treat as none
       if (error && error.code !== 'PGRST116') { setConnStatus('none'); return }
       if (!data) { setConnStatus('none'); return }
 
@@ -211,10 +202,63 @@ export default function ChatDock({
     return () => { cancel = true }
   }, [me?.id, partnerId])
 
-  // ---- Realtime inserts/updates/deletes ----
+  // ---- Realtime connection status for this pair ----
+  useEffect(() => {
+    if (!me?.id || !partnerId) return
+
+    const ch = supabase
+      .channel(`conn-${me.id}-${partnerId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'connection_requests' },
+        payload => {
+          const r = payload?.new
+          if (!r) return
+          const isThisPair =
+            (r.requester === me.id && r.recipient === partnerId) ||
+            (r.requester === partnerId && r.recipient === me.id)
+          if (!isThisPair) return
+          if (r.status === 'pending') {
+            if (r.requester === me.id) setConnStatus('pending_out')
+            else if (r.recipient === me.id) setConnStatus('pending_in')
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'connection_requests' },
+        payload => {
+          const r = payload?.new
+          if (!r) return
+          const isThisPair =
+            (r.requester === me.id && r.recipient === partnerId) ||
+            (r.requester === partnerId && r.recipient === me.id)
+          if (!isThisPair) return
+          if (r.status === 'accepted') setConnStatus('accepted')
+          else if (r.status === 'rejected') setConnStatus('none')
+          else if (r.status === 'pending') {
+            if (r.requester === me.id) setConnStatus('pending_out')
+            else if (r.recipient === me.id) setConnStatus('pending_in')
+          }
+        }
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(ch)
+  }, [me?.id, partnerId])
+
+  // ---- Focus composer when accepted ----
+  useEffect(() => {
+    if (connStatus === 'accepted') {
+      const ta = document.querySelector('textarea.input')
+      if (ta) ta.focus()
+    }
+  }, [connStatus])
+
+  // ---- Realtime messages ----
   useEffect(() => {
     const ch = supabase
-      .channel(`msg-${me.id}-${partnerId}`)
+      .channel(`msg-${me?.id}-${partnerId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -226,10 +270,8 @@ export default function ChatDock({
             prevSnapshotRef.current = next
             return next
           })
-          if (m.receiver === me.id && !m.read_at) markThreadRead()
+          if (m.receiver === me?.id && !m.read_at) markThreadRead()
           onUnreadChange && onUnreadChange()
-
-          // auto-scroll only if user is near bottom
           if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
         }
       )
@@ -253,18 +295,16 @@ export default function ChatDock({
         }
       )
       .subscribe()
-
     return () => supabase.removeChannel(ch)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me.id, partnerId])
+  }, [me?.id, partnerId])
 
-  // ---- Typing indicator via broadcast ----
+  // ---- Typing indicator ----
   useEffect(() => {
     const typingChannel = supabase.channel(`typing:${threadKey}`)
     typingChannel
       .on('broadcast', { event: 'typing' }, payload => {
         const from = payload?.payload?.from
-        if (from && from !== me.id) {
+        if (from && from !== me?.id) {
           setPeerTyping(true)
           window.clearTimeout(typingTimerRef.current)
           typingTimerRef.current = window.setTimeout(() => setPeerTyping(false), 2500)
@@ -275,13 +315,13 @@ export default function ChatDock({
       window.clearTimeout(typingTimerRef.current)
       supabase.removeChannel(typingChannel)
     }
-  }, [threadKey, me.id])
+  }, [threadKey, me?.id])
 
   function broadcastTyping() {
     supabase.channel(`typing:${threadKey}`).send({
       type: 'broadcast',
       event: 'typing',
-      payload: { from: me.id, at: Date.now() }
+      payload: { from: me?.id, at: Date.now() }
     })
   }
 
@@ -290,7 +330,7 @@ export default function ChatDock({
     const el = listRef.current
     if (!el) return
     const onScroll = () => {
-      setMenuOpenFor(null) // close ⋯ menus when scrolling
+      setMenuOpenFor(null)
       trackScrollNearBottom()
     }
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -302,11 +342,7 @@ export default function ChatDock({
     e?.preventDefault?.()
     const body = text.trim()
     if (!body || !partnerId) return
-    // Optional: client gate — don't attempt send unless accepted
-    if (connStatus !== 'accepted') {
-      alert('You must connect first.')
-      return
-    }
+    if (connStatus !== 'accepted') { alert('You must connect first.'); return }
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -318,58 +354,69 @@ export default function ChatDock({
       read_at: null,
       _status: 'sending'
     }
-    setMessages(prev => {
-      const next = [...prev, optimistic]
-      prevSnapshotRef.current = next
-      return next
-    })
+    setMessages(prev => [...prev, optimistic])
     setText('')
     setTimeout(scrollToBottom, 0)
 
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      receiver: partnerId,
-      body
-    }).select('id, sender, receiver, body, created_at, read_at').single()
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender: me.id, receiver: partnerId, body })
+      .select('id, sender, receiver, body, created_at, read_at')
+      .single()
 
     if (error || !data) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
     } else {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...data } : m)))
     }
   }
 
   async function retrySend(failedMsg) {
     if (!partnerId) return
     if (connStatus !== 'accepted') { alert('You must connect first.'); return }
-    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      receiver: partnerId,
-      body: failedMsg.body
-    }).select('id, sender, receiver, body, created_at, read_at').single()
+    setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'sending' } : m)))
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender: me.id, receiver: partnerId, body: failedMsg.body })
+      .select('id, sender, receiver, body, created_at, read_at')
+      .single()
     if (error || !data) {
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
     } else {
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...data } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...data } : m)))
     }
   }
 
-  // ---- Delete own message ----
+  // ---- Delete ----
   async function deleteMessage(id) {
     setMenuOpenFor(null)
     if (!id) return
-    const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
-    if (!yes) return
-    // Snapshot for rollback
+    if (!window.confirm('Delete this message for everyone? This cannot be undone.')) return
     const snapshot = prevSnapshotRef.current
     setMessages(prev => prev.filter(m => m.id !== id))
     const { error } = await supabase.from('messages').delete().eq('id', id)
     if (error) {
-      // rollback on error
       setMessages(snapshot)
       alert(error.message || 'Failed to delete message')
     }
+  }
+
+  // ---- Accept / Reject helpers ----
+  async function acceptConnection() {
+    const { error } = await supabase
+      .from('connection_requests')
+      .update({ status: 'accepted', decided_at: new Date().toISOString() })
+      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+    if (error) return alert(error.message)
+    setConnStatus('accepted')
+  }
+  async function rejectConnection() {
+    const { error } = await supabase
+      .from('connection_requests')
+      .update({ status: 'rejected', decided_at: new Date().toISOString() })
+      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+    if (error) return alert(error.message)
+    setConnStatus('none')
   }
 
   // ---- Mark incoming as read ----
@@ -384,36 +431,6 @@ export default function ChatDock({
     onUnreadChange && onUnreadChange()
   }
 
-  // ---- Connection actions (NEW) ----
-  async function acceptConnection() {
-    const { error } = await supabase
-      .from('connection_requests')
-      .update({ status: 'accepted', decided_at: new Date().toISOString() })
-      .eq('requester', partnerId)
-      .eq('recipient', me.id)
-    if (error) return alert(error.message)
-    setConnStatus('accepted')
-  }
-
-  async function rejectConnection() {
-    const { error } = await supabase
-      .from('connection_requests')
-      .update({ status: 'rejected', decided_at: new Date().toISOString() })
-      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
-      .eq('status', 'pending')
-    if (error) return alert(error.message)
-    setConnStatus('none')
-  }
-
-  async function requestConnectionOut() {
-    const { error } = await supabase
-      .from('connection_requests')
-      .upsert({ requester: me.id, recipient: partnerId, status: 'pending' }, { onConflict: 'requester,recipient' })
-    if (error) return alert(error.message)
-    setConnStatus('pending_out')
-  }
-
-  // ---- keyboard helpers ----
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -429,12 +446,9 @@ export default function ChatDock({
 
   function onInputChange(e) {
     setText(e.target.value)
-    // lightweight throttle
     if (!typingTimerRef.current) {
       broadcastTyping()
-      typingTimerRef.current = window.setTimeout(() => {
-        typingTimerRef.current = null
-      }, 800)
+      typingTimerRef.current = window.setTimeout(() => { typingTimerRef.current = null }, 800)
     }
   }
 
@@ -442,21 +456,37 @@ export default function ChatDock({
   return (
     <div
       style={{
-        position:'fixed', right:16, bottom:80,
-        width: 360, maxWidth:'calc(100vw - 24px)',
-        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
-        boxShadow:'0 12px 32px rgba(0,0,0,0.12)', zIndex: 1002,
-        display:'flex', flexDirection:'column', overflow:'hidden'
+        position: 'fixed',
+        right: 16,
+        bottom: 80,
+        width: 360,
+        maxWidth: 'calc(100vw - 24px)',
+        background: '#fff',
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+        zIndex: 1002,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
       onClick={() => setMenuOpenFor(null)}
     >
       {/* header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
-        <div style={{ fontWeight:800 }}>{title}</div>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 12px',
+          borderBottom: '1px solid var(--border)'
+        }}
+      >
+        <div style={{ fontWeight: 800 }}>{title}</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Inline Accept/Decline when inbound pending */}
           {partnerId && connStatus === 'pending_in' && (
-            <div style={{ display:'flex', gap:6 }}>
+            <div style={{ display: 'flex', gap: 6 }}>
               <button className="btn btn-primary" onClick={acceptConnection} title="Accept">Accept</button>
               <button className="btn btn-neutral" onClick={rejectConnection} title="Decline">Decline</button>
             </div>
@@ -475,17 +505,46 @@ export default function ChatDock({
         </div>
       </div>
 
+      {/* connection status banner */}
+      {connStatus === 'pending_in' && (
+        <div
+          style={{
+            padding: 10,
+            background: '#fef3c7',
+            borderBottom: '1px solid var(--border)',
+            textAlign: 'center'
+          }}
+        >
+          <div style={{ marginBottom: 6 }}>
+            This person wants to connect with you.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+            <button className="btn btn-neutral" onClick={rejectConnection}>Reject</button>
+            <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
+          </div>
+        </div>
+      )}
+      {connStatus === 'pending_out' && (
+        <div
+          style={{
+            padding: 10,
+            background: '#f1f5f9',
+            borderBottom: '1px solid var(--border)',
+            textAlign: 'center'
+          }}
+        >
+          Request sent — waiting for acceptance.
+        </div>
+      )}
+
       {/* list */}
-      <div
-        ref={listRef}
-        style={{ padding:12, overflowY:'auto', maxHeight: 420 }}
-      >
+      <div ref={listRef} style={{ padding: 12, overflowY: 'auto', maxHeight: 420 }}>
         {loading && <div className="muted">Loading…</div>}
 
         {!loading && (
           <>
             {hasMore && (
-              <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
                 <button
                   className="btn btn-neutral"
                   disabled={loadingOlder}
@@ -502,34 +561,36 @@ export default function ChatDock({
             {partnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
 
             {partnerId && messages.map(m => {
-              const mine = m.sender === me.id
+              const mine = m.sender === me?.id
               const failed = m._status === 'failed'
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
-              const showPartnerMenu = !mine // allow report on partner's messages
+              const showPartnerMenu = !mine
 
               return (
-                <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
+                <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8, position: 'relative' }}>
                   <div
                     style={{
-                      maxWidth:'78%', padding:'8px 10px', borderRadius: 12,
+                      maxWidth: '78%',
+                      padding: '8px 10px',
+                      borderRadius: 12,
                       background: mine ? '#0f766e' : '#f8fafc',
                       color: mine ? '#fff' : '#0f172a',
                       border: mine ? 'none' : '1px solid var(--border)'
                     }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
-                    <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                       <span>{new Date(m.created_at).toLocaleString()}</span>
                       {mine && sending && <span>· sending…</span>}
                       {mine && failed && (
                         <>
-                          <span style={{ color:'#ef4444' }}>· failed</span>
+                          <span style={{ color: '#ef4444' }}>· failed</span>
                           <button
                             type="button"
                             className="btn btn-neutral"
-                            style={{ padding:'0 6px', fontSize:11 }}
+                            style={{ padding: '0 6px', fontSize: 11 }}
                             onClick={() => retrySend(m)}
                           >
                             retry
@@ -539,7 +600,6 @@ export default function ChatDock({
                       {!mine && m.read_at && <span>· read</span>}
                     </div>
 
-                    {/* ⋯ menu trigger */}
                     {(showMenuMine || showPartnerMenu) && (
                       <button
                         type="button"
@@ -547,7 +607,7 @@ export default function ChatDock({
                         onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }}
                         title="More"
                         style={{
-                          position:'absolute',
+                          position: 'absolute',
                           top: -6,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
@@ -559,19 +619,18 @@ export default function ChatDock({
                       </button>
                     )}
 
-                    {/* menu */}
                     {menuOpenFor === m.id && (
                       <div
                         style={{
-                          position:'absolute',
+                          position: 'absolute',
                           top: 18,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
-                          background:'#fff',
-                          border:'1px solid var(--border)',
-                          borderRadius:8,
-                          boxShadow:'0 8px 18px rgba(0,0,0,0.12)',
-                          padding:6,
+                          background: '#fff',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          boxShadow: '0 8px 18px rgba(0,0,0,0.12)',
+                          padding: 6,
                           zIndex: 5
                         }}
                         onClick={(e) => e.stopPropagation()}
@@ -603,14 +662,17 @@ export default function ChatDock({
               )
             })}
 
-            {/* typing indicator */}
             {peerTyping && (
-              <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
+              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-start' }}>
                 <div
                   style={{
-                    maxWidth:'60%', padding:'6px 10px', borderRadius:12,
-                    background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
-                    fontSize:12
+                    maxWidth: '60%',
+                    padding: '6px 10px',
+                    borderRadius: 12,
+                    background: '#f1f5f9',
+                    border: '1px solid var(--border)',
+                    color: '#0f172a',
+                    fontSize: 12
                   }}
                 >
                   typing…
@@ -623,34 +685,35 @@ export default function ChatDock({
 
       {/* composer */}
       {canType && partnerId && connStatus === 'accepted' ? (
-        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
+        <form onSubmit={send} style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
           <textarea
             className="input"
             value={text}
             onChange={onInputChange}
             onKeyDown={onKeyDown}
             placeholder="Type a message…"
-            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+            style={{ flex: 1, resize: 'none', minHeight: 42, maxHeight: 120 }}
           />
           <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
             Send
           </button>
         </form>
       ) : (
-        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+        <div className="muted" style={{ padding: 12, borderTop: '1px solid var(--border)' }}>
           {!canType ? 'Sign in to send messages.' :
            !partnerId ? 'Select a person to start chatting.' :
            connStatus === 'pending_out' ? 'Request sent — waiting for acceptance.' :
            connStatus === 'pending_in' ? (
-             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                <span>This user requested to connect.</span>
                <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
                <button className="btn btn-neutral" onClick={rejectConnection}>Decline</button>
              </div>
            ) : (
-             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                <span>Not connected yet.</span>
-               <button className="btn btn-primary" onClick={requestConnectionOut}>Request to connect</button>
+               {/* Optional: trigger from here if you want outgoing request */}
+               {/* <button className="btn btn-primary" onClick={requestConnectionOut}>Request to connect</button> */}
              </div>
            )}
         </div>
@@ -658,6 +721,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
