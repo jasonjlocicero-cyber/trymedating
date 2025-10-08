@@ -3,13 +3,14 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (paginated + safety)
+ * ChatDock (paginated + safety + connection gating)
  * - Typing indicator (broadcast)
  * - Send status (sending/failed + retry)
  * - Auto-mark read on open + new incoming
  * - Delete own messages (with confirm)
  * - Report partner (header + ⋯ on partner messages)
  * - Pagination: loads latest 50, "Load older" for history
+ * - NEW: Accept/Reject connection (QR/requests) + gate composer until accepted
  * - Enter to send, Shift+Enter newline, Esc close
  */
 
@@ -55,6 +56,10 @@ export default function ChatDock({
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
   const [menuOpenFor, setMenuOpenFor] = useState(null) // message id for ⋯ menu
+
+  // NEW: connection gating state
+  // 'accepted' | 'pending_in' | 'pending_out' | 'none' | 'unknown'
+  const [connStatus, setConnStatus] = useState('unknown')
 
   const listRef = useRef(null)
   const inputRef = useRef(null)
@@ -181,6 +186,31 @@ export default function ChatDock({
     loadInitial()
   }, [loadInitial])
 
+  // ---- Load connection status (NEW) ----
+  useEffect(() => {
+    let cancel = false
+    async function loadConn() {
+      if (!me?.id || !partnerId) { setConnStatus('none'); return }
+      const { data, error } = await supabase
+        .from('connection_requests')
+        .select('requester, recipient, status')
+        .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
+        .maybeSingle()
+
+      if (cancel) return
+      // PGRST116 is "Results contain 0 rows" for maybeSingle; treat as none
+      if (error && error.code !== 'PGRST116') { setConnStatus('none'); return }
+      if (!data) { setConnStatus('none'); return }
+
+      if (data.status === 'accepted') setConnStatus('accepted')
+      else if (data.status === 'pending' && data.requester === me.id) setConnStatus('pending_out')
+      else if (data.status === 'pending' && data.recipient === me.id) setConnStatus('pending_in')
+      else setConnStatus('none')
+    }
+    loadConn()
+    return () => { cancel = true }
+  }, [me?.id, partnerId])
+
   // ---- Realtime inserts/updates/deletes ----
   useEffect(() => {
     const ch = supabase
@@ -272,6 +302,11 @@ export default function ChatDock({
     e?.preventDefault?.()
     const body = text.trim()
     if (!body || !partnerId) return
+    // Optional: client gate — don't attempt send unless accepted
+    if (connStatus !== 'accepted') {
+      alert('You must connect first.')
+      return
+    }
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -306,6 +341,7 @@ export default function ChatDock({
 
   async function retrySend(failedMsg) {
     if (!partnerId) return
+    if (connStatus !== 'accepted') { alert('You must connect first.'); return }
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
     const { data, error } = await supabase.from('messages').insert({
       sender: me.id,
@@ -348,6 +384,35 @@ export default function ChatDock({
     onUnreadChange && onUnreadChange()
   }
 
+  // ---- Connection actions (NEW) ----
+  async function acceptConnection() {
+    const { error } = await supabase
+      .from('connection_requests')
+      .update({ status: 'accepted', decided_at: new Date().toISOString() })
+      .eq('requester', partnerId)
+      .eq('recipient', me.id)
+    if (error) return alert(error.message)
+    setConnStatus('accepted')
+  }
+
+  async function rejectConnection() {
+    const { error } = await supabase
+      .from('connection_requests')
+      .update({ status: 'rejected', decided_at: new Date().toISOString() })
+      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+      .eq('status', 'pending')
+    if (error) return alert(error.message)
+    setConnStatus('none')
+  }
+
+  async function requestConnectionOut() {
+    const { error } = await supabase
+      .from('connection_requests')
+      .upsert({ requester: me.id, recipient: partnerId, status: 'pending' }, { onConflict: 'requester,recipient' })
+    if (error) return alert(error.message)
+    setConnStatus('pending_out')
+  }
+
   // ---- keyboard helpers ----
   function onKeyDown(e) {
     if (e.key === 'Escape') {
@@ -388,7 +453,14 @@ export default function ChatDock({
       {/* header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontWeight:800 }}>{title}</div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          {/* Inline Accept/Decline when inbound pending */}
+          {partnerId && connStatus === 'pending_in' && (
+            <div style={{ display:'flex', gap:6 }}>
+              <button className="btn btn-primary" onClick={acceptConnection} title="Accept">Accept</button>
+              <button className="btn btn-neutral" onClick={rejectConnection} title="Decline">Decline</button>
+            </div>
+          )}
           <button className="btn btn-neutral" onClick={markThreadRead} title="Mark read">✓</button>
           {partnerId && (
             <button
@@ -550,7 +622,7 @@ export default function ChatDock({
       </div>
 
       {/* composer */}
-      {canType && partnerId ? (
+      {canType && partnerId && connStatus === 'accepted' ? (
         <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
           <textarea
             className="input"
@@ -566,12 +638,27 @@ export default function ChatDock({
         </form>
       ) : (
         <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
-          {canType ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
+          {!canType ? 'Sign in to send messages.' :
+           !partnerId ? 'Select a person to start chatting.' :
+           connStatus === 'pending_out' ? 'Request sent — waiting for acceptance.' :
+           connStatus === 'pending_in' ? (
+             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+               <span>This user requested to connect.</span>
+               <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
+               <button className="btn btn-neutral" onClick={rejectConnection}>Decline</button>
+             </div>
+           ) : (
+             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+               <span>Not connected yet.</span>
+               <button className="btn btn-primary" onClick={requestConnectionOut}>Request to connect</button>
+             </div>
+           )}
         </div>
       )}
     </div>
   )
 }
+
 
 
 
