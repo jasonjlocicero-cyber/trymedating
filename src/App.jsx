@@ -16,6 +16,7 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
+import ConnectionToast from './components/ConnectionToast'
 
 /** --------------------------
  * Home (hero + features + CTA)
