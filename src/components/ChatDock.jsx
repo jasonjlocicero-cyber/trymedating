@@ -61,9 +61,9 @@ export default function ChatDock({
   const typingTimerRef = useRef(null)
   const nearBottomRef = useRef(true) // track if user is scrolled near bottom for auto-scroll
 
-  const oldestTsRef = useRef(null) // ISO string of oldest loaded message created_at
-  const lastScrollHeightRef = useRef(0) // to preserve scroll position on prepend
-  const prevSnapshotRef = useRef([]) // for delete rollback
+  const oldestTsRef = useRef(null)
+  const lastScrollHeightRef = useRef(0)
+  const prevSnapshotRef = useRef([])
 
   const threadKey = useMemo(() => {
     const a = String(me.id)
@@ -74,7 +74,6 @@ export default function ChatDock({
   const title = useMemo(() => partnerName || 'Conversation', [partnerName])
   const canType = !!me?.id
 
-  // ---- Helpers ----
   function isInThisThread(m) {
     return (
       (m.sender === me.id && m.receiver === partnerId) ||
@@ -85,7 +84,7 @@ export default function ChatDock({
   function trackScrollNearBottom() {
     if (!listRef.current) return
     const el = listRef.current
-    const threshold = 60 // px from bottom
+    const threshold = 60
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
   }
 
@@ -94,7 +93,6 @@ export default function ChatDock({
     listRef.current.scrollTop = listRef.current.scrollHeight
   }
 
-  // Preserve scroll after prepending older messages
   function restoreScrollAfterPrepend() {
     const el = listRef.current
     if (!el) return
@@ -104,6 +102,14 @@ export default function ChatDock({
 
   // ---- Load latest messages (initial) ----
   const loadInitial = useCallback(async () => {
+    // ⛑️ Guard: skip if IDs are missing
+    if (!me?.id || !partnerId) {
+      setMessages([])
+      setHasMore(false)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     const { data, error } = await supabase
       .from('messages')
@@ -128,9 +134,7 @@ export default function ChatDock({
     setHasMore((data || []).length === PAGE_SIZE)
     oldestTsRef.current = reversed.length ? reversed[0].created_at : null
 
-    // mark read on initial open
     markThreadRead()
-    // jump to bottom on first load
     setTimeout(scrollToBottom, 0)
   }, [me.id, partnerId])
 
@@ -164,65 +168,47 @@ export default function ChatDock({
     setHasMore((data || []).length === PAGE_SIZE)
     oldestTsRef.current = batch.length ? batch[0].created_at : oldestTsRef.current
     setLoadingOlder(false)
-    // keep viewport anchored around where the user was
     restoreScrollAfterPrepend()
   }, [me.id, partnerId])
 
-  // ---- Mount / thread change ----
   useEffect(() => {
-    let cancel = false
     loadInitial()
-    return () => { cancel = true }
   }, [loadInitial])
 
-  // ---- Realtime inserts/updates/deletes ----
+  // ---- Realtime ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me.id}-${partnerId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        payload => {
-          const m = payload.new
-          if (!isInThisThread(m)) return
-          setMessages(prev => {
-            const next = [...prev, m]
-            prevSnapshotRef.current = next
-            return next
-          })
-          if (m.receiver === me.id && !m.read_at) markThreadRead()
-          onUnreadChange && onUnreadChange()
-
-          // auto-scroll only if user is near bottom
-          if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
-        }
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        const m = payload.new
+        if (!isInThisThread(m)) return
+        setMessages(prev => {
+          const next = [...prev, m]
+          prevSnapshotRef.current = next
+          return next
+        })
+        if (m.receiver === me.id && !m.read_at) markThreadRead()
+        onUnreadChange && onUnreadChange()
+        if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () =>
+        onUnreadChange && onUnreadChange()
       )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
-        () => onUnreadChange && onUnreadChange()
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages' },
-        payload => {
-          const deletedId = payload.old?.id
-          if (!deletedId) return
-          setMessages(prev => {
-            const next = prev.filter(m => m.id !== deletedId)
-            prevSnapshotRef.current = next
-            return next
-          })
-          onUnreadChange && onUnreadChange()
-        }
-      )
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+        const deletedId = payload.old?.id
+        if (!deletedId) return
+        setMessages(prev => {
+          const next = prev.filter(m => m.id !== deletedId)
+          prevSnapshotRef.current = next
+          return next
+        })
+        onUnreadChange && onUnreadChange()
+      })
       .subscribe()
-
     return () => supabase.removeChannel(ch)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me.id, partnerId])
 
-  // ---- Typing indicator via broadcast ----
+  // ---- Typing indicator ----
   useEffect(() => {
     const typingChannel = supabase.channel(`typing:${threadKey}`)
     typingChannel
@@ -249,23 +235,22 @@ export default function ChatDock({
     })
   }
 
-  // ---- Scroll tracking ----
   useEffect(() => {
     const el = listRef.current
     if (!el) return
     const onScroll = () => {
-      setMenuOpenFor(null) // close ⋯ menus when scrolling
+      setMenuOpenFor(null)
       trackScrollNearBottom()
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // ---- Send (optimistic) ----
+  // ---- Send ----
   async function send(e) {
     e?.preventDefault?.()
     const body = text.trim()
-    if (!body) return
+    if (!body || !partnerId) return // guard
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -285,52 +270,50 @@ export default function ChatDock({
     setText('')
     setTimeout(scrollToBottom, 0)
 
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      receiver: partnerId,
-      body
-    }).select('id, sender, receiver, body, created_at, read_at').single()
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender: me.id, receiver: partnerId, body })
+      .select('id, sender, receiver, body, created_at, read_at')
+      .single()
 
     if (error || !data) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
     } else {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...data } : m)))
     }
   }
 
   async function retrySend(failedMsg) {
-    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      receiver: partnerId,
-      body: failedMsg.body
-    }).select('id, sender, receiver, body, created_at, read_at').single()
+    if (!partnerId) return
+    setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'sending' } : m)))
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({ sender: me.id, receiver: partnerId, body: failedMsg.body })
+      .select('id, sender, receiver, body, created_at, read_at')
+      .single()
     if (error || !data) {
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
     } else {
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...data } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...data } : m)))
     }
   }
 
-  // ---- Delete own message ----
   async function deleteMessage(id) {
     setMenuOpenFor(null)
     if (!id) return
     const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
     if (!yes) return
-    // Snapshot for rollback
     const snapshot = prevSnapshotRef.current
     setMessages(prev => prev.filter(m => m.id !== id))
     const { error } = await supabase.from('messages').delete().eq('id', id)
     if (error) {
-      // rollback on error
       setMessages(snapshot)
       alert(error.message || 'Failed to delete message')
     }
   }
 
-  // ---- Mark incoming as read ----
   async function markThreadRead() {
+    if (!me?.id || !partnerId) return
     await supabase
       .from('messages')
       .update({ read_at: new Date().toISOString() })
@@ -340,7 +323,6 @@ export default function ChatDock({
     onUnreadChange && onUnreadChange()
   }
 
-  // ---- keyboard helpers ----
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -356,7 +338,6 @@ export default function ChatDock({
 
   function onInputChange(e) {
     setText(e.target.value)
-    // lightweight throttle
     if (!typingTimerRef.current) {
       broadcastTyping()
       typingTimerRef.current = window.setTimeout(() => {
@@ -369,41 +350,60 @@ export default function ChatDock({
   return (
     <div
       style={{
-        position:'fixed', right:16, bottom:80,
-        width: 360, maxWidth:'calc(100vw - 24px)',
-        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
-        boxShadow:'0 12px 32px rgba(0,0,0,0.12)', zIndex: 1002,
-        display:'flex', flexDirection:'column', overflow:'hidden'
+        position: 'fixed',
+        right: 16,
+        bottom: 80,
+        width: 360,
+        maxWidth: 'calc(100vw - 24px)',
+        background: '#fff',
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+        zIndex: 1002,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}
       onClick={() => setMenuOpenFor(null)}
     >
       {/* header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
-        <div style={{ fontWeight:800 }}>{title}</div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn btn-neutral" onClick={markThreadRead} title="Mark read">✓</button>
-          <button
-            className="btn btn-neutral"
-            onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })}
-            title="Report this user"
-          >
-            Report
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 12px',
+          borderBottom: '1px solid var(--border)'
+        }}
+      >
+        <div style={{ fontWeight: 800 }}>{title}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-neutral" onClick={markThreadRead} title="Mark read">
+            ✓
           </button>
-          <button className="btn btn-neutral" onClick={onClose} title="Close">✕</button>
+          {partnerId && (
+            <button
+              className="btn btn-neutral"
+              onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })}
+              title="Report this user"
+            >
+              Report
+            </button>
+          )}
+          <button className="btn btn-neutral" onClick={onClose} title="Close">
+            ✕
+          </button>
         </div>
       </div>
 
       {/* list */}
-      <div
-        ref={listRef}
-        style={{ padding:12, overflowY:'auto', maxHeight: 420 }}
-      >
+      <div ref={listRef} style={{ padding: 12, overflowY: 'auto', maxHeight: 420 }}>
         {loading && <div className="muted">Loading…</div>}
 
         {!loading && (
           <>
             {hasMore && (
-              <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
                 <button
                   className="btn btn-neutral"
                   disabled={loadingOlder}
@@ -415,37 +415,60 @@ export default function ChatDock({
               </div>
             )}
 
-            {messages.length === 0 && <div className="muted">Say hi 👋</div>}
+            {(!partnerId) ? (
+              <div className="muted">Pick someone to start a conversation.</div>
+            ) : messages.length === 0 ? (
+              <div className="muted">No messages yet. Say hi 👋</div>
+            ) : null}
 
             {messages.map(m => {
               const mine = m.sender === me.id
               const failed = m._status === 'failed'
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
-              const showPartnerMenu = !mine // allow report on partner's messages
+              const showPartnerMenu = !mine
 
               return (
-                <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
+                <div
+                  key={m.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: mine ? 'flex-end' : 'flex-start',
+                    marginBottom: 8,
+                    position: 'relative'
+                  }}
+                >
                   <div
                     style={{
-                      maxWidth:'78%', padding:'8px 10px', borderRadius: 12,
+                      maxWidth: '78%',
+                      padding: '8px 10px',
+                      borderRadius: 12,
                       background: mine ? '#0f766e' : '#f8fafc',
                       color: mine ? '#fff' : '#0f172a',
                       border: mine ? 'none' : '1px solid var(--border)'
                     }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
-                    <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                    <div
+                      className="muted"
+                      style={{
+                        fontSize: 11,
+                        marginTop: 4,
+                        display: 'flex',
+                        gap: 8,
+                        justifyContent: mine ? 'flex-end' : 'flex-start'
+                      }}
+                    >
                       <span>{new Date(m.created_at).toLocaleString()}</span>
                       {mine && sending && <span>· sending…</span>}
                       {mine && failed && (
                         <>
-                          <span style={{ color:'#ef4444' }}>· failed</span>
+                          <span style={{ color: '#ef4444' }}>· failed</span>
                           <button
                             type="button"
                             className="btn btn-neutral"
-                            style={{ padding:'0 6px', fontSize:11 }}
+                            style={{ padding: '0 6px', fontSize: 11 }}
                             onClick={() => retrySend(m)}
                           >
                             retry
@@ -455,15 +478,17 @@ export default function ChatDock({
                       {!mine && m.read_at && <span>· read</span>}
                     </div>
 
-                    {/* ⋯ menu trigger */}
                     {(showMenuMine || showPartnerMenu) && (
                       <button
                         type="button"
                         className="btn btn-neutral"
-                        onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }}
+                        onClick={e => {
+                          e.stopPropagation()
+                          setMenuOpenFor(menuOpenFor === m.id ? null : m.id)
+                        }}
                         title="More"
                         style={{
-                          position:'absolute',
+                          position: 'absolute',
                           top: -6,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
@@ -475,91 +500,24 @@ export default function ChatDock({
                       </button>
                     )}
 
-                    {/* menu */}
                     {menuOpenFor === m.id && (
                       <div
                         style={{
-                          position:'absolute',
+                          position: 'absolute',
                           top: 18,
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
-                          background:'#fff',
-                          border:'1px solid var(--border)',
-                          borderRadius:8,
-                          boxShadow:'0 8px 18px rgba(0,0,0,0.12)',
-                          padding:6,
+                          background: '#fff',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          boxShadow: '0 8px 18px rgba(0,0,0,0.12)',
+                          padding: 6,
                           zIndex: 5
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={e => e.stopPropagation()}
                       >
                         {mine ? (
                           <button
-                            className="btn btn-neutral"
-                            style={{ width: '100%' }}
-                            onClick={() => deleteMessage(m.id)}
-                          >
-                            Delete
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-neutral"
-                            style={{ width: '100%' }}
-                            onClick={() => {
-                              setMenuOpenFor(null)
-                              reportUser({ reporterId: me.id, reportedId: partnerId })
-                            }}
-                          >
-                            Report user
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-
-            {/* typing indicator */}
-            {peerTyping && (
-              <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
-                <div
-                  style={{
-                    maxWidth:'60%', padding:'6px 10px', borderRadius:12,
-                    background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
-                    fontSize:12
-                  }}
-                >
-                  typing…
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* composer */}
-      {canType ? (
-        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
-          <textarea
-            className="input"
-            value={text}
-            onChange={onInputChange}
-            onKeyDown={onKeyDown}
-            placeholder="Type a message…"
-            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
-          />
-          <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
-            Send
-          </button>
-        </form>
-      ) : (
-        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
-          Sign in to send messages.
-        </div>
-      )}
-    </div>
-  )
-}
 
 
 
