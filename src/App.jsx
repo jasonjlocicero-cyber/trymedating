@@ -16,7 +16,11 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
+
+// New (already in your imports, keeping it)
 import ConnectionToast from './components/ConnectionToast'
+// NEW: QR route to create a connection request
+import Connect from './routes/Connect'
 
 /** --------------------------
  * Home (hero + features + CTA)
@@ -230,7 +234,7 @@ export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
 
-  // NEW: unread count for messaging badge
+  // unread count for messaging badge (used by Header via ChatLauncher)
   const [unread, setUnread] = useState(0)
 
   useEffect(() => {
@@ -261,6 +265,9 @@ export default function App() {
     <>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
+      {/* NEW: global toast for inbound connection requests (Accept/Reject) */}
+      {me?.id && <ConnectionToast me={me} />}
+
       <main style={{ minHeight: '60vh' }}>
         {!loadingAuth && (
           <Routes>
@@ -287,6 +294,9 @@ export default function App() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
 
+            {/* NEW: QR scan route to create a pending connection request */}
+            <Route path="/connect" element={<Connect me={me} />} />
+
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -295,11 +305,13 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble (render once) */}
+      {/* Bottom-right chat bubble (render once).
+          It should already listen for open events and track unread internally. */}
       <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </>
   )
 }
+
 
 
 
