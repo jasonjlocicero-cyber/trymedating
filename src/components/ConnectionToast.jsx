@@ -1,76 +1,98 @@
+// src/components/ConnectionToast.jsx
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
+/**
+ * ConnectionToast
+ * - Listens for new connection_requests where recipient = me.id
+ * - Pops up a toast when someone scans your QR code and sends a request
+ * - Provides Accept / Decline actions inline
+ * - Automatically opens the chat bubble with that requester
+ */
 export default function ConnectionToast({ me }) {
-  const [req, setReq] = useState(null) // { id, requester, recipient, status }
+  const [req, setReq] = useState(null)
 
   useEffect(() => {
     if (!me?.id) return
 
-    // Load the latest pending (covers refresh or missed events)
-    let cancel = false
-    async function load() {
-      const { data, error } = await supabase
-        .from('connection_requests')
-        .select('id, requester, recipient, status, created_at')
-        .eq('recipient', me.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(1)
-      if (!cancel) setReq(error ? null : (data?.[0] || null))
-    }
-    load()
-
     // Realtime notify on new pending requests
     const ch = supabase
       .channel(`conn-requests-${me.id}`)
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'connection_requests', filter: `recipient=eq.${me.id}` },
         payload => {
-          if (payload?.new?.status === 'pending') setReq(payload.new)
+          const r = payload?.new
+          if (r?.status === 'pending') {
+            setReq(r)
+            // Immediately open chat with the requester, so banner shows in the bubble
+            if (window.openChat) window.openChat(r.requester)
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'connection_requests', filter: `recipient=eq.${me.id}` },
+        payload => {
+          const r = payload?.new
+          // Close toast on accept/reject
+          if (r?.status === 'accepted' || r?.status === 'rejected') setReq(null)
         }
       )
       .subscribe()
 
-    return () => { supabase.removeChannel(ch); cancel = true }
+    return () => supabase.removeChannel(ch)
   }, [me?.id])
 
-  if (!me?.id || !req) return null
-
-  async function accept() {
+  async function acceptConnection() {
+    if (!req) return
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'accepted', decided_at: new Date().toISOString() })
       .eq('id', req.id)
-    if (!error) setReq(null); else alert(error.message)
+    if (!error) setReq(null)
   }
 
-  async function reject() {
+  async function rejectConnection() {
+    if (!req) return
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'rejected', decided_at: new Date().toISOString() })
       .eq('id', req.id)
-    if (!error) setReq(null); else alert(error.message)
+    if (!error) setReq(null)
   }
+
+  if (!req) return null
 
   return (
     <div
       style={{
-        position:'fixed', right:16, bottom:16,
-        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
-        boxShadow:'0 10px 26px rgba(0,0,0,0.15)', padding:12, zIndex:1100,
-        width:320, maxWidth:'calc(100vw - 32px)'
+        position: 'fixed',
+        right: 20,
+        bottom: 20,
+        zIndex: 2000,
+        background: '#fff',
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        boxShadow: '0 6px 18px rgba(0,0,0,0.1)',
+        padding: '12px 16px',
+        width: 320,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8
       }}
-      role="dialog" aria-live="polite"
     >
-      <div style={{ fontWeight:800, marginBottom:4 }}>New connection request</div>
-      <div className="muted" style={{ marginBottom:10 }}>
-        Someone wants to connect and chat with you.
+      <div style={{ fontWeight: 700 }}>
+        New connection request
       </div>
-      <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-        <button className="btn btn-neutral" onClick={reject}>Reject</button>
-        <button className="btn btn-primary" onClick={accept}>Accept</button>
+      <div className="muted">
+        Someone just scanned your QR code and wants to connect.
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <button className="btn btn-neutral" onClick={rejectConnection}>Decline</button>
+        <button className="btn btn-primary" onClick={acceptConnection}>Accept</button>
       </div>
     </div>
   )
 }
+
