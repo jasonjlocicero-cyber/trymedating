@@ -78,8 +78,8 @@ export default function ChatDock({
   // ---- Helpers ----
   function isInThisThread(m) {
     return (
-      (m.sender === me?.id && m.receiver === partnerId) ||
-      (m.sender === partnerId && m.receiver === me?.id)
+      (m.sender === me?.id && m.recipient === partnerId) ||
+      (m.sender === partnerId && m.recipient === me?.id)
     )
   }
 
@@ -113,9 +113,9 @@ export default function ChatDock({
     setLoading(true)
     const { data, error } = await supabase
       .from('messages')
-      .select('id, sender, receiver, body, created_at, read_at')
+      .select('id, sender, recipient, body, created_at, read_at')
       .or(
-        `and(sender.eq.${me.id},receiver.eq.${partnerId}),and(sender.eq.${partnerId},receiver.eq.${me.id})`
+        `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
       )
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE)
@@ -148,9 +148,9 @@ export default function ChatDock({
 
     const { data, error } = await supabase
       .from('messages')
-      .select('id, sender, receiver, body, created_at, read_at')
+      .select('id, sender, recipient, body, created_at, read_at')
       .or(
-        `and(sender.eq.${me.id},receiver.eq.${partnerId}),and(sender.eq.${partnerId},receiver.eq.${me.id})`
+        `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
       )
       .lt('created_at', oldestTsRef.current)
       .order('created_at', { ascending: false })
@@ -270,7 +270,7 @@ export default function ChatDock({
             prevSnapshotRef.current = next
             return next
           })
-          if (m.receiver === me?.id && !m.read_at) markThreadRead()
+          if (m.recipient === me?.id && !m.read_at) markThreadRead()
           onUnreadChange && onUnreadChange()
           if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
         }
@@ -348,7 +348,7 @@ export default function ChatDock({
     const optimistic = {
       id: tempId,
       sender: me.id,
-      receiver: partnerId,
+      recipient: partnerId,
       body,
       created_at: new Date().toISOString(),
       read_at: null,
@@ -360,8 +360,8 @@ export default function ChatDock({
 
     const { data, error } = await supabase
       .from('messages')
-      .insert({ sender: me.id, receiver: partnerId, body })
-      .select('id, sender, receiver, body, created_at, read_at')
+      .insert({ sender: me.id, recipient: partnerId, body })
+      .select('id, sender, recipient, body, created_at, read_at')
       .single()
 
     if (error || !data) {
@@ -377,8 +377,8 @@ export default function ChatDock({
     setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'sending' } : m)))
     const { data, error } = await supabase
       .from('messages')
-      .insert({ sender: me.id, receiver: partnerId, body: failedMsg.body })
-      .select('id, sender, receiver, body, created_at, read_at')
+      .insert({ sender: me.id, recipient: partnerId, body: failedMsg.body })
+      .select('id, sender, recipient, body, created_at, read_at')
       .single()
     if (error || !data) {
       setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
@@ -426,7 +426,7 @@ export default function ChatDock({
       .from('messages')
       .update({ read_at: new Date().toISOString() })
       .is('read_at', null)
-      .eq('receiver', me.id)
+      .eq('recipient', me.id)
       .eq('sender', partnerId)
     onUnreadChange && onUnreadChange()
   }
@@ -483,25 +483,61 @@ export default function ChatDock({
         }}
       >
         <div style={{ fontWeight: 800 }}>{title}</div>
+
+        {/* Actions: ✓, Report, ✕ — colored */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Inline Accept/Decline when inbound pending */}
-          {partnerId && connStatus === 'pending_in' && (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn btn-primary" onClick={acceptConnection} title="Accept">Accept</button>
-              <button className="btn btn-neutral" onClick={rejectConnection} title="Decline">Decline</button>
-            </div>
-          )}
-          <button className="btn btn-neutral" onClick={markThreadRead} title="Mark read">✓</button>
+          <button
+            className="btn"
+            onClick={markThreadRead}
+            title="Mark read"
+            aria-label="Mark read"
+            style={{
+              background: '#16a34a',     // green
+              color: '#fff',
+              border: '1px solid #15803d',
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 700
+            }}
+          >
+            ✓
+          </button>
+
           {partnerId && (
             <button
-              className="btn btn-neutral"
+              className="btn"
               onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })}
               title="Report this user"
+              aria-label="Report this user"
+              style={{
+                background: '#f59e0b',   // amber
+                color: '#111827',
+                border: '1px solid #d97706',
+                padding: '6px 10px',
+                borderRadius: 8,
+                fontWeight: 700
+              }}
             >
               Report
             </button>
           )}
-          <button className="btn btn-neutral" onClick={onClose} title="Close">✕</button>
+
+          <button
+            className="btn"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+            style={{
+              background: '#ef4444',     // red
+              color: '#fff',
+              border: '1px solid #dc2626',
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 700
+            }}
+          >
+            ✕
+          </button>
         </div>
       </div>
 
@@ -712,8 +748,6 @@ export default function ChatDock({
            ) : (
              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                <span>Not connected yet.</span>
-               {/* Optional: trigger from here if you want outgoing request */}
-               {/* <button className="btn btn-primary" onClick={requestConnectionOut}>Request to connect</button> */}
              </div>
            )}
         </div>
@@ -721,6 +755,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
