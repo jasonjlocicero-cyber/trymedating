@@ -11,7 +11,7 @@ import { supabase } from '../lib/supabaseClient'
  * - Report partner (header + ⋯ on partner messages)
  * - Pagination: loads latest 50, "Load older" for history
  * - Accept / Reject banner shown when connection pending (teal/coral)
- * - Composer gated until connection is accepted
+ * - Composer always visible; Send disabled until accepted
  * - Header buttons: ✓ teal, Report amber, ✕ coral
  */
 
@@ -36,8 +36,11 @@ async function reportUser({ reporterId, reportedId }) {
     category,
     details
   })
-  if (error) alert(error.message || 'Failed to submit report')
-  else alert('Report submitted. Thank you for helping keep the community safe.')
+  if (error) {
+    alert(error.message || 'Failed to submit report')
+  } else {
+    alert('Report submitted. Thank you for helping keep the community safe.')
+  }
 }
 
 export default function ChatDock({
@@ -327,17 +330,15 @@ export default function ChatDock({
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // ---- Send (optimistic) ----
-async function send(e) {
-  e?.preventDefault?.()
-  const body = text.trim()
-  if (!body || !partnerId) return
-  if (connStatus !== 'accepted') {
-    alert('You need to accept the connection before sending. Use the Accept button above.')
-    return
-  }
-  // ... rest of your send logic unchanged
-}
+  // ---- Send (optimistic) with relaxed guard ----
+  async function send(e) {
+    e?.preventDefault?.()
+    const body = text.trim()
+    if (!body || !partnerId) return
+    if (connStatus !== 'accepted') {
+      alert('You need to accept the connection before sending. Use the Accept button above.')
+      return
+    }
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -372,7 +373,10 @@ async function send(e) {
 
   async function retrySend(failedMsg) {
     if (!partnerId) return
-    if (connStatus !== 'accepted') { alert('You must connect first.'); return }
+    if (connStatus !== 'accepted') {
+      alert('You need to accept the connection before sending. Use the Accept button above.')
+      return
+    }
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
     const { data, error } = await supabase.from('messages').insert({
       sender: me.id,
@@ -716,72 +720,43 @@ async function send(e) {
         )}
       </div>
 
-      {/* composer */}
-      {canType && partnerId && connStatus === 'accepted' ? (
-{/* composer — always visible so you can type, but Send is gated */}
-{(!!me?.id && partnerId) ? (
-  <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
-    <textarea
-      className="input"
-      value={text}
-      onChange={onInputChange}
-      onKeyDown={onKeyDown}
-      placeholder={
-        connStatus === 'accepted'
-          ? 'Type a message…'
-          : (connStatus === 'pending_in'
-              ? 'Respond to the request above to start messaging…'
-              : (connStatus === 'pending_out'
-                  ? 'Waiting for acceptance…'
-                  : 'Not connected yet — you can still type.'))
-      }
-      style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
-    />
-    <button
-      className="btn btn-primary"
-      type="submit"
-      disabled={!text.trim() || connStatus !== 'accepted'}
-      title={connStatus === 'accepted' ? 'Send' : 'You must be connected to send'}
-    >
-      Send
-    </button>
-  </form>
-) : (
-  <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
-    {me?.id ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
-  </div>
-)}
-          {!canType ? 'Sign in to send messages.' :
-           !partnerId ? 'Select a person to start chatting.' :
-           connStatus === 'pending_out' ? 'Request sent — waiting for acceptance.' :
-           connStatus === 'pending_in' ? (
-             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-               <span>This user requested to connect.</span>
-               <button
-                 className="btn"
-                 onClick={acceptConnection}
-                 style={{ background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}
-               >
-                 Accept
-               </button>
-               <button
-                 className="btn"
-                 onClick={rejectConnection}
-                 style={{ background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}
-               >
-                 Decline
-               </button>
-             </div>
-           ) : (
-             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-               <span>Not connected yet.</span>
-             </div>
-           )}
+      {/* composer — always visible so you can type, but Send is gated */}
+      {(!!me?.id && partnerId) ? (
+        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
+          <textarea
+            className="input"
+            value={text}
+            onChange={onInputChange}
+            onKeyDown={onKeyDown}
+            placeholder={
+              connStatus === 'accepted'
+                ? 'Type a message…'
+                : (connStatus === 'pending_in'
+                    ? 'Respond to the request above to start messaging…'
+                    : (connStatus === 'pending_out'
+                        ? 'Waiting for acceptance…'
+                        : 'Not connected yet — you can still type.'))
+            }
+            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+          />
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={!text.trim() || connStatus !== 'accepted'}
+            title={connStatus === 'accepted' ? 'Send' : 'You must be connected to send'}
+          >
+            Send
+          </button>
+        </form>
+      ) : (
+        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+          {me?.id ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
         </div>
       )}
     </div>
   )
 }
+
 
 
 
