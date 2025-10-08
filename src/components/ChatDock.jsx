@@ -518,6 +518,66 @@ export default function ChatDock({
                       >
                         {mine ? (
                           <button
+                        ) : (
+                          <button
+                            className="btn btn-neutral"
+                            style={{ width: '100%' }}
+                            onClick={() => {
+                              setMenuOpenFor(null)
+                              reportUser({ reporterId: me.id, reportedId: partnerId })
+                            }}
+                          >
+                            Report user
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* typing indicator */}
+            {peerTyping && (
+              <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
+                <div
+                  style={{
+                    maxWidth:'60%', padding:'6px 10px', borderRadius:12,
+                    background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
+                    fontSize:12
+                  }}
+                >
+                  typing…
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* composer */}
+      {canType && partnerId ? (
+        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)' }}>
+          <textarea
+            className="input"
+            value={text}
+            onChange={onInputChange}
+            onKeyDown={onKeyDown}
+            placeholder="Type a message…"
+            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+          />
+          <button className="btn btn-primary" type="submit" disabled={!text.trim()}>
+            Send
+          </button>
+        </form>
+      ) : (
+        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+          {canType ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
+        </div>
+      )}
+    </div>
+  )
+}
 
 
 
