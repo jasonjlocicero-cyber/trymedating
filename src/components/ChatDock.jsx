@@ -462,12 +462,15 @@ export default function ChatDock({
     setText('')
     setTimeout(scrollToBottom, 0)
 
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      recipient: partnerId,
-      body,
-      kind: 'text'
-    }).select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size').single()
+    const { data, error } = await supabase.rpc('send_message', {
+      p_recipient: partnerId,
+      p_body: body,
+      p_kind: 'text',
+      p_media_url: null,
+      p_media_name: null,
+      p_media_mime: null,
+      p_media_size: null
+    });
 
     if (error || !data) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
