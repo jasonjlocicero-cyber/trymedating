@@ -3,17 +3,12 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (full)
- * - Typing indicator (broadcast)
- * - Send status (sending/failed + retry)
- * - Auto-mark read on open + new incoming
- * - Delete own messages (with confirm)
- * - Report partner (header + ⋯ on partner messages)
- * - Pagination: loads latest 50, "Load older" for history
+ * ChatDock (full, RPC send)
  * - Connection flow: none → Connect → pending_in|pending_out → accepted
  * - Composer always visible; Send disabled until accepted
- * - Attachments: images/files uploaded to storage bucket 'chat-uploads'
- * - Header buttons colorized: ✓ (teal), Report (amber), ✕ (coral)
+ * - Send text + images/files via RPC public.send_message (security definer)
+ * - Typing indicator, pagination, delete own, report, mark read
+ * - Header buttons colorized: ✓ teal, Report amber, ✕ coral
  */
 
 const PAGE_SIZE = 50
@@ -67,10 +62,10 @@ export default function ChatDock({
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
-  const nearBottomRef = useRef(true) // keep auto-scroll sticky
-  const oldestTsRef = useRef(null)   // ISO string of oldest loaded created_at
-  const lastScrollHeightRef = useRef(0) // preserve scroll when prepending
-  const prevSnapshotRef = useRef([]) // rollback snapshot for delete
+  const nearBottomRef = useRef(true)
+  const oldestTsRef = useRef(null)
+  const lastScrollHeightRef = useRef(0)
+  const prevSnapshotRef = useRef([])
 
   const threadKey = useMemo(() => {
     const a = String(me?.id || '')
@@ -88,18 +83,14 @@ export default function ChatDock({
       (m.sender === partnerId && m.recipient === me?.id)
     )
   }
-
   function trackScrollNearBottom() {
     if (!listRef.current) return
     const el = listRef.current
-    const threshold = 60
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
   }
-
   function scrollToBottom() {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
   }
-
   function restoreScrollAfterPrepend() {
     const el = listRef.current
     if (!el) return
@@ -154,25 +145,25 @@ export default function ChatDock({
 
     try {
       const { url } = await uploadToStorage(file)
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          sender: me.id,
-          recipient: partnerId,
-          body: '',
-          kind,
-          media_url: url,
-          media_name: file.name,
-          media_mime: file.type,
-          media_size: file.size
-        })
-        .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
-        .single()
+
+      // *** RPC send for attachment ***
+      const { data, error } = await supabase.rpc('send_message', {
+        p_recipient: partnerId,
+        p_body: '',
+        p_kind: kind, // 'image' or 'file'
+        p_media_url: url,
+        p_media_name: file.name,
+        p_media_mime: file.type,
+        p_media_size: file.size
+      })
 
       if (error || !data) {
+        console.error('Attachment send error:', error)
+        if (error?.message) alert(`Upload message failed: ${error.message}`)
         setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
       } else {
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
+        const row = Array.isArray(data) ? data[0] : data
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...row } : m))
       }
     } catch (err) {
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
@@ -189,7 +180,6 @@ export default function ChatDock({
     sendAttachmentMessage({ file: f, kind })
     e.target.value = ''
   }
-
   function onPickFile(e) {
     const f = e.target.files?.[0]
     if (!f) return
@@ -198,15 +188,12 @@ export default function ChatDock({
     e.target.value = ''
   }
 
-  // ---- Load latest messages (initial) ----
+  // ---- Load latest (initial) ----
   const loadInitial = useCallback(async () => {
     if (!me?.id || !partnerId) {
-      setMessages([])
-      setHasMore(false)
-      setLoading(false)
+      setMessages([]); setHasMore(false); setLoading(false)
       return
     }
-
     setLoading(true)
     const { data, error } = await supabase
       .from('messages')
@@ -218,20 +205,15 @@ export default function ChatDock({
       .limit(PAGE_SIZE)
 
     if (error) {
-      setMessages([])
-      setHasMore(false)
-      setLoading(false)
+      setMessages([]); setHasMore(false); setLoading(false)
       return
     }
-
     const reversed = (data || []).slice().reverse()
     setMessages(reversed)
     prevSnapshotRef.current = reversed
     setLoading(false)
     setHasMore((data || []).length === PAGE_SIZE)
     oldestTsRef.current = reversed.length ? reversed[0].created_at : null
-
-    // mark read on initial open
     markThreadRead()
     setTimeout(scrollToBottom, 0)
   }, [me?.id, partnerId])
@@ -252,10 +234,7 @@ export default function ChatDock({
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE)
 
-    if (error) {
-      setLoadingOlder(false)
-      return
-    }
+    if (error) { setLoadingOlder(false); return }
 
     const batch = (data || []).slice().reverse()
     setMessages(prev => {
@@ -270,11 +249,9 @@ export default function ChatDock({
   }, [me?.id, partnerId])
 
   // ---- Mount / thread change ----
-  useEffect(() => {
-    loadInitial()
-  }, [loadInitial])
+  useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Load connection status for this pair (pick newest row) ----
+  // ---- Connection status (newest row) ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
@@ -301,57 +278,50 @@ export default function ChatDock({
     return () => { cancel = true }
   }, [me?.id, partnerId])
 
-  // ---- Realtime connection status for this pair ----
+  // ---- Realtime connection changes ----
   useEffect(() => {
     if (!me?.id || !partnerId) return
-
     const ch = supabase
       .channel(`conn-${me.id}-${partnerId}`)
-      .on(
-        'postgres_changes',
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'connection_requests' },
         payload => {
           const r = payload?.new
           if (!r) return
-          const isThisPair =
+          const pair =
             (r.requester === me.id && r.recipient === partnerId) ||
             (r.requester === partnerId && r.recipient === me.id)
-          if (!isThisPair) return
+          if (!pair) return
           if (r.status === 'pending') {
             if (r.requester === me.id) setConnStatus('pending_out')
             else if (r.recipient === me.id) setConnStatus('pending_in')
           }
-        }
-      )
-      .on(
-        'postgres_changes',
+        })
+      .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'connection_requests' },
         payload => {
           const r = payload?.new
           if (!r) return
-          const isThisPair =
+          const pair =
             (r.requester === me.id && r.recipient === partnerId) ||
             (r.requester === partnerId && r.recipient === me.id)
-          if (!isThisPair) return
+          if (!pair) return
           if (r.status === 'accepted') setConnStatus('accepted')
           else if (r.status === 'rejected') setConnStatus('none')
           else if (r.status === 'pending') {
             if (r.requester === me.id) setConnStatus('pending_out')
             else if (r.recipient === me.id) setConnStatus('pending_in')
           }
-        }
-      )
+        })
       .subscribe()
-
     return () => supabase.removeChannel(ch)
   }, [me?.id, partnerId])
 
-  // ---- Realtime inserts/updates/deletes for messages ----
+  // ---- Realtime messages ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
-      .on(
-        'postgres_changes',
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         payload => {
           const m = payload.new
@@ -364,15 +334,11 @@ export default function ChatDock({
           if (m.recipient === me?.id && !m.read_at) markThreadRead()
           onUnreadChange && onUnreadChange()
           if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
-        }
-      )
-      .on(
-        'postgres_changes',
+        })
+      .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
-        () => onUnreadChange && onUnreadChange()
-      )
-      .on(
-        'postgres_changes',
+        () => onUnreadChange && onUnreadChange())
+      .on('postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'messages' },
         payload => {
           const deletedId = payload.old?.id
@@ -383,14 +349,12 @@ export default function ChatDock({
             return next
           })
           onUnreadChange && onUnreadChange()
-        }
-      )
+        })
       .subscribe()
-
     return () => supabase.removeChannel(ch)
   }, [me?.id, partnerId])
 
-  // ---- Typing indicator via broadcast ----
+  // ---- Typing indicator ----
   useEffect(() => {
     const typingChannel = supabase.channel(`typing:${threadKey}`)
     typingChannel
@@ -408,7 +372,6 @@ export default function ChatDock({
       supabase.removeChannel(typingChannel)
     }
   }, [threadKey, me?.id])
-
   function broadcastTyping() {
     supabase.channel(`typing:${threadKey}`).send({
       type: 'broadcast',
@@ -422,14 +385,14 @@ export default function ChatDock({
     const el = listRef.current
     if (!el) return
     const onScroll = () => {
-      setMenuOpenFor(null) // close ⋯ menus when scrolling
+      setMenuOpenFor(null)
       trackScrollNearBottom()
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
-  // ---- Send (optimistic) with relaxed guard ----
+  // ---- Send (TEXT) via RPC ----
   async function send(e) {
     e?.preventDefault?.()
     const body = text.trim()
@@ -462,6 +425,7 @@ export default function ChatDock({
     setText('')
     setTimeout(scrollToBottom, 0)
 
+    // *** RPC send for text ***
     const { data, error } = await supabase.rpc('send_message', {
       p_recipient: partnerId,
       p_body: body,
@@ -470,15 +434,19 @@ export default function ChatDock({
       p_media_name: null,
       p_media_mime: null,
       p_media_size: null
-    });
+    })
 
     if (error || !data) {
+      console.error('Send error:', error)
+      if (error?.message) alert(`Send failed: ${error.message}`)
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
     } else {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...data } : m))
+      const row = Array.isArray(data) ? data[0] : data
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...row } : m))
     }
   }
 
+  // ---- Retry send (TEXT) via RPC ----
   async function retrySend(failedMsg) {
     if (!partnerId) return
     if (connStatus !== 'accepted') {
@@ -486,20 +454,25 @@ export default function ChatDock({
       return
     }
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
-    const { data, error } = await supabase.from('messages').insert({
-      sender: me.id,
-      recipient: partnerId,
-      body: failedMsg.body,
-      kind: failedMsg.kind || 'text',
-      media_url: failedMsg.media_url || null,
-      media_name: failedMsg.media_name || null,
-      media_mime: failedMsg.media_mime || null,
-      media_size: failedMsg.media_size || null
-    }).select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size').single()
+
+    // *** RPC send for retry ***
+    const { data, error } = await supabase.rpc('send_message', {
+      p_recipient: partnerId,
+      p_body: failedMsg.body,
+      p_kind: failedMsg.kind || 'text',
+      p_media_url: failedMsg.media_url || null,
+      p_media_name: failedMsg.media_name || null,
+      p_media_mime: failedMsg.media_mime || null,
+      p_media_size: failedMsg.media_size || null
+    })
+
     if (error || !data) {
+      console.error('Retry send error:', error)
+      if (error?.message) alert(`Send failed: ${error.message}`)
       setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
     } else {
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...data } : m))
+      const row = Array.isArray(data) ? data[0] : data
+      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...row } : m))
     }
   }
 
@@ -518,7 +491,7 @@ export default function ChatDock({
     }
   }
 
-  // ---- Accept / Reject / Request helpers ----
+  // ---- Accept / Reject / Request ----
   async function acceptConnection() {
     const { error } = await supabase
       .from('connection_requests')
@@ -527,7 +500,6 @@ export default function ChatDock({
     if (error) return alert(error.message)
     setConnStatus('accepted')
   }
-
   async function rejectConnection() {
     const { error } = await supabase
       .from('connection_requests')
@@ -536,7 +508,6 @@ export default function ChatDock({
     if (error) return alert(error.message)
     setConnStatus('none')
   }
-
   async function requestConnection() {
     if (!me?.id || !partnerId) return
     const { error } = await supabase
@@ -576,7 +547,6 @@ export default function ChatDock({
       return
     }
   }
-
   function onInputChange(e) {
     setText(e.target.value)
     if (!typingTimerRef.current) {
@@ -603,7 +573,6 @@ export default function ChatDock({
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontWeight:800 }}>{title}</div>
         <div style={{ display:'flex', gap:8 }}>
-          {/* Show Connect when no relationship yet */}
           {connStatus === 'none' && partnerId && (
             <button
               className="btn"
@@ -617,8 +586,6 @@ export default function ChatDock({
               Connect
             </button>
           )}
-
-          {/* Teal ✓ */}
           <button
             className="btn"
             onClick={markThreadRead}
@@ -631,8 +598,6 @@ export default function ChatDock({
           >
             ✓
           </button>
-
-          {/* Amber Report */}
           {partnerId && (
             <button
               className="btn"
@@ -647,8 +612,6 @@ export default function ChatDock({
               Report
             </button>
           )}
-
-          {/* Coral ✕ */}
           <button
             className="btn"
             onClick={onClose}
@@ -715,10 +678,7 @@ export default function ChatDock({
       )}
 
       {/* list */}
-      <div
-        ref={listRef}
-        style={{ padding:12, overflowY:'auto', maxHeight: 420 }}
-      >
+      <div ref={listRef} style={{ padding:12, overflowY:'auto', maxHeight: 420 }}>
         {loading && <div className="muted">Loading…</div>}
 
         {!loading && (
@@ -737,7 +697,6 @@ export default function ChatDock({
             )}
 
             {!partnerId && <div className="muted">Select a person to start chatting.</div>}
-
             {partnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
 
             {partnerId && messages.map(m => {
@@ -745,7 +704,7 @@ export default function ChatDock({
               const failed = m._status === 'failed'
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
-              const showPartnerMenu = !mine // allow report on partner's messages
+              const showPartnerMenu = !mine
 
               return (
                 <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
@@ -758,7 +717,7 @@ export default function ChatDock({
                     }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    {/* message content */}
+                    {/* content */}
                     {m.kind === 'image' && m.media_url ? (
                       <a href={m.media_url} target="_blank" rel="noreferrer" title={m.media_name} style={{ display:'inline-block' }}>
                         <img
@@ -795,7 +754,6 @@ export default function ChatDock({
                       {!mine && m.read_at && <span>· read</span>}
                     </div>
 
-                    {/* ⋯ menu trigger */}
                     {(showMenuMine || showPartnerMenu) && (
                       <button
                         type="button"
@@ -815,7 +773,6 @@ export default function ChatDock({
                       </button>
                     )}
 
-                    {/* menu */}
                     {menuOpenFor === m.id && (
                       <div
                         style={{
@@ -859,7 +816,6 @@ export default function ChatDock({
               )
             })}
 
-            {/* typing indicator */}
             {peerTyping && (
               <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
                 <div
@@ -877,7 +833,7 @@ export default function ChatDock({
         )}
       </div>
 
-      {/* composer — always visible so you can type, but Send is gated */}
+      {/* composer */}
       {(!!me?.id && partnerId) ? (
         <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)', alignItems:'center' }}>
           {/* hidden inputs */}
