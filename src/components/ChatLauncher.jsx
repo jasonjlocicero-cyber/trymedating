@@ -23,8 +23,24 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setMe(session?.user || null)
     })
-    return () => sub?.subscription?.unsubscribe?.()
+    return () => {
+      alive = false
+      sub?.subscription?.unsubscribe?.()
+    }
   }, [])
+
+  // ------- helper: load a display name/handle for a user id -------
+  async function fetchProfileName(userId) {
+    if (!userId) return ''
+    // Adjust column names if your profiles schema differs
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('display_name, handle, user_id')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error || !data) return ''
+    return data.display_name || (data.handle ? `@${data.handle}` : '')
+  }
 
   // ------- global opener + event -------
   useEffect(() => {
@@ -46,6 +62,30 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     }
     return () => window.removeEventListener('open-chat', openFromEvent)
   }, [])
+
+  // ------- realtime: auto-open when I receive a connection request (QR flow) -------
+  useEffect(() => {
+    if (!me?.id) return
+    const ch = supabase
+      .channel(`cr-autoopen-${me.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'connection_requests' },
+        async payload => {
+          const r = payload?.new
+          if (!r) return
+          // If I'm the recipient of a pending connection, open chat focused on requester
+          if (r.recipient === me.id && r.status === 'pending') {
+            const name = await fetchProfileName(r.requester)
+            setPartnerId(r.requester)
+            setPartnerName(name || '')
+            setOpen(true)
+          }
+        }
+      )
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [me?.id])
 
   // ------- recent list when open -------
   useEffect(() => {
@@ -96,16 +136,18 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   // ------- unread count -------
   async function computeUnread(userId) {
     if (!userId) { onUnreadChange(0); return }
+    // We use head:true just to trigger a count; Supabase JS v2 does not expose the header count,
+    // so fall back to length (0 or 1) — for a precise count, consider an RPC later.
     const { data, error } = await supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
       .eq('recipient', userId)
       .is('read_at', null)
     if (error) return onUnreadChange(0)
-    onUnreadChange(data?.length ?? 0) // head:true gives empty array; count returned via header not accessible, so fallback
+    onUnreadChange(data?.length ?? 0)
   }
 
-  // On mount + when user changes, do a lightweight unread recalc via RPC (better approach below)
+  // On mount + when user changes, do a lightweight unread recalc
   useEffect(() => {
     computeUnread(me?.id)
   }, [me?.id])
@@ -114,7 +156,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   useEffect(() => {
     if (!me?.id) return
     const channel = supabase
-      .channel('messages-unread')
+      .channel(`messages-unread-${me.id}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'messages' },
