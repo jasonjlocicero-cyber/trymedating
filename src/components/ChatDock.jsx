@@ -3,17 +3,16 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (full, RPC send)
- * - Connection flow: none → Connect → pending_in|pending_out → accepted
- * - Composer always visible; Send disabled until accepted
+ * ChatDock (full, RPC send + Disconnect)
+ * - Connection flow: none → Connect → pending_in|pending_out → accepted → (Disconnect) → none
+ * - Composer visible; Send disabled until 'accepted'
  * - Send text + images/files via RPC public.send_message (security definer)
  * - Typing indicator, pagination, delete own, report, mark read
- * - Header buttons colorized: ✓ teal, Report amber, ✕ coral
+ * - Header buttons colorized: ✓ teal, Report amber, ✕ coral, Disconnect slate
  */
 
 const PAGE_SIZE = 50
 const REPORT_CATEGORIES = ['spam', 'harassment', 'fake', 'scam', 'other']
-
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
 const MAX_FILE_SIZE  = 25 * 1024 * 1024 // 25MB
 
@@ -56,7 +55,7 @@ export default function ChatDock({
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
-  const [menuOpenFor, setMenuOpenFor] = useState(null) // message id for ⋯ menu
+  const [menuOpenFor, setMenuOpenFor] = useState(null)
   // none | pending_in | pending_out | accepted | unknown
   const [connStatus, setConnStatus] = useState('unknown')
 
@@ -125,7 +124,6 @@ export default function ChatDock({
       return
     }
 
-    // optimistic bubble
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
       id: tempId,
@@ -145,8 +143,6 @@ export default function ChatDock({
 
     try {
       const { url } = await uploadToStorage(file)
-
-      // *** RPC send for attachment ***
       const { data, error } = await supabase.rpc('send_message', {
         p_recipient: partnerId,
         p_body: '',
@@ -156,7 +152,6 @@ export default function ChatDock({
         p_media_mime: file.type,
         p_media_size: file.size
       })
-
       if (error || !data) {
         console.error('Attachment send error:', error)
         if (error?.message) alert(`Upload message failed: ${error.message}`)
@@ -172,7 +167,6 @@ export default function ChatDock({
       setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)
     }
   }
-
   function onPickImage(e) {
     const f = e.target.files?.[0]
     if (!f) return
@@ -251,7 +245,7 @@ export default function ChatDock({
   // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (newest row) ----
+  // ---- Connection status (fetch newest row) ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
@@ -311,6 +305,8 @@ export default function ChatDock({
           else if (r.status === 'pending') {
             if (r.requester === me.id) setConnStatus('pending_out')
             else if (r.recipient === me.id) setConnStatus('pending_in')
+          } else if (r.status === 'disconnected') {
+            setConnStatus('none')
           }
         })
       .subscribe()
@@ -425,7 +421,6 @@ export default function ChatDock({
     setText('')
     setTimeout(scrollToBottom, 0)
 
-    // *** RPC send for text ***
     const { data, error } = await supabase.rpc('send_message', {
       p_recipient: partnerId,
       p_body: body,
@@ -446,7 +441,7 @@ export default function ChatDock({
     }
   }
 
-  // ---- Retry send (TEXT) via RPC ----
+  // ---- Retry send (TEXT/ATTACHMENT) via RPC ----
   async function retrySend(failedMsg) {
     if (!partnerId) return
     if (connStatus !== 'accepted') {
@@ -455,10 +450,9 @@ export default function ChatDock({
     }
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
 
-    // *** RPC send for retry ***
     const { data, error } = await supabase.rpc('send_message', {
       p_recipient: partnerId,
-      p_body: failedMsg.body,
+      p_body: failedMsg.body || '',
       p_kind: failedMsg.kind || 'text',
       p_media_url: failedMsg.media_url || null,
       p_media_name: failedMsg.media_name || null,
@@ -491,7 +485,7 @@ export default function ChatDock({
     }
   }
 
-  // ---- Accept / Reject / Request ----
+  // ---- Accept / Reject / Request / Disconnect ----
   async function acceptConnection() {
     const { error } = await supabase
       .from('connection_requests')
@@ -505,6 +499,7 @@ export default function ChatDock({
       .from('connection_requests')
       .update({ status: 'rejected', decided_at: new Date().toISOString() })
       .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+      .eq('status', 'pending')
     if (error) return alert(error.message)
     setConnStatus('none')
   }
@@ -518,8 +513,19 @@ export default function ChatDock({
         status: 'pending',
         created_at: new Date().toISOString()
       })
-    if (error) alert(error.message)
+    if (error && error.code !== '23505') alert(error.message)
     else setConnStatus('pending_out')
+  }
+  async function disconnectConnection() {
+    // Either party can turn latest accepted row to 'disconnected' (RLS policy required)
+    const { error } = await supabase
+      .from('connection_requests')
+      .update({ status: 'disconnected', decided_at: new Date().toISOString() })
+      .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
+      .eq('status', 'accepted')
+    if (error) return alert(error.message)
+    setConnStatus('none')
+    alert('Disconnected. You can reconnect later with a new request.')
   }
 
   // ---- Mark incoming as read ----
@@ -572,7 +578,7 @@ export default function ChatDock({
       {/* header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontWeight:800 }}>{title}</div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
           {connStatus === 'none' && partnerId && (
             <button
               className="btn"
@@ -586,6 +592,22 @@ export default function ChatDock({
               Connect
             </button>
           )}
+
+          {connStatus === 'accepted' && (
+            <button
+              className="btn"
+              onClick={disconnectConnection}
+              title="Disconnect"
+              aria-label="Disconnect"
+              style={{
+                background:'#64748b', color:'#fff', border:'1px solid #475569',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Disconnect
+            </button>
+          )}
+
           <button
             className="btn"
             onClick={markThreadRead}
@@ -598,6 +620,7 @@ export default function ChatDock({
           >
             ✓
           </button>
+
           {partnerId && (
             <button
               className="btn"
@@ -612,6 +635,7 @@ export default function ChatDock({
               Report
             </button>
           )}
+
           <button
             className="btn"
             onClick={onClose}
@@ -879,6 +903,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
