@@ -1,32 +1,75 @@
 // src/routes/Connect.jsx
 import React, { useEffect, useState, useMemo } from 'react'
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useSearchParams, useNavigate, Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 /**
  * Connect (QR handler)
- * - URL format: /connect?to=<recipientUserId>
- * - If signed in: upsert pending connection (requester = me.id, recipient = to)
- * - Shows current status (pending/accepted/rejected) with CTAs
+ * - URL formats supported:
+ *    • /connect?to=<recipientUserId>
+ *    • /connect?u=<recipientUserId>
+ *    • /connect/:token   (token may be a UUID, or b64 JSON like {"t":"tmdv1","pid":"<uuid>"})
+ *
+ * - Behavior:
+ *    • If signed in and link is valid: auto-create/ensure a pending request (requester = me.id, recipient = target)
+ *    • Immediately opens the Chat bubble focused on the recipient so Accept/Reject is visible
+ *    • Shows current status (pending/accepted/rejected) with CTAs
  */
+
+// Global opener used by ChatLauncher / ChatDock
+function openChatWith(partnerId, partnerName = '') {
+  if (window.openChat) return window.openChat(partnerId, partnerName)
+  window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
+}
+
+// Decode UUID from plain token or base64 JSON token
+function tryDecodeToken(token) {
+  if (!token) return null
+  // plain UUID?
+  if (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}$/i.test(token)) {
+    return token
+  }
+  // base64 JSON with { pid: "<uuid>" }
+  try {
+    const json = JSON.parse(atob(token))
+    if (json && typeof json.pid === 'string') return json.pid
+  } catch (_) {}
+  return null
+}
+
 export default function Connect({ me }) {
   const [sp] = useSearchParams()
+  const { token } = useParams()
   const nav = useNavigate()
 
-  const recipientId = useMemo(() => sp.get('to') || '', [sp])
+  // Accept both ?to= and ?u= and /:token
+  const recipientId = useMemo(() => {
+    const byTo = sp.get('to')
+    const byU = sp.get('u')
+    return byTo || byU || tryDecodeToken(token) || ''
+  }, [sp, token])
+
   const authed = !!me?.id
 
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected'
   const [errorText, setErrorText] = useState('')
   const [recipientHandle, setRecipientHandle] = useState(null) // optional: show who you're connecting to
+  const [message, setMessage] = useState('') // small inline status text
 
   // Load current relationship status (if signed in and link valid)
   useEffect(() => {
+    let cancelled = false
+
     async function init() {
       setErrorText('')
+      setMessage('')
+
       if (!recipientId) { setStatus('invalid'); return }
+
+      // If not authed yet, show CTA; we won't auto-redirect here to avoid surprise
       if (!authed) { setStatus('none'); return }
+
       if (recipientId === me.id) { setStatus('self'); return }
 
       // Optional: fetch a public handle/display name to show
@@ -34,17 +77,24 @@ export default function Connect({ me }) {
         const { data: prof } = await supabase
           .from('profiles')
           .select('handle, display_name')
-          .eq('id', recipientId)
+          .eq('user_id', recipientId) // common schema; if your profiles uses id=auth.id, switch to .eq('id', recipientId)
           .maybeSingle()
-        setRecipientHandle(prof?.display_name || prof?.handle || null)
-      } catch {}
+        if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null)
+      } catch {
+        /* noop */
+      }
 
       // Check if a connection row already exists (either direction)
       const { data, error } = await supabase
         .from('connection_requests')
         .select('requester, recipient, status')
         .or(`and(requester.eq.${me.id},recipient.eq.${recipientId}),and(requester.eq.${recipientId},recipient.eq.${me.id})`)
+        .order('decided_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle()
+
+      if (cancelled) return
 
       if (error && error.code !== 'PGRST116') {
         setErrorText(error.message || 'Failed to load status')
@@ -52,10 +102,39 @@ export default function Connect({ me }) {
         return
       }
 
-      if (!data) { setStatus('none'); return }
+      if (!data) {
+        // No prior row — we will auto-create pending and open chat
+        setStatus('none')
+        // Auto-create (idempotent via unique pending pair index if present)
+        setBusy(true)
+        const { error: insErr } = await supabase
+          .from('connection_requests')
+          .insert({ requester: me.id, recipient: recipientId, status: 'pending' })
+        setBusy(false)
+        if (insErr && insErr.code !== '23505') {
+          setErrorText(insErr.message || 'Could not send request')
+          return
+        }
+        setStatus('pending')
+        setMessage('Request sent — opening chat…')
+        // Immediately open chat bubble focused on recipient
+        openChatWith(recipientId, recipientHandle || '')
+        return
+      }
+
+      // There is an existing row
       setStatus(data.status) // 'pending' | 'accepted' | 'rejected'
+
+      // Regardless of status, open the chat so Accept/Reject is visible (or messages if accepted)
+      openChatWith(recipientId, recipientHandle || '')
+      if (data.status === 'pending') setMessage('Request is pending — check the chat to accept/reject.')
+      if (data.status === 'accepted') setMessage('You are connected — chat is open.')
+      if (data.status === 'rejected') setMessage('This request was declined.')
     }
+
     init()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipientId, authed, me?.id])
 
   async function requestConnection() {
@@ -70,21 +149,19 @@ export default function Connect({ me }) {
     setBusy(true)
     const { error } = await supabase
       .from('connection_requests')
-      .upsert(
-        { requester: me.id, recipient: recipientId, status: 'pending' },
-        { onConflict: 'requester,recipient' }
-      )
+      .insert({ requester: me.id, recipient: recipientId, status: 'pending' })
     setBusy(false)
-    if (error) {
+    if (error && error.code !== '23505') {
       setErrorText(error.message || 'Could not send request')
     } else {
       setStatus('pending')
+      setMessage('Request sent — opening chat…')
+      openChatWith(recipientId, recipientHandle || '')
     }
   }
 
   function goToMessages() {
-    // If you have a chat opener globally (window.openChat), use it:
-    if (window.openChat) window.openChat(recipientId, recipientHandle || '')
+    if (recipientId) openChatWith(recipientId, recipientHandle || '')
     nav('/')
   }
 
@@ -102,7 +179,7 @@ export default function Connect({ me }) {
       {/* Error or invalid states */}
       {status === 'invalid' && (
         <div className="muted" style={{ marginTop: 8 }}>
-          This link is missing a valid <code>to</code> user id.
+          This link is missing a valid <code>to</code>/<code>u</code> user id or token.
         </div>
       )}
       {status === 'self' && (
@@ -113,6 +190,11 @@ export default function Connect({ me }) {
       {errorText && (
         <div className="muted" style={{ color: '#b91c1c', marginTop: 8 }}>
           {errorText}
+        </div>
+      )}
+      {message && !errorText && (
+        <div className="muted" style={{ marginTop: 8 }}>
+          {message}
         </div>
       )}
 
@@ -127,6 +209,7 @@ export default function Connect({ me }) {
         ) : status === 'pending' ? (
           <>
             <span className="muted">Request sent — waiting for acceptance.</span>
+            <button className="btn btn-primary" onClick={goToMessages}>Open messages</button>
             <Link className="btn btn-neutral" to="/">Done</Link>
           </>
         ) : status === 'rejected' ? (
@@ -160,7 +243,9 @@ export default function Connect({ me }) {
       {/* Small note */}
       <div className="muted" style={{ marginTop: 16 }}>
         After you send a request, the other person will see a popup to <strong>Accept</strong> or <strong>Decline</strong>.
+        The chat bubble will open automatically so you can decide right away.
       </div>
     </div>
   )
 }
+
