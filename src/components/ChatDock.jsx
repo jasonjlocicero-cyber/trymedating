@@ -3,13 +3,12 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (full, robust pending handling)
- * - Connection flow: none → Connect → pending_in|pending_out → accepted → (Disconnect) → none
- * - Double-pending safe: prefers incoming pending (shows Accept/Reject even if you also requested)
- * - RPC send: text + image/file attachments (storage: chat-uploads)
- * - Typing indicator, pagination, delete own, report, mark read
- * - Header buttons colorized: ✓ teal, Report amber, ✕ coral, Disconnect slate
- * - NEW: Accept/Reject buttons inline inside the **first partner message bubble** when status = pending_in
+ * ChatDock (RPC-driven connection state)
+ * - Uses SECURITY DEFINER RPCs to bypass RLS quirks for connection state/actions
+ * - Flow: none → Connect → pending_in|pending_out → accepted → (Disconnect) → none
+ * - Inline Accept/Reject inside first partner bubble when pending_in
+ * - Messaging: text + image/file attachments (Supabase Storage: chat-uploads)
+ * - Extras: typing indicator, pagination, delete own, report, mark read
  */
 
 const PAGE_SIZE = 50
@@ -23,8 +22,7 @@ function isImage(mime) {
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
-    `Reason? Choose one:
-${REPORT_CATEGORIES.join(', ')}`,
+    `Reason? Choose one:\n${REPORT_CATEGORIES.join(', ')}`,
     'spam'
   )
   if (!categoryRaw) return
@@ -58,10 +56,9 @@ export default function ChatDock({
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
   const [menuOpenFor, setMenuOpenFor] = useState(null)
-  // none | pending_in | pending_out | accepted | unknown
+  // none | pending_in | pending_out | accepted | none/unknown
   const [connStatus, setConnStatus] = useState('unknown')
-  // if there is a partner->me pending, store its row id to accept/reject precisely
-  const [incomingReqId, setIncomingReqId] = useState(null)
+  const [incomingReqId, setIncomingReqId] = useState(null) // for recipient-side accept/reject
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -77,7 +74,6 @@ export default function ChatDock({
   }, [me?.id, partnerId])
 
   const title = useMemo(() => partnerName || 'Conversation', [partnerName])
-  const canType = !!me?.id
 
   // ---- Helpers ----
   function isInThisThread(m) {
@@ -249,114 +245,22 @@ export default function ChatDock({
   // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (robust: prefer incoming pending, handle double-pending & RLS quirks) ----
-  useEffect(() => {
-    let cancel = false
-    async function loadConn() {
-      if (!me?.id || !partnerId) {
-        setConnStatus('none')
-        setIncomingReqId(null)
-        return
-      }
-
-      // Fetch ALL pending for this pair (both directions) in one query
-      const { data: pend, error: pendErr } = await supabase
-        .from('connection_requests')
-        .select('id, requester, recipient, status, created_at, decided_at')
-        .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-      if (cancel) return
-
-      if (!pendErr && Array.isArray(pend) && pend.length) {
-        // Prefer incoming pending if any
-        const incoming = pend.find(r => r.requester === partnerId && r.recipient === me.id)
-        if (incoming) {
-          setIncomingReqId(incoming.id)
-          setConnStatus('pending_in')
-          return
-        }
-        const outgoing = pend.find(r => r.requester === me.id && r.recipient === partnerId)
-        if (outgoing) {
-          setConnStatus('pending_out')
-          return
-        }
-      }
-
-      // Otherwise check latest verdict (accepted / rejected / disconnected / none)
-      const { data: latest, error: lErr } = await supabase
-        .from('connection_requests')
-        .select('requester, recipient, status, decided_at, created_at')
-        .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
-        .order('decided_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false })
-        .limit(1)
-      if (cancel) return
-      if (lErr) { setConnStatus('none'); return }
-      if (!latest || !Array.isArray(latest) || latest.length === 0) { setConnStatus('none'); return }
-      const last = latest[0]
-      if (last.status === 'accepted') setConnStatus('accepted')
-      else setConnStatus('none')
-    }
-    loadConn()
-    return () => { cancel = true }
+  // ---- Connection status (via SECURITY DEFINER RPC) ----
+  const fetchConnState = useCallback(async () => {
+    if (!me?.id || !partnerId) { setConnStatus('none'); setIncomingReqId(null); return }
+    const { data, error } = await supabase.rpc('get_connection_state', {
+      p_me: me.id,
+      p_partner: partnerId
+    })
+    if (error) { console.error('get_connection_state error', error); setConnStatus('none'); setIncomingReqId(null); return }
+    const row = Array.isArray(data) ? data[0] : data
+    setConnStatus(row?.status || 'none')
+    setIncomingReqId(row?.incoming_id || null)
   }, [me?.id, partnerId])
 
-  // ---- Realtime connection changes ----
-  useEffect(() => {
-    if (!me?.id || !partnerId) return
-    const ch = supabase
-      .channel(`conn-${me.id}-${partnerId}`)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'connection_requests' },
-        payload => {
-          const r = payload?.new
-          if (!r) return
-          const pair =
-            (r.requester === me.id && r.recipient === partnerId) ||
-            (r.requester === partnerId && r.recipient === me.id)
-          if (!pair) return
-          if (r.status === 'pending') {
-            if (r.recipient === me.id) {
-              setIncomingReqId(r.id)
-              setConnStatus('pending_in')
-            } else if (r.requester === me.id) {
-              setConnStatus('pending_out')
-            }
-          }
-        })
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'connection_requests' },
-        payload => {
-          const r = payload?.new
-          if (!r) return
-          const pair =
-            (r.requester === me.id && r.recipient === partnerId) ||
-            (r.requester === partnerId && r.recipient === me.id)
-          if (!pair) return
-          if (r.status === 'accepted') {
-            setConnStatus('accepted')
-            setIncomingReqId(null)
-          } else if (r.status === 'rejected') {
-            setConnStatus('none')
-            setIncomingReqId(null)
-          } else if (r.status === 'pending') {
-            if (r.recipient === me.id) {
-              setIncomingReqId(r.id)
-              setConnStatus('pending_in')
-            } else if (r.requester === me.id) {
-              setConnStatus('pending_out')
-            }
-          } else if (r.status === 'disconnected') {
-            setConnStatus('none')
-            setIncomingReqId(null)
-          }
-        })
-      .subscribe()
-    return () => supabase.removeChannel(ch)
-  }, [me?.id, partnerId])
+  useEffect(() => { fetchConnState() }, [fetchConnState])
 
-  // ---- Realtime messages ----
+  // Also, listen for realtime inserts/updates to messages to refresh badges/read counts
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
@@ -491,6 +395,7 @@ export default function ChatDock({
       alert('You need to accept the connection before sending. Use the Accept button above.')
       return
     }
+
     setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
 
     const { data, error } = await supabase.rpc('send_message', {
@@ -528,89 +433,37 @@ export default function ChatDock({
     }
   }
 
-  // ---- Accept / Reject / Request / Disconnect ----
+  // ---- Accept / Reject / Request / Disconnect (via RPCs) ----
   async function acceptConnection() {
-    // Prefer accepting the specific incoming row if we know it
-    if (incomingReqId) {
-      const { error } = await supabase
-        .from('connection_requests')
-        .update({ status: 'accepted', decided_at: new Date().toISOString() })
-        .eq('id', incomingReqId)
-        .eq('recipient', me.id)
-        .eq('status', 'pending')
-      if (error) return alert(error.message)
-      setConnStatus('accepted')
-      setIncomingReqId(null)
-      return
-    }
-    // Fallback
-    const { error } = await supabase
-      .from('connection_requests')
-      .update({ status: 'accepted', decided_at: new Date().toISOString() })
-      .eq('recipient', me.id)
-      .eq('requester', partnerId)
-      .eq('status', 'pending')
-    if (error) return alert(error.message)
+    if (!me?.id || !partnerId) return
+    const { data, error } = await supabase.rpc('accept_request', { p_me: me.id, p_partner: partnerId })
+    if (error) { alert(error.message); return }
     setConnStatus('accepted')
+    setIncomingReqId(null)
   }
 
   async function rejectConnection() {
-    if (incomingReqId) {
-      const { error } = await supabase
-        .from('connection_requests')
-        .update({ status: 'rejected', decided_at: new Date().toISOString() })
-        .eq('id', incomingReqId)
-        .eq('recipient', me.id)
-        .eq('status', 'pending')
-      if (error) return alert(error.message)
-      setConnStatus('none')
-      setIncomingReqId(null)
-      return
-    }
+    if (!incomingReqId) return alert('No pending request found.')
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'rejected', decided_at: new Date().toISOString() })
-      .eq('recipient', me.id)
-      .eq('requester', partnerId)
-      .eq('status', 'pending')
-    if (error) return alert(error.message)
+      .eq('id', incomingReqId)
+    if (error) { alert(error.message); return }
     setConnStatus('none')
+    setIncomingReqId(null)
   }
 
   async function requestConnection() {
     if (!me?.id || !partnerId) return
-
-    // Failsafe: if a reverse pending already exists (partner -> me), accept it immediately
-    const { data: revPend, error: revErr } = await supabase
-      .from('connection_requests')
-      .select('id')
-      .eq('requester', partnerId)
-      .eq('recipient', me.id)
-      .eq('status', 'pending')
-      .limit(1)
-    if (!revErr && Array.isArray(revPend) && revPend.length) {
-      const rid = revPend[0].id
-      const { error: accErr } = await supabase
-        .from('connection_requests')
-        .update({ status: 'accepted', decided_at: new Date().toISOString() })
-        .eq('id', rid)
-      if (accErr) return alert(accErr.message)
+    const { data, error } = await supabase.rpc('request_or_accept', { p_me: me.id, p_partner: partnerId })
+    if (error) { alert(error.message); return }
+    const result = Array.isArray(data) ? data[0] : data
+    if (result === 'accepted') {
       setConnStatus('accepted')
       setIncomingReqId(null)
-      return
+    } else {
+      setConnStatus('pending_out')
     }
-
-    // Otherwise, insert my outgoing pending
-    const { error } = await supabase
-      .from('connection_requests')
-      .insert({
-        requester: me.id,
-        recipient: partnerId,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      })
-    if (error && error.code !== '23505') alert(error.message)
-    else setConnStatus('pending_out')
   }
 
   async function disconnectConnection() {
@@ -661,7 +514,6 @@ export default function ChatDock({
   }
 
   // ===== Inline Accept/Reject placement logic =====
-  // Find the first message sent by partner (earliest in the currently loaded list).
   const firstPartnerIndex = useMemo(() => {
     if (!Array.isArray(messages) || !partnerId) return -1
     return messages.findIndex(m => m.sender === partnerId)
@@ -755,7 +607,7 @@ export default function ChatDock({
         </div>
       </div>
 
-      {/* connection status banner (kept for clarity; inline buttons are ALSO added below) */}
+      {/* connection status banner (also have inline bubble buttons below) */}
       {connStatus === 'pending_in' && (
         <div
           style={{
@@ -834,9 +686,6 @@ export default function ChatDock({
               const showMenuMine = mine && !sending && !failed
               const showPartnerMenu = !mine
 
-              // Show inline Accept/Reject only when:
-              // - status is pending_in (incoming request)
-              // - this is the FIRST partner message in the thread (idx === firstPartnerIndex)
               const showInlineDecision = connStatus === 'pending_in' && idx === firstPartnerIndex && m.sender === partnerId
 
               return (
@@ -1038,6 +887,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
