@@ -582,8 +582,7 @@ export default function ChatDock({
         <div style={{ fontWeight:800 }}>{title}</div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
           {(connStatus === 'none' || connStatus === 'pending_out') && partnerId && (
-            <button
-              className="btn"
+            <button type="button" className="btn"
               onClick={requestConnection}
               onMouseDown={(e)=>e.stopPropagation()}
               title="Connect or accept reverse request"
@@ -599,9 +598,7 @@ export default function ChatDock({
           )}
 
           {connStatus === 'accepted' && (
-            <button
-              className="btn"
-              onClick={disconnectConnection}
+            <button type="button" classNonnectConnection}
               onMouseDown={(e)=>e.stopPropagation()}
               title="Disconnect"
               aria-label="Disconnect"
@@ -617,10 +614,9 @@ export default function ChatDock({
           )}
 
           {partnerId && connStatus !== 'accepted' && (
-            <button
-              className="btn"
+            <button type="button" className="btn"
               onClick={acceptConnection}
-              onMouseDown={(e)=>e.stopPropagation()}
+              }
               title="Accept (works even if UI shows pending_out)"
               disabled={isBusy}
               style={{
@@ -634,12 +630,10 @@ export default function ChatDock({
           )}
 
           {partnerId && connStatus !== 'accepted' && (
-            <button
-              className="btn"
+            <button type="button" className="btn"
               onClick={rejectConnection}
               onMouseDown={(e)=>e.stopPropagation()}
-              title="Reject pending (if exists)"
-              disabled={isBusy}
+              title="Rejecdisabled={isBusy}
               style={{
                 opacity:isBusy?0.7:1,
                 background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
@@ -650,36 +644,31 @@ export default function ChatDock({
             </button>
           )}
 
-          <button
-            className="btn"
+          <button type="button" className="btn"
             onClick={markThreadRead}
             title="Mark read"
             aria-label="Mark read"
             style={{
-              background: '#0f766e', color:'#fff', border:'1px solid #0f766e',
-              padding:'6px 10px', borderRadius:8, fontWeight:700
+              background: '#0f766e', color:'#fff', border:'1pxing:'6px 10px', borderRadius:8, fontWeight:700
             }}
           >
             ✓
           </button>
 
           {partnerId && (
-            <button
-              className="btn"
+            <button type="button" className="btn"
               onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })}
               title="Report this user"
               aria-label="Report this user"
               style={{
-                background:'#f59e0b', color:'#111827', border:'1px solid #d97706',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
+                background:'#f59e0b', color:'#111827',        padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
               Report
             </button>
           )}
 
-          <button
-            className="btn"
+          <button type="button" className="btn"
             onClick={onClose}
             title="Close"
             aria-label="Close"
@@ -690,10 +679,7 @@ export default function ChatDock({
           >
             ✕
           </button>
-        </div>
-      </div>
-
-      {/* connection status banner (decision UI always available) */}
+ /* connection status banner (decision UI always available) */}
       {partnerId && connStatus !== 'accepted' && (
         <div
           style={{
@@ -708,11 +694,11 @@ export default function ChatDock({
              'Not connected yet — Connect or Accept if a request exists.'}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap:'wrap' }}>
-            <button className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+            <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
               style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
-            <button className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+            <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
               style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
-            <button className="btn" onClick={requestConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+            <button type="button" className="btn" onClick={requestConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
               style={{ opacity:isBusy?0.7:1, background:'#0ea5e9', color:'#fff', border:'1px solid #0284c7', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('connect') || 'Connect'} </button>
           </div>
           {lastConnError && (
@@ -731,8 +717,7 @@ export default function ChatDock({
           <>
             {hasMore && (
               <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
-                <button
-                  className="btn btn-neutral"
+                <button type="button" className="btn btn-neutral"
                   disabled={loadingOlder}
                   onClick={loadOlder}
                   title="Load older messages"
@@ -742,8 +727,7 @@ export default function ChatDock({
               </div>
             )}
 
-            {!partnerId && <div className="muted">Select a person to start chatting.</div>}
-            {partnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
+            {!partnerId && <div className="muted">SelertnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
 
             {partnerId && messages.map((m, idx) => {
               const mine = m.sender === me?.id
@@ -786,9 +770,9 @@ export default function ChatDock({
                     {/* Inline Accept/Reject INSIDE the first partner bubble (fallback-friendly) */}
                     {showInlineDecision && (
                       <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                        <button className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+                        <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
                           style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
-                        <button className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+                        <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
                           style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
                       </div>
                     )}
@@ -809,11 +793,7 @@ export default function ChatDock({
                           </button>
                         </>
                       )}
-                      {!mine && m.read_at && <span>· read</span>}
-                    </div>
-
-                    {(showMenuMine || showPartnerMenu) && (
-                      <button
+                      {!mine && m.read_at && <span                     <button
                         type="button"
                         className="btn btn-neutral"
                         onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }}
@@ -824,10 +804,7 @@ export default function ChatDock({
                           right: mine ? -6 : 'auto',
                           left: mine ? 'auto' : -6,
                           padding: '0 6px',
-                          fontSize: 12
-                        }}
-                      >
-                        ⋯
+                 ⋯
                       </button>
                     )}
 
@@ -848,19 +825,16 @@ export default function ChatDock({
                         onClick={(e) => e.stopPropagation()}
                       >
                         {mine ? (
-                          <button
-                            className="btn btn-neutral"
+                          <button type="button" className="btn btn-neutral"
                             style={{ width: '100%' }}
                             onClick={() => deleteMessage(m.id)}
                           >
                             Delete
                           </button>
                         ) : (
-                          <button
-                            className="btn btn-neutral"
+                          <button type="button" className="btn btn-neutral"
                             style={{ width: '100%' }}
-                            onClick={() => {
-                              setMenuOpenFor(null)
+            setMenuOpenFor(null)
                               reportUser({ reporterId: me.id, reportedId: partnerId })
                             }}
                           >
@@ -870,11 +844,7 @@ export default function ChatDock({
                       </div>
                     )}
                   </div>
-                </div>
-              )
-            })}
-
-            {peerTyping && (
+      peerTyping && (
               <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
                 <div
                   style={{
@@ -937,7 +907,6 @@ export default function ChatDock({
     </div>
   )
 }
-
 
 
 
