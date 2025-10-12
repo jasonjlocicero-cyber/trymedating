@@ -102,6 +102,68 @@ export default function ChatDock({
     el.scrollTop = el.scrollTop + delta
   }
 
+  // ---- Message de-dupe + reconciliation helpers ----
+  function mergeIncomingMessage(newMsg, tempMatchHint) {
+    if (!newMsg) return
+    setMessages(prev => {
+      // If the server row is already present, do nothing
+      if (newMsg.id && prev.some(x => x.id === newMsg.id)) {
+        return prev
+      }
+      // Try to find an optimistic temp we can replace
+      let idx = -1
+      if (tempMatchHint?.tempId) {
+        idx = prev.findIndex(x => x.id === tempMatchHint.tempId)
+      }
+      if (idx === -1) {
+        idx = prev.findIndex(x =>
+          String(x.id).startsWith('temp-') &&
+          x.sender === newMsg.sender &&
+          x.recipient === newMsg.recipient &&
+          x.kind === (newMsg.kind || 'text') &&
+          (x.body || '') === (newMsg.body || '') &&
+          (
+            (newMsg.media_url && x.media_url === 'uploading...') ||
+            (!newMsg.media_url)
+          )
+        )
+      }
+      if (idx !== -1) {
+        const next = prev.slice()
+        next[idx] = newMsg
+        prevSnapshotRef.current = next
+        return next
+      }
+      const next = [...prev, newMsg]
+      prevSnapshotRef.current = next
+      return next
+    })
+  }
+
+  function reconcileAfterRpc(tempId, persistedRow) {
+    if (!persistedRow) return
+    setMessages(prev => {
+      // If realtime already inserted the persisted row, drop the temp
+      if (prev.some(x => x.id === persistedRow.id)) {
+        const next = prev.filter(x => x.id !== tempId)
+        prevSnapshotRef.current = next
+        return next
+      }
+      // Otherwise, replace the temp with the real row
+      const idx = prev.findIndex(x => x.id === tempId)
+      if (idx !== -1) {
+        const next = prev.slice()
+        next[idx] = persistedRow
+        prevSnapshotRef.current = next
+        return next
+      }
+      // Fallback: append (should be rare)
+      const next = [...prev, persistedRow]
+      prevSnapshotRef.current = next
+      return next
+    })
+  }
+
   // ---- Upload helpers ----
   async function uploadToStorage(file) {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'bin'
@@ -154,7 +216,7 @@ export default function ChatDock({
         setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
       } else {
         const row = Array.isArray(data) ? data[0] : data
-        setMessages(prev => prev.map(m => (m.id === tempId ? { ...row } : m)))
+        reconcileAfterRpc(tempId, row)
       }
     } catch (err) {
       setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
@@ -261,11 +323,7 @@ export default function ChatDock({
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
         const m = payload.new
         if (!isInThisThread(m)) return
-        setMessages(prev => {
-          const next = [...prev, m]
-          prevSnapshotRef.current = next
-          return next
-        })
+        mergeIncomingMessage(m)
         if (m.recipient === me?.id && !m.read_at) markThreadRead()
         onUnreadChange && onUnreadChange()
         if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
@@ -358,7 +416,7 @@ export default function ChatDock({
       setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
     } else {
       const row = Array.isArray(data) ? data[0] : data
-      setMessages(prev => prev.map(m => (m.id === tempId ? { ...row } : m)))
+      reconcileAfterRpc(tempId, row)
     }
   }
 
@@ -385,7 +443,7 @@ export default function ChatDock({
       setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
     } else {
       const row = Array.isArray(data) ? data[0] : data
-      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...row } : m)))
+      reconcileAfterRpc(failedMsg.id, row)
     }
   }
 
