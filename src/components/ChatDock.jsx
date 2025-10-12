@@ -659,7 +659,7 @@ export default function ChatDock({
                           </button>
                         </>
                       )}
-                      {!mine && m.read_at && <span>· read</span>}
+                      
                     </div>
 
                     {(showMenuMine || showPartnerMenu) && (
