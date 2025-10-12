@@ -547,14 +547,7 @@ export default function ChatDock({
               style={{ opacity: isBusy ? 0.7 : 1, background: '#f43f5e', color: '#fff', border: '1px solid #e11d48', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               {busyLabel('reject') || 'Reject'}
             </button>
-          )}
-
-          <button type="button" className="btn" onClick={markThreadRead} title="Mark read"
-            style={{ background: '#0f766e', color: '#fff', border: '1px solid #0f766e', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
-            ✓
-          </button>
-
-          {partnerId && (
+          )}{partnerId && (
             <button type="button" className="btn" onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })} title="Report this user"
               style={{ background: '#f59e0b', color: '#111827', border: '1px solid #d97706', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               Report
@@ -747,6 +740,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
