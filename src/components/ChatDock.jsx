@@ -3,19 +3,18 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (RPC-driven + hardwired action handlers)
- * - SECURITY DEFINER RPCs for connection state/actions: get_connection_state, request_or_accept, accept_request
- * - Adds reject_request RPC usage (falls back to raw UPDATE if RPC missing)
- * - Prevents double-clicks; shows busy state; stops event bubbling so clicks always fire
+ * ChatDock (RPC-driven)
+ * - Uses SECURITY DEFINER RPCs: get_connection_state, request_or_accept, accept_request, reject_request
+ * - Shows Accept/Reject/Connect in header + banner + inline in first partner bubble
+ * - Buttons are type="button" and stop event bubbling; busy state prevents double clicks
  * - Polls connection state every 4s until accepted
- * - Inline Accept/Reject inside first partner bubble + banner + header actions
- * - Messaging: text + image/file attachments (Supabase Storage: chat-uploads)
+ * - Supports text + image/file uploads via Supabase Storage (bucket: chat-uploads)
  */
 
 const PAGE_SIZE = 50
 const REPORT_CATEGORIES = ['spam', 'harassment', 'fake', 'scam', 'other']
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB
-const MAX_FILE_SIZE  = 25 * 1024 * 1024 // 25MB
+const MAX_FILE_SIZE = 25 * 1024 * 1024 // 25MB
 
 function isImage(mime) {
   return typeof mime === 'string' && mime.startsWith('image/')
@@ -58,9 +57,10 @@ export default function ChatDock({
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
   const [menuOpenFor, setMenuOpenFor] = useState(null)
-  // none | pending_in | pending_out | accepted | unknown
-  const [connStatus, setConnStatus] = useState('unknown')
-  const [incomingReqId, setIncomingReqId] = useState(null) // recipient-side accept/reject id when available
+
+  // connection state
+  const [connStatus, setConnStatus] = useState('unknown') // none | pending_in | pending_out | accepted | unknown
+  const [incomingReqId, setIncomingReqId] = useState(null)
   const [lastConnError, setLastConnError] = useState(null)
   const [actionBusy, setActionBusy] = useState(null) // 'accept' | 'reject' | 'connect' | 'disconnect'
 
@@ -116,18 +116,9 @@ export default function ChatDock({
 
   async function sendAttachmentMessage({ file, kind }) {
     if (!partnerId) return
-    if (kind === 'image' && file.size > MAX_IMAGE_SIZE) {
-      alert('Image too large. Max 10MB.')
-      return
-    }
-    if (kind === 'file' && file.size > MAX_FILE_SIZE) {
-      alert('File too large. Max 25MB.')
-      return
-    }
-    if (connStatus !== 'accepted') {
-      alert('You need to accept the connection before sending. Use the Accept button above.')
-      return
-    }
+    if (kind === 'image' && file.size > MAX_IMAGE_SIZE) { alert('Image too large. Max 10MB.'); return }
+    if (kind === 'file' && file.size > MAX_FILE_SIZE) { alert('File too large. Max 25MB.'); return }
+    if (connStatus !== 'accepted') { alert('You need to accept the connection before sending.'); return }
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -151,7 +142,7 @@ export default function ChatDock({
       const { data, error } = await supabase.rpc('send_message', {
         p_recipient: partnerId,
         p_body: '',
-        p_kind: kind, // 'image' or 'file'
+        p_kind: kind,
         p_media_url: url,
         p_media_name: file.name,
         p_media_mime: file.type,
@@ -160,28 +151,26 @@ export default function ChatDock({
       if (error || !data) {
         console.error('Attachment send error:', error)
         if (error?.message) alert(`Upload message failed: ${error.message}`)
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+        setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
       } else {
         const row = Array.isArray(data) ? data[0] : data
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...row } : m))
+        setMessages(prev => prev.map(m => (m.id === tempId ? { ...row } : m)))
       }
     } catch (err) {
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
       alert(err.message || 'Upload failed')
     } finally {
       setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)
     }
   }
   function onPickImage(e) {
-    const f = e.target.files?.[0]
-    if (!f) return
+    const f = e.target.files?.[0]; if (!f) return
     const kind = isImage(f.type) ? 'image' : 'file'
     sendAttachmentMessage({ file: f, kind })
     e.target.value = ''
   }
   function onPickFile(e) {
-    const f = e.target.files?.[0]
-    if (!f) return
+    const f = e.target.files?.[0]; if (!f) return
     const kind = isImage(f.type) ? 'image' : 'file'
     sendAttachmentMessage({ file: f, kind })
     e.target.value = ''
@@ -189,24 +178,16 @@ export default function ChatDock({
 
   // ---- Load latest (initial) ----
   const loadInitial = useCallback(async () => {
-    if (!me?.id || !partnerId) {
-      setMessages([]); setHasMore(false); setLoading(false)
-      return
-    }
+    if (!me?.id || !partnerId) { setMessages([]); setHasMore(false); setLoading(false); return }
     setLoading(true)
     const { data, error } = await supabase
       .from('messages')
       .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
-      .or(
-        `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
-      )
+      .or(`and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`)
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE)
 
-    if (error) {
-      setMessages([]); setHasMore(false); setLoading(false)
-      return
-    }
+    if (error) { setMessages([]); setHasMore(false); setLoading(false); return }
     const reversed = (data || []).slice().reverse()
     setMessages(reversed)
     prevSnapshotRef.current = reversed
@@ -226,9 +207,7 @@ export default function ChatDock({
     const { data, error } = await supabase
       .from('messages')
       .select('id, sender, recipient, body, created_at, read_at, kind, media_url, media_name, media_mime, media_size')
-      .or(
-        `and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`
-      )
+      .or(`and(sender.eq.${me.id},recipient.eq.${partnerId}),and(sender.eq.${partnerId},recipient.eq.${me.id})`)
       .lt('created_at', oldestTsRef.current)
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE)
@@ -247,25 +226,21 @@ export default function ChatDock({
     restoreScrollAfterPrepend()
   }, [me?.id, partnerId])
 
-  // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (via SECURITY DEFINER RPC) + POLL ----
+  // ---- Connection status (RPC) + POLL ----
   const fetchConnState = useCallback(async () => {
     if (!me?.id || !partnerId) { setConnStatus('none'); setIncomingReqId(null); return }
     try {
-      const { data, error } = await supabase.rpc('get_connection_state', {
-        p_me: me.id,
-        p_partner: partnerId
-      })
-      if (error) { throw error }
+      const { data, error } = await supabase.rpc('get_connection_state', { p_me: me.id, p_partner: partnerId })
+      if (error) throw error
       const row = Array.isArray(data) ? data[0] : data
       const nextStatus = row?.conn_status || 'none'
       setConnStatus(nextStatus)
       setIncomingReqId(row?.incoming_id || null)
       setLastConnError(null)
     } catch (err) {
-      console.warn('get_connection_state failed; UI will expose force controls', err)
+      console.warn('get_connection_state failed; showing decision UI anyway', err)
       setLastConnError(err?.message || String(err))
     }
   }, [me?.id, partnerId])
@@ -283,35 +258,29 @@ export default function ChatDock({
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        payload => {
-          const m = payload.new
-          if (!isInThisThread(m)) return
-          setMessages(prev => {
-            const next = [...prev, m]
-            prevSnapshotRef.current = next
-            return next
-          })
-          if (m.recipient === me?.id && !m.read_at) markThreadRead()
-          onUnreadChange && onUnreadChange()
-          if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+        const m = payload.new
+        if (!isInThisThread(m)) return
+        setMessages(prev => {
+          const next = [...prev, m]
+          prevSnapshotRef.current = next
+          return next
         })
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
-        () => onUnreadChange && onUnreadChange())
-      .on('postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'messages' },
-        payload => {
-          const deletedId = payload.old?.id
-          if (!deletedId) return
-          setMessages(prev => {
-            const next = prev.filter(m => m.id !== deletedId)
-            prevSnapshotRef.current = next
-            return next
-          })
-          onUnreadChange && onUnreadChange()
+        if (m.recipient === me?.id && !m.read_at) markThreadRead()
+        onUnreadChange && onUnreadChange()
+        if (nearBottomRef.current) setTimeout(scrollToBottom, 0)
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => onUnreadChange && onUnreadChange())
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+        const deletedId = payload.old?.id
+        if (!deletedId) return
+        setMessages(prev => {
+          const next = prev.filter(m => m.id !== deletedId)
+          prevSnapshotRef.current = next
+          return next
         })
+        onUnreadChange && onUnreadChange()
+      })
       .subscribe()
     return () => supabase.removeChannel(ch)
   }, [me?.id, partnerId])
@@ -335,21 +304,14 @@ export default function ChatDock({
     }
   }, [threadKey, me?.id])
   function broadcastTyping() {
-    supabase.channel(`typing:${threadKey}`).send({
-      type: 'broadcast',
-      event: 'typing',
-      payload: { from: me?.id, at: Date.now() }
-    })
+    supabase.channel(`typing:${threadKey}`).send({ type: 'broadcast', event: 'typing', payload: { from: me?.id, at: Date.now() } })
   }
 
   // ---- Scroll tracking ----
   useEffect(() => {
     const el = listRef.current
     if (!el) return
-    const onScroll = () => {
-      setMenuOpenFor(null)
-      trackScrollNearBottom()
-    }
+    const onScroll = () => { setMenuOpenFor(null); trackScrollNearBottom() }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
@@ -359,10 +321,7 @@ export default function ChatDock({
     e?.preventDefault?.()
     const body = text.trim()
     if (!body || !partnerId) return
-    if (connStatus !== 'accepted') {
-      alert('You need to accept the connection before sending. Use the Accept button above.')
-      return
-    }
+    if (connStatus !== 'accepted') { alert('You need to accept the connection before sending.'); return }
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const optimistic = {
@@ -379,11 +338,7 @@ export default function ChatDock({
       media_size: null,
       _status: 'sending'
     }
-    setMessages(prev => {
-      const next = [...prev, optimistic]
-      prevSnapshotRef.current = next
-      return next
-    })
+    setMessages(prev => { const next = [...prev, optimistic]; prevSnapshotRef.current = next; return next })
     setText('')
     setTimeout(scrollToBottom, 0)
 
@@ -400,22 +355,19 @@ export default function ChatDock({
     if (error || !data) {
       console.error('Send error:', error)
       if (error?.message) alert(`Send failed: ${error.message}`)
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...m, _status: 'failed' } : m)))
     } else {
       const row = Array.isArray(data) ? data[0] : data
-      setMessages(prev => prev.map(m => m.id === tempId ? { ...row } : m))
+      setMessages(prev => prev.map(m => (m.id === tempId ? { ...row } : m)))
     }
   }
 
   // ---- Retry send via RPC ----
   async function retrySend(failedMsg) {
     if (!partnerId) return
-    if (connStatus !== 'accepted') {
-      alert('You need to accept the connection before sending. Use the Accept button above.')
-      return
-    }
+    if (connStatus !== 'accepted') { alert('You need to accept the connection before sending.'); return }
 
-    setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'sending' } : m))
+    setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'sending' } : m)))
 
     const { data, error } = await supabase.rpc('send_message', {
       p_recipient: partnerId,
@@ -430,16 +382,16 @@ export default function ChatDock({
     if (error || !data) {
       console.error('Retry send error:', error)
       if (error?.message) alert(`Send failed: ${error.message}`)
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...m, _status: 'failed' } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...m, _status: 'failed' } : m)))
     } else {
       const row = Array.isArray(data) ? data[0] : data
-      setMessages(prev => prev.map(m => m.id === failedMsg.id ? { ...row } : m))
+      setMessages(prev => prev.map(m => (m.id === failedMsg.id ? { ...row } : m)))
     }
   }
 
-  // ---- Accept / Reject / Request / Disconnect (RPCs + busy + stopPropagation) ----
+  // ---- Connection actions (RPCs + busy + stopPropagation) ----
   async function acceptConnection(e) {
-    e?.preventDefault?.(); e?.stopPropagation?.();
+    e?.preventDefault?.(); e?.stopPropagation?.()
     if (actionBusy) return
     if (!me?.id || !partnerId) return
     try {
@@ -456,14 +408,12 @@ export default function ChatDock({
   }
 
   async function rejectConnection(e) {
-    e?.preventDefault?.(); e?.stopPropagation?.();
+    e?.preventDefault?.(); e?.stopPropagation?.()
     if (actionBusy) return
     try {
       setActionBusy('reject')
-      // Prefer SECURITY DEFINER RPC if installed
       const { error: rpcErr } = await supabase.rpc('reject_request', { p_me: me?.id, p_partner: partnerId })
       if (rpcErr) {
-        // Fallback to raw update
         const { error } = await supabase
           .from('connection_requests')
           .update({ status: 'rejected', decided_at: new Date().toISOString() })
@@ -482,7 +432,7 @@ export default function ChatDock({
   }
 
   async function requestConnection(e) {
-    e?.preventDefault?.(); e?.stopPropagation?.();
+    e?.preventDefault?.(); e?.stopPropagation?.()
     if (actionBusy) return
     if (!me?.id || !partnerId) return
     try {
@@ -499,7 +449,7 @@ export default function ChatDock({
   }
 
   async function disconnectConnection(e) {
-    e?.preventDefault?.(); e?.stopPropagation?.();
+    e?.preventDefault?.(); e?.stopPropagation?.()
     if (actionBusy) return
     try {
       setActionBusy('disconnect')
@@ -533,24 +483,14 @@ export default function ChatDock({
 
   // ---- keyboard helpers ----
   function onKeyDown(e) {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose && onClose()
-      return
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
-      return
-    }
+    if (e.key === 'Escape') { e.preventDefault(); onClose && onClose(); return }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return }
   }
   function onInputChange(e) {
     setText(e.target.value)
     if (!typingTimerRef.current) {
       broadcastTyping()
-      typingTimerRef.current = window.setTimeout(() => {
-        typingTimerRef.current = null
-      }, 800)
+      typingTimerRef.current = window.setTimeout(() => { typingTimerRef.current = null }, 800)
     }
   }
 
@@ -560,149 +500,98 @@ export default function ChatDock({
     return messages.findIndex(m => m.sender === partnerId)
   }, [messages, partnerId])
 
-  const showAnyDecisionUI = (connStatus === 'pending_in') || (!!lastConnError && partnerId) || (connStatus === 'pending_out')
+  const showAnyDecisionUI = connStatus === 'pending_in' || (!!lastConnError && partnerId) || connStatus === 'pending_out'
 
   // ---- UI ----
-  const busyLabel = (k) => actionBusy === k ? '…' : undefined
+  const busyLabel = (k) => (actionBusy === k ? '…' : undefined)
   const isBusy = !!actionBusy
 
   return (
     <div
       style={{
-        position:'fixed', right:16, bottom:80,
-        width: 360, maxWidth:'calc(100vw - 24px)',
-        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
-        boxShadow:'0 12px 32px rgba(0,0,0,0.12)', zIndex: 1002,
-        display:'flex', flexDirection:'column', overflow:'hidden'
+        position: 'fixed', right: 16, bottom: 80,
+        width: 360, maxWidth: 'calc(100vw - 24px)',
+        background: '#fff', border: '1px solid var(--border)', borderRadius: 12,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.12)', zIndex: 1002,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden'
       }}
       onClick={() => setMenuOpenFor(null)}
     >
       {/* header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
-        <div style={{ fontWeight:800 }}>{title}</div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 800 }}>{title}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {(connStatus === 'none' || connStatus === 'pending_out') && partnerId && (
-            <button type="button" className="btn"
-              onClick={requestConnection}
-              onMouseDown={(e)=>e.stopPropagation()}
-              title="Connect or accept reverse request"
-              disabled={isBusy}
-              style={{
-                opacity:isBusy?0.7:1,
-                background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
+            <button type="button" className="btn" onClick={requestConnection} onMouseDown={(e) => e.stopPropagation()} title="Connect or accept reverse request" disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#0f766e', color: '#fff', border: '1px solid #0f766e', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               {busyLabel('connect') || (connStatus === 'pending_out' ? 'Resend / Accept' : 'Connect')}
             </button>
           )}
 
           {connStatus === 'accepted' && (
-            <button type="button" classNonnectConnection}
-              onMouseDown={(e)=>e.stopPropagation()}
-              title="Disconnect"
-              aria-label="Disconnect"
-              disabled={isBusy}
-              style={{
-                opacity:isBusy?0.7:1,
-                background:'#64748b', color:'#fff', border:'1px solid #475569',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
+            <button type="button" className="btn" onClick={disconnectConnection} onMouseDown={(e) => e.stopPropagation()} title="Disconnect" disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#64748b', color: '#fff', border: '1px solid #475569', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               {busyLabel('disconnect') || 'Disconnect'}
             </button>
           )}
 
           {partnerId && connStatus !== 'accepted' && (
-            <button type="button" className="btn"
-              onClick={acceptConnection}
-              }
-              title="Accept (works even if UI shows pending_out)"
-              disabled={isBusy}
-              style={{
-                opacity:isBusy?0.7:1,
-                background:'#059669', color:'#fff', border:'1px solid #047857',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
+            <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e) => e.stopPropagation()} title="Accept (works even if UI shows pending_out)" disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#059669', color: '#fff', border: '1px solid #047857', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               {busyLabel('accept') || 'Accept'}
             </button>
           )}
 
           {partnerId && connStatus !== 'accepted' && (
-            <button type="button" className="btn"
-              onClick={rejectConnection}
-              onMouseDown={(e)=>e.stopPropagation()}
-              title="Rejecdisabled={isBusy}
-              style={{
-                opacity:isBusy?0.7:1,
-                background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
+            <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e) => e.stopPropagation()} title="Reject pending (if exists)" disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#f43f5e', color: '#fff', border: '1px solid #e11d48', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               {busyLabel('reject') || 'Reject'}
             </button>
           )}
 
-          <button type="button" className="btn"
-            onClick={markThreadRead}
-            title="Mark read"
-            aria-label="Mark read"
-            style={{
-              background: '#0f766e', color:'#fff', border:'1pxing:'6px 10px', borderRadius:8, fontWeight:700
-            }}
-          >
+          <button type="button" className="btn" onClick={markThreadRead} title="Mark read"
+            style={{ background: '#0f766e', color: '#fff', border: '1px solid #0f766e', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
             ✓
           </button>
 
           {partnerId && (
-            <button type="button" className="btn"
-              onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })}
-              title="Report this user"
-              aria-label="Report this user"
-              style={{
-                background:'#f59e0b', color:'#111827',        padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
+            <button type="button" className="btn" onClick={() => reportUser({ reporterId: me.id, reportedId: partnerId })} title="Report this user"
+              style={{ background: '#f59e0b', color: '#111827', border: '1px solid #d97706', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
               Report
             </button>
           )}
 
-          <button type="button" className="btn"
-            onClick={onClose}
-            title="Close"
-            aria-label="Close"
-            style={{
-              background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
-              padding:'6px 10px', borderRadius:8, fontWeight:700
-            }}
-          >
+          <button type="button" className="btn" onClick={onClose} title="Close"
+            style={{ background: '#f43f5e', color: '#fff', border: '1px solid #e11d48', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
             ✕
           </button>
- /* connection status banner (decision UI always available) */}
+        </div>
+      </div>
+
+      {/* connection status banner */}
       {partnerId && connStatus !== 'accepted' && (
-        <div
-          style={{
-            padding: 10,
-            background: '#fff7ed',
-            borderBottom: '1px solid var(--border)'
-          }}
-        >
-          <div style={{ fontWeight:700, marginBottom: 6 }}>
-            {connStatus === 'pending_in' ? 'This person wants to connect with you.' :
-             connStatus === 'pending_out' ? 'Request sent — you can still Accept if they already requested you.' :
-             'Not connected yet — Connect or Accept if a request exists.'}
+        <div style={{ padding: 10, background: '#fff7ed', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            {connStatus === 'pending_in' ? 'This person wants to connect with you.'
+              : connStatus === 'pending_out' ? 'Request sent — you can still Accept if they already requested you.'
+              : 'Not connected yet — Connect or Accept if a request exists.'}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap:'wrap' }}>
-            <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
-              style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
-            <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
-              style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
-            <button type="button" className="btn" onClick={requestConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
-              style={{ opacity:isBusy?0.7:1, background:'#0ea5e9', color:'#fff', border:'1px solid #0284c7', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('connect') || 'Connect'} </button>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e) => e.stopPropagation()} disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#f43f5e', color: '#fff', border: '1px solid #e11d48', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
+              {busyLabel('reject') || 'Reject'}
+            </button>
+            <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e) => e.stopPropagation()} disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#0f766e', color: '#fff', border: '1px solid #0f766e', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
+              {busyLabel('accept') || 'Accept'}
+            </button>
+            <button type="button" className="btn" onClick={requestConnection} onMouseDown={(e) => e.stopPropagation()} disabled={isBusy}
+              style={{ opacity: isBusy ? 0.7 : 1, background: '#0ea5e9', color: '#fff', border: '1px solid #0284c7', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
+              {busyLabel('connect') || 'Connect'}
+            </button>
           </div>
           {lastConnError && (
-            <div className="muted" style={{ marginTop:6, fontSize:12, color:'#b91c1c' }}>
+            <div className="muted" style={{ marginTop: 6, fontSize: 12, color: '#b91c1c' }}>
               (State fallback active: {String(lastConnError)})
             </div>
           )}
@@ -710,24 +599,21 @@ export default function ChatDock({
       )}
 
       {/* list */}
-      <div ref={listRef} style={{ padding:12, overflowY:'auto', maxHeight: 420 }}>
+      <div ref={listRef} style={{ padding: 12, overflowY: 'auto', maxHeight: 420 }}>
         {loading && <div className="muted">Loading…</div>}
 
         {!loading && (
           <>
             {hasMore && (
-              <div style={{ display:'flex', justifyContent:'center', marginBottom:8 }}>
-                <button type="button" className="btn btn-neutral"
-                  disabled={loadingOlder}
-                  onClick={loadOlder}
-                  title="Load older messages"
-                >
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                <button type="button" className="btn btn-neutral" disabled={loadingOlder} onClick={loadOlder} title="Load older messages">
                   {loadingOlder ? 'Loading…' : 'Load older'}
                 </button>
               </div>
             )}
 
-            {!partnerId && <div className="muted">SelertnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
+            {!partnerId && <div className="muted">Select a person to start chatting.</div>}
+            {partnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
 
             {partnerId && messages.map((m, idx) => {
               const mine = m.sender === me?.id
@@ -735,124 +621,85 @@ export default function ChatDock({
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
               const showPartnerMenu = !mine
-
               const showInlineDecision = showAnyDecisionUI && idx === firstPartnerIndex && m.sender === partnerId
 
               return (
-                <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
+                <div key={m.id} style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom: 8, position: 'relative' }}>
                   <div
-                    style={{
-                      maxWidth:'78%', padding:'8px 10px', borderRadius: 12,
-                      background: mine ? '#0f766e' : '#f8fafc',
-                      color: mine ? '#fff' : '#0f172a',
-                      border: mine ? 'none' : '1px solid var(--border)'
-                    }}
+                    style={{ maxWidth: '78%', padding: '8px 10px', borderRadius: 12, background: mine ? '#0f766e' : '#f8fafc', color: mine ? '#fff' : '#0f172a', border: mine ? 'none' : '1px solid var(--border)' }}
                     onMouseLeave={() => setMenuOpenFor(null)}
                   >
-                    {/* content */}
                     {m.kind === 'image' && m.media_url ? (
-                      <a href={m.media_url} target="_blank" rel="noreferrer" title={m.media_name} style={{ display:'inline-block' }}>
-                        <img
-                          src={m.media_url}
-                          alt={m.media_name || 'image'}
-                          style={{ maxWidth: '100%', borderRadius: 8, display: 'block' }}
-                          onLoad={() => setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)}
-                        />
+                      <a href={m.media_url} target="_blank" rel="noreferrer" title={m.media_name} style={{ display: 'inline-block' }}>
+                        <img src={m.media_url} alt={m.media_name || 'image'} style={{ maxWidth: '100%', borderRadius: 8, display: 'block' }}
+                          onLoad={() => setTimeout(() => { if (nearBottomRef.current) scrollToBottom() }, 0)} />
                       </a>
                     ) : m.kind === 'file' && m.media_url ? (
-                      <a href={m.media_url} target="_blank" rel="noreferrer" className="btn btn-neutral" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                      <a href={m.media_url} target="_blank" rel="noreferrer" className="btn btn-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         📎 {m.media_name || 'download'} ({m.media_mime || 'file'})
                       </a>
                     ) : (
-                      <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
                     )}
 
-                    {/* Inline Accept/Reject INSIDE the first partner bubble (fallback-friendly) */}
                     {showInlineDecision && (
-                      <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                        <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
-                          style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
-                        <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
-                          style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button type="button" className="btn" onClick={rejectConnection} onMouseDown={(e) => e.stopPropagation()} disabled={isBusy}
+                          style={{ opacity: isBusy ? 0.7 : 1, background: '#f43f5e', color: '#fff', border: '1px solid #e11d48', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
+                          {busyLabel('reject') || 'Reject'}
+                        </button>
+                        <button type="button" className="btn" onClick={acceptConnection} onMouseDown={(e) => e.stopPropagation()} disabled={isBusy}
+                          style={{ opacity: isBusy ? 0.7 : 1, background: '#0f766e', color: '#fff', border: '1px solid #0f766e', padding: '6px 10px', borderRadius: 8, fontWeight: 700 }}>
+                          {busyLabel('accept') || 'Accept'}
+                        </button>
                       </div>
                     )}
 
-                    <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4, display: 'flex', gap: 8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                       <span>{new Date(m.created_at).toLocaleString()}</span>
                       {mine && sending && <span>· sending…</span>}
                       {mine && failed && (
                         <>
-                          <span style={{ color:'#f43f5e' }}>· failed</span>
-                          <button
-                            type="button"
-                            className="btn btn-neutral"
-                            style={{ padding:'0 6px', fontSize:11 }}
-                            onClick={() => retrySend(m)}
-                          >
+                          <span style={{ color: '#f43f5e' }}>· failed</span>
+                          <button type="button" className="btn btn-neutral" style={{ padding: '0 6px', fontSize: 11 }} onClick={() => retrySend(m)}>
                             retry
                           </button>
                         </>
                       )}
-                      {!mine && m.read_at && <span                     <button
-                        type="button"
-                        className="btn btn-neutral"
-                        onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }}
-                        title="More"
-                        style={{
-                          position:'absolute',
-                          top: -6,
-                          right: mine ? -6 : 'auto',
-                          left: mine ? 'auto' : -6,
-                          padding: '0 6px',
-                 ⋯
+                      {!mine && m.read_at && <span>· read</span>}
+                    </div>
+
+                    {(showMenuMine || showPartnerMenu) && (
+                      <button type="button" className="btn btn-neutral" onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === m.id ? null : m.id) }} title="More"
+                        style={{ position: 'absolute', top: -6, right: mine ? -6 : 'auto', left: mine ? 'auto' : -6, padding: '0 6px', fontSize: 12 }}>
+                        ⋯
                       </button>
                     )}
 
                     {menuOpenFor === m.id && (
                       <div
-                        style={{
-                          position:'absolute',
-                          top: 18,
-                          right: mine ? -6 : 'auto',
-                          left: mine ? 'auto' : -6,
-                          background:'#fff',
-                          border:'1px solid var(--border)',
-                          borderRadius:8,
-                          boxShadow:'0 8px 18px rgba(0,0,0,0.12)',
-                          padding:6,
-                          zIndex: 5
-                        }}
+                        style={{ position: 'absolute', top: 18, right: mine ? -6 : 'auto', left: mine ? 'auto' : -6, background: '#fff', border: '1px solid var(--border)', borderRadius: 8, boxShadow: '0 8px 18px rgba(0,0,0,0.12)', padding: 6, zIndex: 5 }}
                         onClick={(e) => e.stopPropagation()}
                       >
                         {mine ? (
-                          <button type="button" className="btn btn-neutral"
-                            style={{ width: '100%' }}
-                            onClick={() => deleteMessage(m.id)}
-                          >
+                          <button type="button" className="btn btn-neutral" style={{ width: '100%' }} onClick={() => deleteMessage(m.id)}>
                             Delete
                           </button>
                         ) : (
-                          <button type="button" className="btn btn-neutral"
-                            style={{ width: '100%' }}
-            setMenuOpenFor(null)
-                              reportUser({ reporterId: me.id, reportedId: partnerId })
-                            }}
-                          >
+                          <button type="button" className="btn btn-neutral" style={{ width: '100%' }} onClick={() => { setMenuOpenFor(null); reportUser({ reporterId: me.id, reportedId: partnerId }) }}>
                             Report user
                           </button>
                         )}
                       </div>
                     )}
                   </div>
-      peerTyping && (
-              <div style={{ marginTop:8, display:'flex', justifyContent:'flex-start' }}>
-                <div
-                  style={{
-                    maxWidth:'60%', padding:'6px 10px', borderRadius:12,
-                    background:'#f1f5f9', border:'1px solid var(--border)', color:'#0f172a',
-                    fontSize:12
-                  }}
-                >
+                </div>
+              )
+            })}
+
+            {peerTyping && (
+              <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-start' }}>
+                <div style={{ maxWidth: '60%', padding: '6px 10px', borderRadius: 12, background: '#f1f5f9', border: '1px solid var(--border)', color: '#0f172a', fontSize: 12 }}>
                   typing…
                 </div>
               </div>
@@ -863,13 +710,11 @@ export default function ChatDock({
 
       {/* composer */}
       {(!!me?.id && partnerId) ? (
-        <form onSubmit={send} style={{ display:'flex', gap:8, padding:12, borderTop:'1px solid var(--border)', alignItems:'center' }}>
-          {/* hidden inputs */}
-          <input type="file" accept="image/*" onChange={onPickImage} style={{ display:'none' }} id="pick-image" />
-          <input type="file" onChange={onPickFile} style={{ display:'none' }} id="pick-file" />
+        <form onSubmit={send} style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)', alignItems: 'center' }}>
+          <input type="file" accept="image/*" onChange={onPickImage} style={{ display: 'none' }} id="pick-image" />
+          <input type="file" onChange={onPickFile} style={{ display: 'none' }} id="pick-file" />
 
-          {/* attach controls */}
-          <div style={{ display:'flex', gap:6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
             <label htmlFor="pick-image" className="btn btn-neutral" title="Send image">🖼️</label>
             <label htmlFor="pick-file" className="btn btn-neutral" title="Send file">📎</label>
           </div>
@@ -882,25 +727,20 @@ export default function ChatDock({
             placeholder={
               connStatus === 'accepted'
                 ? 'Type a message…'
-                : (connStatus === 'pending_in'
-                    ? 'Respond to the request above to start messaging…'
-                    : (connStatus === 'pending_out'
-                        ? 'Waiting for acceptance… (you can also Accept)'
-                        : 'Not connected yet — Connect or Accept if they already requested you.'))
+                : connStatus === 'pending_in'
+                  ? 'Respond to the request above to start messaging…'
+                  : connStatus === 'pending_out'
+                    ? 'Waiting for acceptance… (you can also Accept)'
+                    : 'Not connected yet — Connect or Accept if they already requested you.'
             }
-            style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
+            style={{ flex: 1, resize: 'none', minHeight: 42, maxHeight: 120 }}
           />
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={!text.trim() || connStatus !== 'accepted'}
-            title={connStatus === 'accepted' ? 'Send' : 'You must be connected to send'}
-          >
+          <button className="btn btn-primary" type="submit" disabled={!text.trim() || connStatus !== 'accepted'} title={connStatus === 'accepted' ? 'Send' : 'You must be connected to send'}>
             Send
           </button>
         </form>
       ) : (
-        <div className="muted" style={{ padding:12, borderTop:'1px solid var(--border)' }}>
+        <div className="muted" style={{ padding: 12, borderTop: '1px solid var(--border)' }}>
           {me?.id ? 'Select a person to start chatting.' : 'Sign in to send messages.'}
         </div>
       )}
