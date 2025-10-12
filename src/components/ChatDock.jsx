@@ -3,14 +3,13 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (RPC-driven + failsafes)
- * - Uses SECURITY DEFINER RPCs for connection state/actions (get_connection_state, request_or_accept, accept_request)
- * - Adds robust fallbacks so Accept/Reject controls are visible even if state detection lags (RLS, race, or missing realtime)
- * - Polls connection state until accepted
- * - Inline Accept/Reject inside first partner bubble AND banner fallback
- * - "Force Accept" button works even if UI shows pending_out (uses accept_request RPC anyway)
+ * ChatDock (RPC-driven + hardwired action handlers)
+ * - SECURITY DEFINER RPCs for connection state/actions: get_connection_state, request_or_accept, accept_request
+ * - Adds reject_request RPC usage (falls back to raw UPDATE if RPC missing)
+ * - Prevents double-clicks; shows busy state; stops event bubbling so clicks always fire
+ * - Polls connection state every 4s until accepted
+ * - Inline Accept/Reject inside first partner bubble + banner + header actions
  * - Messaging: text + image/file attachments (Supabase Storage: chat-uploads)
- * - Extras: typing indicator, pagination, delete own, report, mark read
  */
 
 const PAGE_SIZE = 50
@@ -24,8 +23,7 @@ function isImage(mime) {
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
-    `Reason? Choose one:
-${REPORT_CATEGORIES.join(', ')}`,
+    `Reason? Choose one:\n${REPORT_CATEGORIES.join(', ')}`,
     'spam'
   )
   if (!categoryRaw) return
@@ -59,10 +57,11 @@ export default function ChatDock({
   const [hasMore, setHasMore] = useState(true)
   const [peerTyping, setPeerTyping] = useState(false)
   const [menuOpenFor, setMenuOpenFor] = useState(null)
-  // none | pending_in | pending_out | accepted | none/unknown
+  // none | pending_in | pending_out | accepted | unknown
   const [connStatus, setConnStatus] = useState('unknown')
   const [incomingReqId, setIncomingReqId] = useState(null) // recipient-side accept/reject id when available
   const [lastConnError, setLastConnError] = useState(null)
+  const [actionBusy, setActionBusy] = useState(null) // 'accept' | 'reject' | 'connect' | 'disconnect'
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -267,13 +266,11 @@ export default function ChatDock({
     } catch (err) {
       console.warn('get_connection_state failed; UI will expose force controls', err)
       setLastConnError(err?.message || String(err))
-      // Keep connStatus as-is so UI can still function
     }
   }, [me?.id, partnerId])
 
   useEffect(() => {
     fetchConnState()
-    // Poll until accepted to survive realtime/RPC delays
     window.clearInterval(pollTimerRef.current)
     pollTimerRef.current = window.setInterval(() => {
       if (connStatus !== 'accepted') fetchConnState()
@@ -281,7 +278,7 @@ export default function ChatDock({
     return () => window.clearInterval(pollTimerRef.current)
   }, [fetchConnState, connStatus])
 
-  // ---- Realtime messages (for thread items; connection state is polled) ----
+  // ---- Realtime messages ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
@@ -439,67 +436,86 @@ export default function ChatDock({
     }
   }
 
-  // ---- Delete own message ----
-  async function deleteMessage(id) {
-    setMenuOpenFor(null)
-    if (!id) return
-    const yes = window.confirm('Delete this message for everyone? This cannot be undone.')
-    if (!yes) return
-    const snapshot = prevSnapshotRef.current
-    setMessages(prev => prev.filter(m => m.id !== id))
-    const { error } = await supabase.from('messages').delete().eq('id', id)
-    if (error) {
-      setMessages(snapshot)
-      alert(error.message || 'Failed to delete message')
+  // ---- Accept / Reject / Request / Disconnect (RPCs + busy + stopPropagation) ----
+  async function acceptConnection(e) {
+    e?.preventDefault?.(); e?.stopPropagation?.();
+    if (actionBusy) return
+    if (!me?.id || !partnerId) return
+    try {
+      setActionBusy('accept')
+      const { error } = await supabase.rpc('accept_request', { p_me: me.id, p_partner: partnerId })
+      if (error) throw error
+      await fetchConnState()
+    } catch (err) {
+      console.error('accept_request failed', err)
+      alert(err.message || 'Accept failed')
+    } finally {
+      setActionBusy(null)
     }
   }
 
-  // ---- Accept / Reject / Request / Disconnect (RPCs + force actions) ----
-  async function acceptConnection() {
-    if (!me?.id || !partnerId) return
-    const { data, error } = await supabase.rpc('accept_request', { p_me: me.id, p_partner: partnerId })
-    if (error) { alert(error.message); return }
-    await fetchConnState()
+  async function rejectConnection(e) {
+    e?.preventDefault?.(); e?.stopPropagation?.();
+    if (actionBusy) return
+    try {
+      setActionBusy('reject')
+      // Prefer SECURITY DEFINER RPC if installed
+      const { error: rpcErr } = await supabase.rpc('reject_request', { p_me: me?.id, p_partner: partnerId })
+      if (rpcErr) {
+        // Fallback to raw update
+        const { error } = await supabase
+          .from('connection_requests')
+          .update({ status: 'rejected', decided_at: new Date().toISOString() })
+          .eq('recipient', me?.id)
+          .eq('requester', partnerId)
+          .eq('status', 'pending')
+        if (error) throw error
+      }
+      await fetchConnState()
+    } catch (err) {
+      console.error('reject failed', err)
+      alert(err.message || 'Reject failed')
+    } finally {
+      setActionBusy(null)
+    }
   }
 
-  async function rejectConnection() {
-    // If we have the incoming id, use it; otherwise attempt a generic recipient-side reject
-    if (incomingReqId) {
+  async function requestConnection(e) {
+    e?.preventDefault?.(); e?.stopPropagation?.();
+    if (actionBusy) return
+    if (!me?.id || !partnerId) return
+    try {
+      setActionBusy('connect')
+      const { error } = await supabase.rpc('request_or_accept', { p_me: me.id, p_partner: partnerId })
+      if (error) throw error
+      await fetchConnState()
+    } catch (err) {
+      console.error('request_or_accept failed', err)
+      alert(err.message || 'Connect failed')
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function disconnectConnection(e) {
+    e?.preventDefault?.(); e?.stopPropagation?.();
+    if (actionBusy) return
+    try {
+      setActionBusy('disconnect')
       const { error } = await supabase
         .from('connection_requests')
-        .update({ status: 'rejected', decided_at: new Date().toISOString() })
-        .eq('id', incomingReqId)
-      if (error) { alert(error.message); return }
+        .update({ status: 'disconnected', decided_at: new Date().toISOString() })
+        .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
+        .eq('status', 'accepted')
+      if (error) throw error
       await fetchConnState()
-      return
+      alert('Disconnected. You can reconnect later with a new request.')
+    } catch (err) {
+      console.error('disconnect failed', err)
+      alert(err.message || 'Disconnect failed')
+    } finally {
+      setActionBusy(null)
     }
-    // Generic reject attempt (will no-op if nothing to reject)
-    const { error } = await supabase
-      .from('connection_requests')
-      .update({ status: 'rejected', decided_at: new Date().toISOString() })
-      .eq('recipient', me?.id)
-      .eq('requester', partnerId)
-      .eq('status', 'pending')
-    if (error) { console.warn('generic reject failed', error) }
-    await fetchConnState()
-  }
-
-  async function requestConnection() {
-    if (!me?.id || !partnerId) return
-    const { data, error } = await supabase.rpc('request_or_accept', { p_me: me.id, p_partner: partnerId })
-    if (error) { alert(error.message); return }
-    await fetchConnState()
-  }
-
-  async function disconnectConnection() {
-    const { error } = await supabase
-      .from('connection_requests')
-      .update({ status: 'disconnected', decided_at: new Date().toISOString() })
-      .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
-      .eq('status', 'accepted')
-    if (error) return alert(error.message)
-    await fetchConnState()
-    alert('Disconnected. You can reconnect later with a new request.')
   }
 
   // ---- Mark incoming as read ----
@@ -546,6 +562,9 @@ export default function ChatDock({
   const showAnyDecisionUI = (connStatus === 'pending_in') || (!!lastConnError && partnerId) || (connStatus === 'pending_out')
 
   // ---- UI ----
+  const busyLabel = (k) => actionBusy === k ? '…' : undefined
+  const isBusy = !!actionBusy
+
   return (
     <div
       style={{
@@ -565,13 +584,16 @@ export default function ChatDock({
             <button
               className="btn"
               onClick={requestConnection}
+              onMouseDown={(e)=>e.stopPropagation()}
               title="Connect or accept reverse request"
+              disabled={isBusy}
               style={{
+                opacity:isBusy?0.7:1,
                 background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
                 padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
-              {connStatus === 'pending_out' ? 'Resend / Accept' : 'Connect'}
+              {busyLabel('connect') || (connStatus === 'pending_out' ? 'Resend / Accept' : 'Connect')}
             </button>
           )}
 
@@ -579,44 +601,51 @@ export default function ChatDock({
             <button
               className="btn"
               onClick={disconnectConnection}
+              onMouseDown={(e)=>e.stopPropagation()}
               title="Disconnect"
               aria-label="Disconnect"
+              disabled={isBusy}
               style={{
+                opacity:isBusy?0.7:1,
                 background:'#64748b', color:'#fff', border:'1px solid #475569',
                 padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
-              Disconnect
+              {busyLabel('disconnect') || 'Disconnect'}
             </button>
           )}
 
-          {/* Force Accept visible when status not accepted to break stalemates */}
           {partnerId && connStatus !== 'accepted' && (
             <button
               className="btn"
               onClick={acceptConnection}
-              title="Force accept if a reverse pending exists"
+              onMouseDown={(e)=>e.stopPropagation()}
+              title="Accept (works even if UI shows pending_out)"
+              disabled={isBusy}
               style={{
+                opacity:isBusy?0.7:1,
                 background:'#059669', color:'#fff', border:'1px solid #047857',
                 padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
-              Accept
+              {busyLabel('accept') || 'Accept'}
             </button>
           )}
 
-          {/* Optional inline reject in header when not accepted */}
           {partnerId && connStatus !== 'accepted' && (
             <button
               className="btn"
               onClick={rejectConnection}
+              onMouseDown={(e)=>e.stopPropagation()}
               title="Reject pending (if exists)"
+              disabled={isBusy}
               style={{
+                opacity:isBusy?0.7:1,
                 background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
                 padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
-              Reject
+              {busyLabel('reject') || 'Reject'}
             </button>
           )}
 
@@ -663,7 +692,7 @@ export default function ChatDock({
         </div>
       </div>
 
-      {/* connection status banner (always shows decision UI if detection failed) */}
+      {/* connection status banner (decision UI always available) */}
       {partnerId && connStatus !== 'accepted' && (
         <div
           style={{
@@ -674,40 +703,16 @@ export default function ChatDock({
         >
           <div style={{ fontWeight:700, marginBottom: 6 }}>
             {connStatus === 'pending_in' ? 'This person wants to connect with you.' :
-             connStatus === 'pending_out' ? 'Request sent — you can still accept if they already requested you.' :
-             'Not connected yet — you can connect or accept if a request exists.'}
+             connStatus === 'pending_out' ? 'Request sent — you can still Accept if they already requested you.' :
+             'Not connected yet — Connect or Accept if a request exists.'}
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap:'wrap' }}>
-            <button
-              className="btn"
-              onClick={rejectConnection}
-              style={{
-                background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
-              Reject
-            </button>
-            <button
-              className="btn"
-              onClick={acceptConnection}
-              style={{
-                background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
-              Accept
-            </button>
-            <button
-              className="btn"
-              onClick={requestConnection}
-              style={{
-                background:'#0ea5e9', color:'#fff', border:'1px solid #0284c7',
-                padding:'6px 10px', borderRadius:8, fontWeight:700
-              }}
-            >
-              Connect
-            </button>
+            <button className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+              style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
+            <button className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+              style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
+            <button className="btn" onClick={requestConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+              style={{ opacity:isBusy?0.7:1, background:'#0ea5e9', color:'#fff', border:'1px solid #0284c7', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('connect') || 'Connect'} </button>
           </div>
           {lastConnError && (
             <div className="muted" style={{ marginTop:6, fontSize:12, color:'#b91c1c' }}>
@@ -780,26 +785,10 @@ export default function ChatDock({
                     {/* Inline Accept/Reject INSIDE the first partner bubble (fallback-friendly) */}
                     {showInlineDecision && (
                       <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                        <button
-                          className="btn"
-                          onClick={rejectConnection}
-                          style={{
-                            background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
-                            padding:'6px 10px', borderRadius:8, fontWeight:700
-                          }}
-                        >
-                          Reject
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={acceptConnection}
-                          style={{
-                            background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
-                            padding:'6px 10px', borderRadius:8, fontWeight:700
-                          }}
-                        >
-                          Accept
-                        </button>
+                        <button className="btn" onClick={rejectConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+                          style={{ opacity:isBusy?0.7:1, background:'#f43f5e', color:'#fff', border:'1px solid #e11d48', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('reject') || 'Reject'} </button>
+                        <button className="btn" onClick={acceptConnection} onMouseDown={(e)=>e.stopPropagation()} disabled={isBusy}
+                          style={{ opacity:isBusy?0.7:1, background:'#0f766e', color:'#fff', border:'1px solid #0f766e', padding:'6px 10px', borderRadius:8, fontWeight:700 }}> {busyLabel('accept') || 'Accept'} </button>
                       </div>
                     )}
 
@@ -947,6 +936,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
