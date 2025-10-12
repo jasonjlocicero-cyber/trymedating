@@ -3,10 +3,12 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (RPC-driven connection state)
- * - Uses SECURITY DEFINER RPCs to bypass RLS quirks for connection state/actions
- * - Flow: none → Connect → pending_in|pending_out → accepted → (Disconnect) → none
- * - Inline Accept/Reject inside first partner bubble when pending_in
+ * ChatDock (RPC-driven + failsafes)
+ * - Uses SECURITY DEFINER RPCs for connection state/actions (get_connection_state, request_or_accept, accept_request)
+ * - Adds robust fallbacks so Accept/Reject controls are visible even if state detection lags (RLS, race, or missing realtime)
+ * - Polls connection state until accepted
+ * - Inline Accept/Reject inside first partner bubble AND banner fallback
+ * - "Force Accept" button works even if UI shows pending_out (uses accept_request RPC anyway)
  * - Messaging: text + image/file attachments (Supabase Storage: chat-uploads)
  * - Extras: typing indicator, pagination, delete own, report, mark read
  */
@@ -22,7 +24,8 @@ function isImage(mime) {
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
-    `Reason? Choose one:\n${REPORT_CATEGORIES.join(', ')}`,
+    `Reason? Choose one:
+${REPORT_CATEGORIES.join(', ')}`,
     'spam'
   )
   if (!categoryRaw) return
@@ -58,7 +61,8 @@ export default function ChatDock({
   const [menuOpenFor, setMenuOpenFor] = useState(null)
   // none | pending_in | pending_out | accepted | none/unknown
   const [connStatus, setConnStatus] = useState('unknown')
-  const [incomingReqId, setIncomingReqId] = useState(null) // for recipient-side accept/reject
+  const [incomingReqId, setIncomingReqId] = useState(null) // recipient-side accept/reject id when available
+  const [lastConnError, setLastConnError] = useState(null)
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -66,6 +70,7 @@ export default function ChatDock({
   const oldestTsRef = useRef(null)
   const lastScrollHeightRef = useRef(0)
   const prevSnapshotRef = useRef([])
+  const pollTimerRef = useRef(null)
 
   const threadKey = useMemo(() => {
     const a = String(me?.id || '')
@@ -245,22 +250,38 @@ export default function ChatDock({
   // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (via SECURITY DEFINER RPC) ----
+  // ---- Connection status (via SECURITY DEFINER RPC) + POLL ----
   const fetchConnState = useCallback(async () => {
     if (!me?.id || !partnerId) { setConnStatus('none'); setIncomingReqId(null); return }
-    const { data, error } = await supabase.rpc('get_connection_state', {
-      p_me: me.id,
-      p_partner: partnerId
-    })
-    if (error) { console.error('get_connection_state error', error); setConnStatus('none'); setIncomingReqId(null); return }
-    const row = Array.isArray(data) ? data[0] : data
-    setConnStatus(row?.status || 'none')
-    setIncomingReqId(row?.incoming_id || null)
+    try {
+      const { data, error } = await supabase.rpc('get_connection_state', {
+        p_me: me.id,
+        p_partner: partnerId
+      })
+      if (error) { throw error }
+      const row = Array.isArray(data) ? data[0] : data
+      const nextStatus = row?.status || 'none'
+      setConnStatus(nextStatus)
+      setIncomingReqId(row?.incoming_id || null)
+      setLastConnError(null)
+    } catch (err) {
+      console.warn('get_connection_state failed; UI will expose force controls', err)
+      setLastConnError(err?.message || String(err))
+      // Keep connStatus as-is so UI can still function
+    }
   }, [me?.id, partnerId])
 
-  useEffect(() => { fetchConnState() }, [fetchConnState])
+  useEffect(() => {
+    fetchConnState()
+    // Poll until accepted to survive realtime/RPC delays
+    window.clearInterval(pollTimerRef.current)
+    pollTimerRef.current = window.setInterval(() => {
+      if (connStatus !== 'accepted') fetchConnState()
+    }, 4000)
+    return () => window.clearInterval(pollTimerRef.current)
+  }, [fetchConnState, connStatus])
 
-  // Also, listen for realtime inserts/updates to messages to refresh badges/read counts
+  // ---- Realtime messages (for thread items; connection state is polled) ----
   useEffect(() => {
     const ch = supabase
       .channel(`msg-${me?.id}-${partnerId}`)
@@ -433,37 +454,41 @@ export default function ChatDock({
     }
   }
 
-  // ---- Accept / Reject / Request / Disconnect (via RPCs) ----
+  // ---- Accept / Reject / Request / Disconnect (RPCs + force actions) ----
   async function acceptConnection() {
     if (!me?.id || !partnerId) return
     const { data, error } = await supabase.rpc('accept_request', { p_me: me.id, p_partner: partnerId })
     if (error) { alert(error.message); return }
-    setConnStatus('accepted')
-    setIncomingReqId(null)
+    await fetchConnState()
   }
 
   async function rejectConnection() {
-    if (!incomingReqId) return alert('No pending request found.')
+    // If we have the incoming id, use it; otherwise attempt a generic recipient-side reject
+    if (incomingReqId) {
+      const { error } = await supabase
+        .from('connection_requests')
+        .update({ status: 'rejected', decided_at: new Date().toISOString() })
+        .eq('id', incomingReqId)
+      if (error) { alert(error.message); return }
+      await fetchConnState()
+      return
+    }
+    // Generic reject attempt (will no-op if nothing to reject)
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'rejected', decided_at: new Date().toISOString() })
-      .eq('id', incomingReqId)
-    if (error) { alert(error.message); return }
-    setConnStatus('none')
-    setIncomingReqId(null)
+      .eq('recipient', me?.id)
+      .eq('requester', partnerId)
+      .eq('status', 'pending')
+    if (error) { console.warn('generic reject failed', error) }
+    await fetchConnState()
   }
 
   async function requestConnection() {
     if (!me?.id || !partnerId) return
     const { data, error } = await supabase.rpc('request_or_accept', { p_me: me.id, p_partner: partnerId })
     if (error) { alert(error.message); return }
-    const result = Array.isArray(data) ? data[0] : data
-    if (result === 'accepted') {
-      setConnStatus('accepted')
-      setIncomingReqId(null)
-    } else {
-      setConnStatus('pending_out')
-    }
+    await fetchConnState()
   }
 
   async function disconnectConnection() {
@@ -473,8 +498,7 @@ export default function ChatDock({
       .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
       .eq('status', 'accepted')
     if (error) return alert(error.message)
-    setConnStatus('none')
-    setIncomingReqId(null)
+    await fetchConnState()
     alert('Disconnected. You can reconnect later with a new request.')
   }
 
@@ -519,6 +543,8 @@ export default function ChatDock({
     return messages.findIndex(m => m.sender === partnerId)
   }, [messages, partnerId])
 
+  const showAnyDecisionUI = (connStatus === 'pending_in') || (!!lastConnError && partnerId) || (connStatus === 'pending_out')
+
   // ---- UI ----
   return (
     <div
@@ -535,17 +561,17 @@ export default function ChatDock({
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderBottom:'1px solid var(--border)' }}>
         <div style={{ fontWeight:800 }}>{title}</div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
-          {connStatus === 'none' && partnerId && (
+          {(connStatus === 'none' || connStatus === 'pending_out') && partnerId && (
             <button
               className="btn"
               onClick={requestConnection}
-              title="Send connection request"
+              title="Connect or accept reverse request"
               style={{
                 background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
                 padding:'6px 10px', borderRadius:8, fontWeight:700
               }}
             >
-              Connect
+              {connStatus === 'pending_out' ? 'Resend / Accept' : 'Connect'}
             </button>
           )}
 
@@ -561,6 +587,36 @@ export default function ChatDock({
               }}
             >
               Disconnect
+            </button>
+          )}
+
+          {/* Force Accept visible when status not accepted to break stalemates */}
+          {partnerId && connStatus !== 'accepted' && (
+            <button
+              className="btn"
+              onClick={acceptConnection}
+              title="Force accept if a reverse pending exists"
+              style={{
+                background:'#059669', color:'#fff', border:'1px solid #047857',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Accept
+            </button>
+          )}
+
+          {/* Optional inline reject in header when not accepted */}
+          {partnerId && connStatus !== 'accepted' && (
+            <button
+              className="btn"
+              onClick={rejectConnection}
+              title="Reject pending (if exists)"
+              style={{
+                background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Reject
             </button>
           )}
 
@@ -607,20 +663,21 @@ export default function ChatDock({
         </div>
       </div>
 
-      {/* connection status banner (also have inline bubble buttons below) */}
-      {connStatus === 'pending_in' && (
+      {/* connection status banner (always shows decision UI if detection failed) */}
+      {partnerId && connStatus !== 'accepted' && (
         <div
           style={{
             padding: 10,
-            background: '#fef3c7',
-            borderBottom: '1px solid var(--border)',
-            textAlign: 'center'
+            background: '#fff7ed',
+            borderBottom: '1px solid var(--border)'
           }}
         >
-          <div style={{ marginBottom: 6 }}>
-            This person wants to connect with you.
+          <div style={{ fontWeight:700, marginBottom: 6 }}>
+            {connStatus === 'pending_in' ? 'This person wants to connect with you.' :
+             connStatus === 'pending_out' ? 'Request sent — you can still accept if they already requested you.' :
+             'Not connected yet — you can connect or accept if a request exists.'}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, flexWrap:'wrap' }}>
             <button
               className="btn"
               onClick={rejectConnection}
@@ -641,19 +698,22 @@ export default function ChatDock({
             >
               Accept
             </button>
+            <button
+              className="btn"
+              onClick={requestConnection}
+              style={{
+                background:'#0ea5e9', color:'#fff', border:'1px solid #0284c7',
+                padding:'6px 10px', borderRadius:8, fontWeight:700
+              }}
+            >
+              Connect
+            </button>
           </div>
-        </div>
-      )}
-      {connStatus === 'pending_out' && (
-        <div
-          style={{
-            padding: 10,
-            background: '#f1f5f9',
-            borderBottom: '1px solid var(--border)',
-            textAlign: 'center'
-          }}
-        >
-          Request sent — waiting for acceptance.
+          {lastConnError && (
+            <div className="muted" style={{ marginTop:6, fontSize:12, color:'#b91c1c' }}>
+              (State fallback active: {String(lastConnError)})
+            </div>
+          )}
         </div>
       )}
 
@@ -686,7 +746,7 @@ export default function ChatDock({
               const showMenuMine = mine && !sending && !failed
               const showPartnerMenu = !mine
 
-              const showInlineDecision = connStatus === 'pending_in' && idx === firstPartnerIndex && m.sender === partnerId
+              const showInlineDecision = showAnyDecisionUI && idx === firstPartnerIndex && m.sender === partnerId
 
               return (
                 <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
@@ -717,7 +777,7 @@ export default function ChatDock({
                       <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
                     )}
 
-                    {/* Inline Accept/Reject INSIDE the first partner bubble */}
+                    {/* Inline Accept/Reject INSIDE the first partner bubble (fallback-friendly) */}
                     {showInlineDecision && (
                       <div style={{ display:'flex', gap:8, marginTop:8 }}>
                         <button
@@ -865,8 +925,8 @@ export default function ChatDock({
                 : (connStatus === 'pending_in'
                     ? 'Respond to the request above to start messaging…'
                     : (connStatus === 'pending_out'
-                        ? 'Waiting for acceptance…'
-                        : 'Not connected yet — you can still type.'))
+                        ? 'Waiting for acceptance… (you can also Accept)'
+                        : 'Not connected yet — Connect or Accept if they already requested you.'))
             }
             style={{ flex:1, resize:'none', minHeight:42, maxHeight:120 }}
           />
@@ -887,6 +947,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
