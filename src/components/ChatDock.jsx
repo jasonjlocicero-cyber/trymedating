@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabaseClient'
  * - RPC send: text + image/file attachments (storage: chat-uploads)
  * - Typing indicator, pagination, delete own, report, mark read
  * - Header buttons colorized: ✓ teal, Report amber, ✕ coral, Disconnect slate
+ * - NEW: Accept/Reject buttons inline inside the **first partner message bubble** when status = pending_in
  */
 
 const PAGE_SIZE = 50
@@ -647,6 +648,13 @@ export default function ChatDock({
     }
   }
 
+  // ===== Inline Accept/Reject placement logic =====
+  // Find the first message sent by partner (earliest in the currently loaded list).
+  const firstPartnerIndex = useMemo(() => {
+    if (!Array.isArray(messages) || !partnerId) return -1
+    return messages.findIndex(m => m.sender === partnerId)
+  }, [messages, partnerId])
+
   // ---- UI ----
   return (
     <div
@@ -735,7 +743,7 @@ export default function ChatDock({
         </div>
       </div>
 
-      {/* connection status banner */}
+      {/* connection status banner (kept for clarity; inline buttons are ALSO added below) */}
       {connStatus === 'pending_in' && (
         <div
           style={{
@@ -807,12 +815,17 @@ export default function ChatDock({
             {!partnerId && <div className="muted">Select a person to start chatting.</div>}
             {partnerId && messages.length === 0 && <div className="muted">Say hi 👋</div>}
 
-            {partnerId && messages.map(m => {
+            {partnerId && messages.map((m, idx) => {
               const mine = m.sender === me?.id
               const failed = m._status === 'failed'
               const sending = m._status === 'sending'
               const showMenuMine = mine && !sending && !failed
               const showPartnerMenu = !mine
+
+              // Show inline Accept/Reject only when:
+              // - status is pending_in (incoming request)
+              // - this is the FIRST partner message in the thread (idx === firstPartnerIndex)
+              const showInlineDecision = connStatus === 'pending_in' && idx === firstPartnerIndex && m.sender === partnerId
 
               return (
                 <div key={m.id} style={{ display:'flex', justifyContent: mine ? 'flex-end' : 'flex-start', marginBottom:8, position:'relative' }}>
@@ -841,6 +854,32 @@ export default function ChatDock({
                       </a>
                     ) : (
                       <div style={{ whiteSpace:'pre-wrap' }}>{m.body}</div>
+                    )}
+
+                    {/* Inline Accept/Reject INSIDE the first partner bubble */}
+                    {showInlineDecision && (
+                      <div style={{ display:'flex', gap:8, marginTop:8 }}>
+                        <button
+                          className="btn"
+                          onClick={rejectConnection}
+                          style={{
+                            background:'#f43f5e', color:'#fff', border:'1px solid #e11d48',
+                            padding:'6px 10px', borderRadius:8, fontWeight:700
+                          }}
+                        >
+                          Reject
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={acceptConnection}
+                          style={{
+                            background:'#0f766e', color:'#fff', border:'1px solid #0f766e',
+                            padding:'6px 10px', borderRadius:8, fontWeight:700
+                          }}
+                        >
+                          Accept
+                        </button>
+                      </div>
                     )}
 
                     <div className="muted" style={{ fontSize:11, marginTop:4, display:'flex', gap:8, justifyContent: mine ? 'flex-end' : 'flex-start' }}>
@@ -987,6 +1026,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
