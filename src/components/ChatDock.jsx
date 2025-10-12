@@ -23,7 +23,8 @@ function isImage(mime) {
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
-    `Reason? Choose one:\n${REPORT_CATEGORIES.join(', ')}`,
+    `Reason? Choose one:
+${REPORT_CATEGORIES.join(', ')}`,
     'spam'
   )
   if (!categoryRaw) return
@@ -248,7 +249,7 @@ export default function ChatDock({
   // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (robust: prefer incoming pending) ----
+  // ---- Connection status (robust: prefer incoming pending, handle double-pending & RLS quirks) ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
@@ -258,42 +259,31 @@ export default function ChatDock({
         return
       }
 
-      // 1) Incoming pending (partner -> me)
-      const { data: inc, error: incErr } = await supabase
+      // Fetch ALL pending for this pair (both directions) in one query
+      const { data: pend, error: pendErr } = await supabase
         .from('connection_requests')
         .select('id, requester, recipient, status, created_at, decided_at')
-        .eq('requester', partnerId)
-        .eq('recipient', me.id)
+        .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
       if (cancel) return
-      if (!incErr && inc?.id) {
-        setIncomingReqId(inc.id)
-        setConnStatus('pending_in')
-        return
-      } else {
-        setIncomingReqId(null)
+
+      if (!pendErr && Array.isArray(pend) && pend.length) {
+        // Prefer incoming pending if any
+        const incoming = pend.find(r => r.requester === partnerId && r.recipient === me.id)
+        if (incoming) {
+          setIncomingReqId(incoming.id)
+          setConnStatus('pending_in')
+          return
+        }
+        const outgoing = pend.find(r => r.requester === me.id && r.recipient === partnerId)
+        if (outgoing) {
+          setConnStatus('pending_out')
+          return
+        }
       }
 
-      // 2) Outgoing pending (me -> partner)
-      const { data: out, error: outErr } = await supabase
-        .from('connection_requests')
-        .select('id, requester, recipient, status, created_at, decided_at')
-        .eq('requester', me.id)
-        .eq('recipient', partnerId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (cancel) return
-      if (!outErr && out?.id) {
-        setConnStatus('pending_out')
-        return
-      }
-
-      // 3) Otherwise check latest verdict (accepted / rejected / disconnected / none)
+      // Otherwise check latest verdict (accepted / rejected / disconnected / none)
       const { data: latest, error: lErr } = await supabase
         .from('connection_requests')
         .select('requester, recipient, status, decided_at, created_at')
@@ -301,11 +291,11 @@ export default function ChatDock({
         .order('decided_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(1)
-        .maybeSingle()
       if (cancel) return
-      if (lErr && lErr.code !== 'PGRST116') { setConnStatus('none'); return }
-      if (!latest) { setConnStatus('none'); return }
-      if (latest.status === 'accepted') setConnStatus('accepted')
+      if (lErr) { setConnStatus('none'); return }
+      if (!latest || !Array.isArray(latest) || latest.length === 0) { setConnStatus('none'); return }
+      const last = latest[0]
+      if (last.status === 'accepted') setConnStatus('accepted')
       else setConnStatus('none')
     }
     loadConn()
@@ -589,6 +579,28 @@ export default function ChatDock({
 
   async function requestConnection() {
     if (!me?.id || !partnerId) return
+
+    // Failsafe: if a reverse pending already exists (partner -> me), accept it immediately
+    const { data: revPend, error: revErr } = await supabase
+      .from('connection_requests')
+      .select('id')
+      .eq('requester', partnerId)
+      .eq('recipient', me.id)
+      .eq('status', 'pending')
+      .limit(1)
+    if (!revErr && Array.isArray(revPend) && revPend.length) {
+      const rid = revPend[0].id
+      const { error: accErr } = await supabase
+        .from('connection_requests')
+        .update({ status: 'accepted', decided_at: new Date().toISOString() })
+        .eq('id', rid)
+      if (accErr) return alert(accErr.message)
+      setConnStatus('accepted')
+      setIncomingReqId(null)
+      return
+    }
+
+    // Otherwise, insert my outgoing pending
     const { error } = await supabase
       .from('connection_requests')
       .insert({
