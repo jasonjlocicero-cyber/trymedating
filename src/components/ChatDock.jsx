@@ -3,10 +3,10 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * ChatDock (full, RPC send + Disconnect)
+ * ChatDock (full, robust pending handling)
  * - Connection flow: none → Connect → pending_in|pending_out → accepted → (Disconnect) → none
- * - Composer visible; Send disabled until 'accepted'
- * - Send text + images/files via RPC public.send_message (security definer)
+ * - Double-pending safe: prefers incoming pending (shows Accept/Reject even if you also requested)
+ * - RPC send: text + image/file attachments (storage: chat-uploads)
  * - Typing indicator, pagination, delete own, report, mark read
  * - Header buttons colorized: ✓ teal, Report amber, ✕ coral, Disconnect slate
  */
@@ -58,6 +58,8 @@ export default function ChatDock({
   const [menuOpenFor, setMenuOpenFor] = useState(null)
   // none | pending_in | pending_out | accepted | unknown
   const [connStatus, setConnStatus] = useState('unknown')
+  // if there is a partner->me pending, store its row id to accept/reject precisely
+  const [incomingReqId, setIncomingReqId] = useState(null)
 
   const listRef = useRef(null)
   const typingTimerRef = useRef(null)
@@ -245,12 +247,53 @@ export default function ChatDock({
   // ---- Mount / thread change ----
   useEffect(() => { loadInitial() }, [loadInitial])
 
-  // ---- Connection status (fetch newest row) ----
+  // ---- Connection status (robust: prefer incoming pending) ----
   useEffect(() => {
     let cancel = false
     async function loadConn() {
-      if (!me?.id || !partnerId) { setConnStatus('none'); return }
-      const { data, error } = await supabase
+      if (!me?.id || !partnerId) {
+        setConnStatus('none')
+        setIncomingReqId(null)
+        return
+      }
+
+      // 1) Incoming pending (partner -> me)
+      const { data: inc, error: incErr } = await supabase
+        .from('connection_requests')
+        .select('id, requester, recipient, status, created_at, decided_at')
+        .eq('requester', partnerId)
+        .eq('recipient', me.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (cancel) return
+      if (!incErr && inc?.id) {
+        setIncomingReqId(inc.id)
+        setConnStatus('pending_in')
+        return
+      } else {
+        setIncomingReqId(null)
+      }
+
+      // 2) Outgoing pending (me -> partner)
+      const { data: out, error: outErr } = await supabase
+        .from('connection_requests')
+        .select('id, requester, recipient, status, created_at, decided_at')
+        .eq('requester', me.id)
+        .eq('recipient', partnerId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (cancel) return
+      if (!outErr && out?.id) {
+        setConnStatus('pending_out')
+        return
+      }
+
+      // 3) Otherwise check latest verdict (accepted / rejected / disconnected / none)
+      const { data: latest, error: lErr } = await supabase
         .from('connection_requests')
         .select('requester, recipient, status, decided_at, created_at')
         .or(`and(requester.eq.${me.id},recipient.eq.${partnerId}),and(requester.eq.${partnerId},recipient.eq.${me.id})`)
@@ -258,14 +301,10 @@ export default function ChatDock({
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-
       if (cancel) return
-      if (error && error.code !== 'PGRST116') { setConnStatus('none'); return }
-      if (!data) { setConnStatus('none'); return }
-
-      if (data.status === 'accepted') setConnStatus('accepted')
-      else if (data.status === 'pending' && data.requester === me.id) setConnStatus('pending_out')
-      else if (data.status === 'pending' && data.recipient === me.id) setConnStatus('pending_in')
+      if (lErr && lErr.code !== 'PGRST116') { setConnStatus('none'); return }
+      if (!latest) { setConnStatus('none'); return }
+      if (latest.status === 'accepted') setConnStatus('accepted')
       else setConnStatus('none')
     }
     loadConn()
@@ -287,8 +326,12 @@ export default function ChatDock({
             (r.requester === partnerId && r.recipient === me.id)
           if (!pair) return
           if (r.status === 'pending') {
-            if (r.requester === me.id) setConnStatus('pending_out')
-            else if (r.recipient === me.id) setConnStatus('pending_in')
+            if (r.recipient === me.id) {
+              setIncomingReqId(r.id)
+              setConnStatus('pending_in')
+            } else if (r.requester === me.id) {
+              setConnStatus('pending_out')
+            }
           }
         })
       .on('postgres_changes',
@@ -300,13 +343,22 @@ export default function ChatDock({
             (r.requester === me.id && r.recipient === partnerId) ||
             (r.requester === partnerId && r.recipient === me.id)
           if (!pair) return
-          if (r.status === 'accepted') setConnStatus('accepted')
-          else if (r.status === 'rejected') setConnStatus('none')
-          else if (r.status === 'pending') {
-            if (r.requester === me.id) setConnStatus('pending_out')
-            else if (r.recipient === me.id) setConnStatus('pending_in')
+          if (r.status === 'accepted') {
+            setConnStatus('accepted')
+            setIncomingReqId(null)
+          } else if (r.status === 'rejected') {
+            setConnStatus('none')
+            setIncomingReqId(null)
+          } else if (r.status === 'pending') {
+            if (r.recipient === me.id) {
+              setIncomingReqId(r.id)
+              setConnStatus('pending_in')
+            } else if (r.requester === me.id) {
+              setConnStatus('pending_out')
+            }
           } else if (r.status === 'disconnected') {
             setConnStatus('none')
+            setIncomingReqId(null)
           }
         })
       .subscribe()
@@ -441,7 +493,7 @@ export default function ChatDock({
     }
   }
 
-  // ---- Retry send (TEXT/ATTACHMENT) via RPC ----
+  // ---- Retry send via RPC ----
   async function retrySend(failedMsg) {
     if (!partnerId) return
     if (connStatus !== 'accepted') {
@@ -487,22 +539,53 @@ export default function ChatDock({
 
   // ---- Accept / Reject / Request / Disconnect ----
   async function acceptConnection() {
+    // Prefer accepting the specific incoming row if we know it
+    if (incomingReqId) {
+      const { error } = await supabase
+        .from('connection_requests')
+        .update({ status: 'accepted', decided_at: new Date().toISOString() })
+        .eq('id', incomingReqId)
+        .eq('recipient', me.id)
+        .eq('status', 'pending')
+      if (error) return alert(error.message)
+      setConnStatus('accepted')
+      setIncomingReqId(null)
+      return
+    }
+    // Fallback
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'accepted', decided_at: new Date().toISOString() })
-      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+      .eq('recipient', me.id)
+      .eq('requester', partnerId)
+      .eq('status', 'pending')
     if (error) return alert(error.message)
     setConnStatus('accepted')
   }
+
   async function rejectConnection() {
+    if (incomingReqId) {
+      const { error } = await supabase
+        .from('connection_requests')
+        .update({ status: 'rejected', decided_at: new Date().toISOString() })
+        .eq('id', incomingReqId)
+        .eq('recipient', me.id)
+        .eq('status', 'pending')
+      if (error) return alert(error.message)
+      setConnStatus('none')
+      setIncomingReqId(null)
+      return
+    }
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'rejected', decided_at: new Date().toISOString() })
-      .or(`and(requester.eq.${partnerId},recipient.eq.${me.id}),and(requester.eq.${me.id},recipient.eq.${partnerId})`)
+      .eq('recipient', me.id)
+      .eq('requester', partnerId)
       .eq('status', 'pending')
     if (error) return alert(error.message)
     setConnStatus('none')
   }
+
   async function requestConnection() {
     if (!me?.id || !partnerId) return
     const { error } = await supabase
@@ -516,8 +599,8 @@ export default function ChatDock({
     if (error && error.code !== '23505') alert(error.message)
     else setConnStatus('pending_out')
   }
+
   async function disconnectConnection() {
-    // Either party can turn latest accepted row to 'disconnected' (RLS policy required)
     const { error } = await supabase
       .from('connection_requests')
       .update({ status: 'disconnected', decided_at: new Date().toISOString() })
@@ -525,6 +608,7 @@ export default function ChatDock({
       .eq('status', 'accepted')
     if (error) return alert(error.message)
     setConnStatus('none')
+    setIncomingReqId(null)
     alert('Disconnected. You can reconnect later with a new request.')
   }
 
@@ -903,6 +987,7 @@ export default function ChatDock({
     </div>
   )
 }
+
 
 
 
