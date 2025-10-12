@@ -23,7 +23,8 @@ function isImage(mime) {
 
 async function reportUser({ reporterId, reportedId }) {
   const categoryRaw = window.prompt(
-    `Reason? Choose one:\n${REPORT_CATEGORIES.join(', ')}`,
+    `Reason? Choose one:
+${REPORT_CATEGORIES.join(', ')}`,
     'spam'
   )
   if (!categoryRaw) return
@@ -259,7 +260,7 @@ export default function ChatDock({
       })
       if (error) { throw error }
       const row = Array.isArray(data) ? data[0] : data
-      const nextStatus = row?.status || 'none'
+      const nextStatus = row?.conn_status || 'none'
       setConnStatus(nextStatus)
       setIncomingReqId(row?.incoming_id || null)
       setLastConnError(null)
