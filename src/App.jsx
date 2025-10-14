@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
+import { ChatProvider } from './chat/ChatContext'  // ← NEW
 
 // Layout
 import Header from './components/Header'
@@ -262,7 +263,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
       {/* NEW: global toast for inbound connection requests (Accept/Reject) */}
@@ -308,7 +309,7 @@ export default function App() {
       {/* Bottom-right chat bubble (render once).
           It should already listen for open events and track unread internally. */}
       <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
-    </>
+    </ChatProvider>
   )
 }
 
