@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
+import { openChat } from '../chat/openChat' // adjust path
+<button onClick={() => openChat(user.id, user.display_name)}>Message</button>
 
 export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null)
