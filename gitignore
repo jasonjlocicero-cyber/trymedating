@@ -1,0 +1,7 @@
+/ (repo root)
+├─ .gitignore
+├─ .env.example
+├─ README.md
+└─ .github/
+   └─ workflows/
+      └─ ci.yml
