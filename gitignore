@@ -1,7 +1,23 @@
-/ (repo root)
-├─ .gitignore
-├─ .env.example
-├─ README.md
-└─ .github/
-   └─ workflows/
-      └─ ci.yml
+# dependency & builds
+node_modules/
+dist/
+build/
+coverage/
+
+# editors/OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# frameworks/tools
+.next/
+.netlify/
+.vercel/
+.tmp/
+.supabase/**/temp/
+supabase/.temp/
