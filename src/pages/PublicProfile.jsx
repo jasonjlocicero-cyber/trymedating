@@ -2,6 +2,14 @@
 import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { openChat } from '../chat/openChat' // adjust path
+
+<button
+  className="btn btn-primary"
+  onClick={() => openChat(user.id, user.display_name)}
+>
+  Message
+</button>
 
 export default function PublicProfile() {
   const { handle } = useParams()
