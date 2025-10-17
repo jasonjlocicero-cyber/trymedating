@@ -2,31 +2,42 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
+/** ----------------------------------------
+ * Helpers & constants
+ * -------------------------------------- */
 const ACCEPTED = new Set(["accepted", "connected", "approved"]);
-const TABLE = "connections";
-const C = { requester: "requester_id", addressee: "addressee_id", status: "status", createdAt: "created_at", updatedAt: "updated_at" };
-
+const CONN_TABLE = "connections";
+const C = {
+  requester: "requester_id",
+  addressee: "addressee_id",
+  status: "status",
+  createdAt: "created_at",
+  updatedAt: "updated_at",
+};
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
+const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 
-const otherPartyId = (row, my) =>
-  row[C.requester] === my ? row[C.addressee] : row[C.requester];
-
-export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
+/** ----------------------------------------
+ * ChatDock
+ * -------------------------------------- */
+export default function ChatDock() {
+  // auth / ids
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
 
-  const [peer, setPeer] = useState(toId(peerId));
+  // connection state
+  const [peer, setPeer] = useState(""); // auto-filled by "auto resume"
   const [conn, setConn] = useState(null);
-  const status = conn ? conn[C.status] : "none";
+  const status = conn?.[C.status] || "none";
   const [busy, setBusy] = useState(false);
 
-  // inline composer (used only if renderMessages not provided)
+  // messages (inline composer)
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const scrollerRef = useRef(null);
 
-  /* auth */
+  /* -------------------- auth -------------------- */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -36,93 +47,114 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     return () => { mounted = false; };
   }, []);
 
-  /* auto-resume last connection if no peer selected */
+  /* -------------------- auto-resume latest connection -------------------- */
   const [autoTried, setAutoTried] = useState(false);
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
-      const { data } = await supabase
-        .from(TABLE)
+      // prefer accepted/connected, otherwise show latest pending
+      const { data, error } = await supabase
+        .from(CONN_TABLE)
         .select("*")
-        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
-        .in("status", ["accepted","connected","pending"])
-        .order("updated_at", { ascending: false })
-        .order("created_at", { ascending: false })
-        .limit(1);
-      if (data?.length) setPeer(otherPartyId(data[0], myId));
+        .or(`${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`)
+        .order(C.updatedAt, { ascending: false })
+        .order(C.createdAt, { ascending: false })
+        .limit(10);
+
+      if (!error && data?.length) {
+        const accepted = data.find((r) => ACCEPTED.has(r[C.status]));
+        const latest = accepted || data[0];
+        setPeer(otherPartyId(latest, myId));
+      }
       setAutoTried(true);
     })();
   }, [autoTried, myId, peer]);
 
-  /* fetch + realtime for the current pair */
-  const fetchLatest = useCallback(async (uid) => {
-    uid = toId(uid);
-    if (!uid || !peer) return;
-    const pairOr =
-      `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
-      `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
-    let q = supabase.from(TABLE).select("*").or(pairOr);
-    if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
-    const { data } = await q.limit(1);
-    setConn(data?.[0] ?? null);
-  }, [peer]);
+  /* -------------------- fetch + subscribe connection -------------------- */
+  const fetchLatestConn = useCallback(
+    async (uid) => {
+      uid = toId(uid);
+      if (!uid || !peer) return;
+      const pairOr =
+        `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
+        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
+      let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
+      if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+      const { data, error } = await q.limit(1);
+      if (!error) setConn(data?.[0] ?? null);
+    },
+    [peer]
+  );
 
-  const subscribeRealtime = useCallback((uid) => {
-    uid = toId(uid);
-    if (!uid || !peer) return () => {};
-    const filter =
-      `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
-      `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
-    const ch = supabase
-      .channel(`conn:${uid}<->${peer}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: TABLE, filter }, () => fetchLatest(uid))
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [peer, fetchLatest]);
+  const subscribeConn = useCallback(
+    (uid) => {
+      uid = toId(uid);
+      if (!uid || !peer) return () => {};
+      const filter =
+        `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
+        `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
+      const ch = supabase
+        .channel(`conn:${uid}<->${peer}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: CONN_TABLE, filter },
+          () => fetchLatestConn(uid)
+        )
+        .subscribe();
+      return () => supabase.removeChannel(ch);
+    },
+    [peer, fetchLatestConn]
+  );
 
   useEffect(() => {
     if (!myId || !peer) return;
-    fetchLatest(myId);
-    const off = subscribeRealtime(myId);
+    fetchLatestConn(myId);
+    const off = subscribeConn(myId);
     return off;
-  }, [myId, peer, fetchLatest, subscribeRealtime]);
+  }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  useEffect(() => {
-    if (conn && ACCEPTED.has(conn[C.status]) && onReadyChat) onReadyChat(conn.id);
-  }, [conn, onReadyChat]);
-
-  /* connect actions */
+  /* -------------------- connection actions -------------------- */
   const requestConnect = async () => {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      // auto-accept if the other side already requested
-      if (conn && conn[C.status] === "pending" &&
-          toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
+      // if the other side already requested, auto-accept
+      if (
+        conn &&
+        conn[C.status] === "pending" &&
+        toId(conn[C.requester]) === peer &&
+        toId(conn[C.addressee]) === myId
+      ) {
         await acceptRequest(conn.id);
         return;
       }
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(TABLE).insert(payload).select();
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to connect."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to connect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const acceptRequest = async (id = conn?.id) => {
     const cid = toId(id);
-    if (!cid || !conn || conn[C.status] !== "pending") return;
-    const iAmAddressee = toId(conn[C.addressee]) === myId;
-    if (!iAmAddressee) return;
+    if (!cid || !conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
     setBusy(true);
     try {
       const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", cid).select();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to accept."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to accept.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const rejectRequest = async () => {
@@ -130,11 +162,15 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     setBusy(true);
     try {
       const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to reject."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to reject.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const cancelPending = async () => {
@@ -142,11 +178,15 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     setBusy(true);
     try {
       const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to cancel."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to cancel.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const disconnect = async () => {
@@ -154,11 +194,15 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     setBusy(true);
     try {
       const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to disconnect."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to disconnect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const reconnect = async () => {
@@ -166,25 +210,31 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     setBusy(true);
     try {
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(TABLE).insert(payload).select();
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to reconnect."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      alert(e.message || "Failed to reconnect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  /* messages (inline fallback) */
-  const canSend = useMemo(() =>
-    !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending, [myId, conn?.id, status, text, sending]);
+  /* -------------------- messages: fetch + realtime + send -------------------- */
+  const canSend = useMemo(
+    () => !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending,
+    [myId, conn?.id, status, text, sending]
+  );
 
   const fetchMessages = useCallback(async () => {
     if (!conn?.id) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("messages")
       .select("*")
       .eq("connection_id", conn.id)
       .order("created_at", { ascending: true });
-    setItems(data || []);
+    if (!error) setItems(data || []);
   }, [conn?.id]);
 
   useEffect(() => {
@@ -192,9 +242,11 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on("postgres_changes",
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages())
+        () => fetchMessages()
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -212,62 +264,83 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
       const recip = otherPartyId(conn, myId);
       const payload = {
         connection_id: conn.id,
+        sender: myId,          // legacy NOT NULL column
+        recipient: recip,      // legacy NOT NULL column
         body: text.trim(),
-
-        // Fill legacy NOT NULL columns only — let triggers mirror to *_id
-        sender: myId,
-        recipient: recip,
-        // IMPORTANT: do NOT include recipient_id (and you can omit sender_id)
       };
-     const { error } = await supabase.from("messages").insert(payload);
-     if (error) throw error;
-     setText("");
-   } catch (err) {
-     alert(err.message ?? "Failed to send");
-     console.error(err);
-   } finally {
-     setSending(false);
-   }
- };
+      const { error } = await supabase.from("messages").insert(payload);
+      if (error) throw error;
+      setText("");
+    } catch (err) {
+      alert(err.message ?? "Failed to send");
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  };
 
-  const Mine = (m) => (m.sender_id === myId) || (m.sender === myId);
+  const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
-  /* UI helpers */
+  /* -------------------- small UI helpers -------------------- */
   const Btn = ({ onClick, label, tone = "primary", disabled }) => {
     const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
     return (
-      <button onClick={onClick} disabled={busy || disabled}
+      <button
+        onClick={onClick}
+        disabled={busy || disabled}
         style={{
-          padding: "8px 12px", borderRadius: 16, marginRight: 8, border: "1px solid var(--border)",
-          background: disabled ? "#cbd5e1" : bg, color: tone === "ghost" ? "#111" : "#fff",
-          cursor: busy || disabled ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 14
-        }}>
+          padding: "8px 12px",
+          borderRadius: 16,
+          marginRight: 8,
+          border: "1px solid var(--border)",
+          background: disabled ? "#cbd5e1" : bg,
+          color: tone === "ghost" ? "#111" : "#fff",
+          cursor: busy || disabled ? "not-allowed" : "pointer",
+          fontWeight: 600,
+          fontSize: 14,
+        }}
+      >
         {label}
       </button>
     );
   };
   const Pill = (txt, color) => (
-    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>{txt}</span>
+    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
+      {txt}
+    </span>
   );
 
-  /* signed out */
-  if (!me) return <div className="p-3 text-sm">Please sign in to use chat.</div>;
-
-  /* no peer yet — we just wait for auto-resume; show tiny hint */
-  if (!peer) {
+  /* -------------------- render -------------------- */
+  if (!me) {
     return (
-      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
-        <div style={{ fontWeight: 700 }}>Messages</div>
-        <div className="muted" style={{ fontSize: 13 }}>
-          Loading your latest conversation…
-        </div>
+      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div className="muted" style={{ fontSize: 13 }}>Please sign in to use chat.</div>
       </div>
     );
   }
 
-  /* main */
+  if (!peer) {
+    // waiting for auto-resume to resolve a partner
+    return (
+      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Messages</div>
+        <div className="muted" style={{ fontSize: 13 }}>Loading your latest conversation…</div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+    <div
+      style={{
+        maxWidth: 720,           // compact width
+        margin: "12px auto",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        padding: 12,
+        background: "#fff",
+      }}
+    >
+      {/* Top: connection state */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontWeight: 700 }}>Connection</div>
         <div>
@@ -279,6 +352,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
         </div>
       </div>
 
+      {/* Controls */}
       <div style={{ marginBottom: 10 }}>
         {status === "none" && <Btn onClick={requestConnect} label="Connect" />}
         {status === "pending" && toId(conn?.[C.requester]) === myId && (
@@ -297,61 +371,79 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
         {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" />}
       </div>
 
-      {/* messages (small, not full page) */}
+      {/* Messages area (compact height) */}
       {ACCEPTED.has(status) && (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          {typeof renderMessages === "function" ? (
-            renderMessages(conn.id)
-          ) : (
-            <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 320 }}>
-              <div
-                ref={scrollerRef}
-                style={{
-                  border: "1px solid var(--border)", borderRadius: 12, padding: 12,
-                  overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 240
-                }}
-              >
-                {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
-                {items.map((m) => {
-                  const mine = Mine(m);
-                  return (
-                    <div key={m.id}
-                         style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
-                      <div style={{
-                        maxWidth: 520, padding: "8px 10px", borderRadius: 12,
-                        border: "1px solid var(--border)", background: mine ? "#eef6ff" : "#f8fafc",
-                        whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4
-                      }}>
-                        {m.body}
-                        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
-                          {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
-                        </div>
+          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 320 }}>
+            <div
+              ref={scrollerRef}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                padding: 12,
+                overflowY: "auto",
+                background: "#fff",
+                minHeight: 140,
+                maxHeight: 240, // keeps it small
+              }}
+            >
+              {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
+              {items.map((m) => {
+                const mine = isMine(m);
+                return (
+                  <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                    <div
+                      style={{
+                        maxWidth: 520,
+                        padding: "8px 10px",
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: mine ? "#eef6ff" : "#f8fafc",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        fontSize: 14,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {m.body}
+                      <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
+                        {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-
-              <form onSubmit={send} style={{ display: "flex", gap: 8 }}>
-                <input
-                  type="text"
-                  placeholder="Type a message…"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px", fontSize: 14 }}
-                />
-                <button type="submit" disabled={!canSend}
-                        style={{ padding: "10px 14px", borderRadius: 12, background: canSend ? "#2563eb" : "#cbd5e1",
-                                 color: "#fff", border: "none", cursor: canSend ? "pointer" : "not-allowed", fontWeight: 600 }}>
-                  Send
-                </button>
-              </form>
+                  </div>
+                );
+              })}
             </div>
-          )}
+
+            <form onSubmit={send} style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                placeholder="Type a message…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px", fontSize: 14 }}
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  background: canSend ? "#2563eb" : "#cbd5e1",
+                  color: "#fff",
+                  border: "none",
+                  cursor: canSend ? "pointer" : "not-allowed",
+                  fontWeight: 600,
+                }}
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
-      {/* tiny debug; remove later */}
+      {/* tiny debug (remove if you want) */}
       <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
         <div>me: {myId}</div>
         <div>peer: {peer}</div>
