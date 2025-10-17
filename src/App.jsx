@@ -299,11 +299,15 @@ export default function App() {
             {/* NEW: QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
-            {/* NEW: Direct chat route */}
-            <Route
-              path="/chat/handle/:handle"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
+            {/* Direct chat with flexible inputs */}
++            <Route
++              path="/chat"
++              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
++            />
++            <Route
++              path="/chat/handle/:handle"
++              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
++            />
             
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
