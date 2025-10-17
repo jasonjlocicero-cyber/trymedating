@@ -213,20 +213,22 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
       const payload = {
         connection_id: conn.id,
         body: text.trim(),
-        // legacy + new columns (your DB has both and `recipient` is NOT NULL)
+
+        // Fill legacy NOT NULL columns only — let triggers mirror to *_id
         sender: myId,
-        sender_id: myId,
         recipient: recip,
-        recipient_id: recip,
+        // IMPORTANT: do NOT include recipient_id (and you can omit sender_id)
       };
-      const { error } = await supabase.from("messages").insert(payload);
-      if (error) throw error;
-      setText("");
-    } catch (err) {
-      alert(err.message ?? "Failed to send");
-      console.error(err);
-    } finally { setSending(false); }
-  };
+     const { error } = await supabase.from("messages").insert(payload);
+     if (error) throw error;
+     setText("");
+   } catch (err) {
+     alert(err.message ?? "Failed to send");
+     console.error(err);
+   } finally {
+     setSending(false);
+   }
+ };
 
   const Mine = (m) => (m.sender_id === myId) || (m.sender === myId);
 
