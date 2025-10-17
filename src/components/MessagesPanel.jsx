@@ -58,12 +58,21 @@ export default function MessagesPanel({ connectionId }) {
   if (!canSend) return;
   setSending(true);
   try {
+    // helper: the other party in the connection
+    const otherPartyId = (row, my) =>
+      row.requester_id === my ? row.addressee_id : row.requester_id;
+
+    const recip = otherPartyId(conn, myId);
+
+    // IMPORTANT: only these three fields are required.
+    // Your DB triggers will mirror sender -> sender_id and recipient -> recipient_id.
     const payload = {
-      connection_id: connectionId,
-      sender_id: myId,  // keep
-      sender: myId,     // <-- NEW: fill legacy NOT NULL column
+      connection_id: conn.id,
+      sender: myId,      // legacy NOT NULL col (DB trigger fills sender_id)
+      recipient: recip,  // legacy NOT NULL col (DB trigger fills recipient_id)
       body: text.trim(),
     };
+
     const { error } = await supabase.from("messages").insert(payload);
     if (error) throw error;
     setText("");
