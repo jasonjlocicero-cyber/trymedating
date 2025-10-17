@@ -3,50 +3,61 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 /**
- * Auto-detects the user-id column pair your `connections` table uses
- * and runs the full connect/accept/reject/disconnect/reconnect flow.
+ * ChatDock — connection lifecycle + auto schema detection
  *
- * Accepted schemas (first match wins):
- *  - requester_id / addressee_id
- *  - sender_id / receiver_id
- *  - initiator_id / target_id
- *  - from_user_id / to_user_id
- *  - user1_id / user2_id
- *  - user_a / user_b
+ * Works with many possible column names. If your connections table uses
+ * different ones, detection will figure it out automatically. If not,
+ * the UI will show you the columns it sees so we can map them exactly.
  *
- * Status column: tries "status" (default) and falls back to "state".
+ * Table assumptions:
+ * - table: "connections" (change TABLE if yours is different)
+ * - columns: requester/addressee (or sender/recipient, etc.), status, timestamps optional
  */
 
-const COLUMN_PAIRS = [
-  ["requester_id", "addressee_id"],
-  ["sender_id", "receiver_id"],
-  ["initiator_id", "target_id"],
-  ["from_user_id", "to_user_id"],
-  ["user1_id", "user2_id"],
-  ["user_a", "user_b"],
+const TABLE = "connections";
+
+// Try these column-name combos in order until one works
+const CANDIDATES = [
+  // status = status
+  { requester: "requester_id", addressee: "addressee_id", status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "sender_id",     addressee: "recipient_id", status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "from_user_id",  addressee: "to_user_id",   status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "user_a_id",     addressee: "user_b_id",    status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "user1_id",      addressee: "user2_id",     status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "initiator_id",  addressee: "target_id",    status: "status", createdAt: "created_at", updatedAt: "updated_at" },
+
+  // status = state / connection_status (fallbacks)
+  { requester: "requester_id", addressee: "addressee_id", status: "state", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "sender_id",     addressee: "recipient_id", status: "state", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "from_user_id",  addressee: "to_user_id",   status: "state", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "user_a_id",     addressee: "user_b_id",    status: "state", createdAt: "created_at", updatedAt: "updated_at" },
+  { requester: "initiator_id",  addressee: "target_id",    status: "state", createdAt: "created_at", updatedAt: "updated_at" },
+
+  { requester: "requester_id", addressee: "addressee_id", status: "connection_status" },
+  { requester: "sender_id",     addressee: "recipient_id", status: "connection_status" },
+  { requester: "from_user_id",  addressee: "to_user_id",   status: "connection_status" },
 ];
 
-const STATUS_CANDIDATES = ["status", "state"];
-const ACCEPTED_STATES = new Set(["accepted", "connected"]);
+// Treat these as “connected”
+const ACCEPTED_STATES = new Set(["accepted", "connected", "approved"]);
 
 export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
-  const [me, setMe] = useState(null); // { id, ... }
+  const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  // dynamic schema mapping we detect once:
-  const [cols, setCols] = useState(null);     // { req: '...', addr: '...' }
-  const [statusCol, setStatusCol] = useState("status");
-
+  const [detecting, setDetecting] = useState(true);
+  const [cols, setCols] = useState(null);        // the detected mapping {requester, addressee, status, createdAt?, updatedAt?}
+  const [seenColumns, setSeenColumns] = useState(null); // first row keys for debug (if any rows exist)
   const [conn, setConn] = useState(null);
   const [busy, setBusy] = useState(false);
   const [manual, setManual] = useState("");
 
   const myId = me?.id;
-  const status = conn?.[statusCol] ?? "none";
-  const isRequester = !!(conn && myId && conn[cols?.req] === myId);
-  const isAddressee = !!(conn && myId && conn[cols?.addr] === myId);
+  const C = cols || {};
+  const status = conn ? conn[C.status] : "none";
+  const isRequester = !!(conn && myId && C.requester && conn[C.requester] === myId);
+  const isAddressee = !!(conn && myId && C.addressee && conn[C.addressee] === myId);
 
-  /* -------------------- load current user -------------------- */
+  /* ---------------- load current user ---------------- */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -57,196 +68,161 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     return () => { mounted = false; };
   }, []);
 
-  /* -------------------- schema detection -------------------- */
-  const detectCols = useCallback(async (uid, peer) => {
-    // try each candidate pair until a query doesn't fail schema validation
-    for (const [req, addr] of COLUMN_PAIRS) {
-      const filter = `or(and(${req}.eq.${uid},${addr}.eq.${peer}),and(${req}.eq.${peer},${addr}.eq.${uid}))`;
-      const { error } = await supabase
-        .from("connections")
-        .select("id")      // minimal select to avoid missing columns
-        .or(filter)
-        .limit(1);
+  /* ---------------- schema detection ---------------- */
+  const detectSchema = useCallback(async () => {
+    setDetecting(true);
+    setCols(null);
 
+    // capture whatever columns exist (if any rows present)
+    const probe = await supabase.from(TABLE).select("*").limit(1);
+    if (!probe.error && Array.isArray(probe.data) && probe.data[0]) {
+      setSeenColumns(Object.keys(probe.data[0]));
+    }
+
+    // try each candidate by selecting those columns (limit 0/1)
+    for (const cand of CANDIDATES) {
+      const selectList = [cand.requester, cand.addressee, cand.status]
+        .filter(Boolean).join(",");
+      // if we can select these columns without a schema error, we found a match
+      const { error } = await supabase.from(TABLE).select(selectList).limit(1);
       if (!error) {
-        return { req, addr };
+        setCols(cand);
+        setDetecting(false);
+        return;
       }
-      // if the error is "schema cache / column not found", try next pair
     }
-    return null;
+    // none matched
+    setDetecting(false);
   }, []);
 
-  const detectStatus = useCallback(async () => {
-    for (const c of STATUS_CANDIDATES) {
-      const { error } = await supabase.from("connections").select(`id, ${c}`).limit(1);
-      if (!error) return c;
-    }
-    return "status"; // default; updates will fail if truly absent, and we’ll see the message
-  }, []);
+  useEffect(() => {
+    detectSchema();
+  }, [detectSchema]);
 
-  /* -------------------- fetch + realtime -------------------- */
-  const fetchLatestConnection = useCallback(async (uid, mapping) => {
-    if (!uid || !peerId || !mapping) return;
-    const { req, addr } = mapping;
-    const filter = `or(and(${req}.eq.${uid},${addr}.eq.${peerId}),and(${req}.eq.${peerId},${addr}.eq.${uid}))`;
+  /* ---------------- helpers ---------------- */
+  const fetchLatestConnection = useCallback(async (uid) => {
+    if (!uid || !peerId || !cols) return;
+    const pairOr =
+      `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peerId}),` +
+      `and(${C.requester}.eq.${peerId},${C.addressee}.eq.${uid})`;
+    let q = supabase.from(TABLE).select("*").or(pairOr);
+    if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+    const { data, error } = await q.limit(1);
+    if (!error) setConn(data?.[0] ?? null);
+  }, [peerId, cols]);
 
-    const { data, error } = await supabase
-      .from("connections")
-      .select("*")
-      .or(filter)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (!error) setConn(Array.isArray(data) ? data[0] : data);
-  }, [peerId]);
-
-  const subscribeRealtime = useCallback((uid, mapping) => {
-    if (!uid || !peerId || !mapping) return () => {};
-    const { req, addr } = mapping;
+  const subscribeRealtime = useCallback((uid) => {
+    if (!uid || !peerId || !cols) return () => {};
     const filter =
-      `or(and(${req}=eq.${uid},${addr}=eq.${peerId}),and(${req}=eq.${peerId},${addr}=eq.${uid}))`;
-
+      `or(` +
+      `and(${C.requester}=eq.${uid},${C.addressee}=eq.${peerId}),` +
+      `and(${C.requester}=eq.${peerId},${C.addressee}=eq.${uid})` +
+      `)`;
     const channel = supabase
       .channel(`conn:${uid}<->${peerId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "connections", filter },
-        () => fetchLatestConnection(uid, mapping)
+        { event: "*", schema: "public", table: TABLE, filter },
+        () => fetchLatestConnection(uid)
       )
       .subscribe();
-
     return () => supabase.removeChannel(channel);
-  }, [peerId, fetchLatestConnection]);
-
-  // boot: detect mapping + status column, then fetch + subscribe
-  useEffect(() => {
-    let off = null;
-    let mounted = true;
-
-    (async () => {
-      if (!myId || !peerId) return;
-      const mapping = await detectCols(myId, peerId);
-      if (!mapping) {
-        console.error("[ChatDock] Could not detect user-id columns on `connections`.");
-        return;
-      }
-      const sCol = await detectStatus();
-      if (mounted) {
-        setCols(mapping);
-        setStatusCol(sCol);
-      }
-      await fetchLatestConnection(myId, mapping);
-      off = subscribeRealtime(myId, mapping);
-    })();
-
-    return () => {
-      mounted = false;
-      if (off) off();
-    };
-  }, [myId, peerId, detectCols, detectStatus, fetchLatestConnection, subscribeRealtime]);
+  }, [peerId, cols, fetchLatestConnection]);
 
   useEffect(() => {
-    if (conn && ACCEPTED_STATES.has(conn?.[statusCol]) && onReadyChat) {
+    if (!myId || !cols) return;
+    fetchLatestConnection(myId);
+    const off = subscribeRealtime(myId);
+    return off;
+  }, [myId, cols, fetchLatestConnection, subscribeRealtime]);
+
+  useEffect(() => {
+    if (conn && cols && ACCEPTED_STATES.has(conn[C.status]) && onReadyChat) {
       onReadyChat(conn.id);
     }
-  }, [conn, statusCol, onReadyChat]);
+  }, [conn, cols, onReadyChat]);
 
-  /* -------------------- actions (use detected columns) -------------------- */
+  /* ---------------- actions ---------------- */
   const requestConnect = async () => {
     if (!myId || !peerId || !cols) return;
     setBusy(true);
     try {
-      // Auto-accept if the other user already requested
-      if (
-        conn && conn[statusCol] === "pending" &&
-        conn[cols.req] === peerId && conn[cols.addr] === myId
-      ) {
+      // auto-accept if the other side already requested
+      if (conn && conn[C.status] === "pending" && conn[C.requester] === peerId && conn[C.addressee] === myId) {
         await acceptRequest(conn.id);
         return;
       }
-      const payload = { [cols.req]: myId, [cols.addr]: peerId, [statusCol]: "pending" };
-      const { data, error } = await supabase.from("connections").insert(payload).select();
+      const payload = { [C.requester]: myId, [C.addressee]: peerId, [C.status]: "pending" };
+      const { data, error } = await supabase.from(TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("requestConnect error:", e);
       alert(e.message ?? "Failed to send request.");
+      console.error("requestConnect error:", e);
     } finally {
       setBusy(false);
     }
   };
 
   const cancelPending = async () => {
-    if (!conn || conn[statusCol] !== "pending" || !cols || !isRequester) return;
+    if (!conn || conn[C.status] !== "pending" || !isRequester) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("connections")
-        .update({ [statusCol]: "disconnected", updated_at: new Date().toISOString() })
-        .eq("id", conn.id)
-        .select();
+      const payload = { [C.status]: "disconnected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("cancelPending error:", e);
-      alert(e.message ?? "Failed to cancel.");
+      alert(e.message ?? "Failed to cancel."); console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
   const acceptRequest = async (id = conn?.id) => {
-    if (!id || !conn || conn[statusCol] !== "pending" || !cols || !isAddressee) return;
+    if (!id || !conn || conn[C.status] !== "pending" || !isAddressee) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("connections")
-        .update({ [statusCol]: "accepted", updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .select();
+      const payload = { [C.status]: "accepted" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("acceptRequest error:", e);
-      alert(e.message ?? "Failed to accept.");
+      alert(e.message ?? "Failed to accept."); console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
   const rejectRequest = async () => {
-    if (!conn || conn[statusCol] !== "pending" || !cols || !isAddressee) return;
+    if (!conn || conn[C.status] !== "pending" || !isAddressee) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("connections")
-        .update({ [statusCol]: "rejected", updated_at: new Date().toISOString() })
-        .eq("id", conn.id)
-        .select();
+      const payload = { [C.status]: "rejected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("rejectRequest error:", e);
-      alert(e.message ?? "Failed to reject.");
+      alert(e.message ?? "Failed to reject."); console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
   const disconnect = async () => {
-    if (!conn || !ACCEPTED_STATES.has(conn?.[statusCol]) || !cols) return;
+    if (!conn || !ACCEPTED_STATES.has(conn[C.status])) return;
     setBusy(true);
     try {
-      const { data, error } = await supabase
-        .from("connections")
-        .update({ [statusCol]: "disconnected", updated_at: new Date().toISOString() })
-        .eq("id", conn.id)
-        .select();
+      const payload = { [C.status]: "disconnected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("disconnect error:", e);
-      alert(e.message ?? "Failed to disconnect.");
+      alert(e.message ?? "Failed to disconnect."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -256,19 +232,18 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     if (!myId || !peerId || !cols) return;
     setBusy(true);
     try {
-      const payload = { [cols.req]: myId, [cols.addr]: peerId, [statusCol]: "pending" };
-      const { data, error } = await supabase.from("connections").insert(payload).select();
+      const payload = { [C.requester]: myId, [C.addressee]: peerId, [C.status]: "pending" };
+      const { data, error } = await supabase.from(TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      console.error("reconnect error:", e);
-      alert(e.message ?? "Failed to reconnect.");
+      alert(e.message ?? "Failed to reconnect."); console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
-  /* -------------------- UI helpers -------------------- */
+  /* ---------------- simple UI bits ---------------- */
   const Btn = ({ onClick, label, tone = "primary", disabled }) => {
     const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
     return (
@@ -283,8 +258,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
           background: disabled ? "#cbd5e1" : bg,
           color: tone === "ghost" ? "#111" : "#fff",
           cursor: busy || disabled ? "not-allowed" : "pointer",
-          fontWeight: 600,
-          fontSize: 14,
+          fontWeight: 600, fontSize: 14
         }}
       >
         {label}
@@ -298,37 +272,62 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     </span>
   );
 
-  /* -------------------- early returns -------------------- */
+  /* ---------------- early returns ---------------- */
   if (loading) return <div className="p-3 text-sm">Loading chat…</div>;
-  if (!myId) return <div className="p-3 text-sm">Please sign in to use chat.</div>;
 
+  // manual peer-id fallback if needed
   if (!peerId) {
     return (
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 8 }}>Connection</div>
-        <div className="text-sm" style={{ marginBottom: 8 }}>
-          No peer selected. Paste the other user’s UUID to open a chat.
-        </div>
+        <div className="text-sm" style={{ marginBottom: 8 }}>No peer selected. Paste the other user’s UUID.</div>
         <div style={{ display: "flex", gap: 8, maxWidth: 560 }}>
-          <input
-            value={manual}
-            onChange={(e) => setManual(e.target.value)}
-            placeholder="Other user's UUID (profiles.id)"
-            style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
-          />
-          <button onClick={() => manual.trim() && (window.location.assign(`/chat/${manual.trim()}`))} className="btn btn-primary">
-            Open
-          </button>
-        </div>
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.6 }}>
-          <div>me: {myId}</div>
-          <div>peer: (none)</div>
+          <input value={manual} onChange={(e) => setManual(e.target.value)}
+                 placeholder="Other user's UUID (profiles.id)"
+                 style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }} />
+          <button onClick={() => { const id = manual.trim(); if (id) window.location.assign(`/chat/${id}`); }} className="btn btn-primary">Open</button>
         </div>
       </div>
     );
   }
 
-  /* -------------------- render -------------------- */
+  // schema still detecting or failed
+  if (detecting) {
+    return (
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Connection</div>
+        <div>Detecting schema…</div>
+        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
+          me: {myId}<br/>peer: {peerId}
+        </div>
+      </div>
+    );
+  }
+
+  if (!cols) {
+    return (
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>Connection</div>
+        <div style={{ marginBottom: 6 }}>Couldn’t auto-detect your connections columns.</div>
+        <div className="text-sm" style={{ marginBottom: 8 }}>
+          Please share the column names for <code>{TABLE}</code> (requester/addressee + status), or run this in Supabase SQL:
+          <pre style={{ whiteSpace: "pre-wrap", marginTop: 8 }}>
+{`select column_name
+from information_schema.columns
+where table_schema='public' and table_name='${TABLE}'
+order by ordinal_position;`}
+          </pre>
+        </div>
+        {Array.isArray(seenColumns) && (
+          <div style={{ fontSize: 12, opacity: 0.7 }}>
+            First row keys seen: <code>{seenColumns.join(", ") || "(none — table empty?)"}</code>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ---------------- render ---------------- */
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -338,39 +337,33 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
           {status === "pending" && pill("Pending", "#fde68a")}
           {status === "rejected" && pill("Rejected", "#fecaca")}
           {status === "disconnected" && pill("Disconnected", "#e5e7eb")}
-          {status === "none" && pill("No connection", "#f3f4f6")}
+          {!conn && pill("No connection", "#f3f4f6")}
         </div>
       </div>
 
-      {/* Actions */}
       <div style={{ marginBottom: 10 }}>
-        {(!cols) && <span className="text-sm" style={{ opacity: 0.7 }}>Detecting schema…</span>}
-        {(cols && status === "none") && <Btn onClick={requestConnect} label="Connect" />}
-
-        {(cols && status === "pending" && isRequester) && (
+        {!conn && <Btn onClick={requestConnect} label="Connect" />}
+        {conn && conn[cols.status] === "pending" && isRequester && (
           <>
             <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
             <Btn tone="ghost" onClick={cancelPending} label="Cancel" />
           </>
         )}
-
-        {(cols && status === "pending" && isAddressee) && (
+        {conn && conn[cols.status] === "pending" && isAddressee && (
           <>
             <Btn onClick={acceptRequest} label="Accept" />
             <Btn tone="danger" onClick={rejectRequest} label="Reject" />
           </>
         )}
-
-        {(cols && ACCEPTED_STATES.has(status)) && (
+        {conn && ACCEPTED_STATES.has(conn[cols.status]) && (
           <Btn tone="danger" onClick={disconnect} label="Disconnect" />
         )}
-
-        {(cols && (status === "rejected" || status === "disconnected")) && (
+        {conn && (conn[cols.status] === "rejected" || conn[cols.status] === "disconnected") && (
           <Btn onClick={reconnect} label="Reconnect" />
         )}
       </div>
 
-      {ACCEPTED_STATES.has(status) && (
+      {conn && ACCEPTED_STATES.has(conn[cols.status]) && (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           {typeof renderMessages === "function"
             ? renderMessages(conn.id)
@@ -382,9 +375,8 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.6 }}>
         <div>me: {myId}</div>
         <div>peer: {peerId}</div>
-        <div>columns: {cols ? `${cols.req} / ${cols.addr}` : "(detecting…)"}</div>
-        <div>statusCol: {statusCol}</div>
-        <div>conn: {conn ? `${conn.id} • ${conn[statusCol]}` : "none"}</div>
+        <div>conn: {conn ? `${conn.id} • ${conn[cols.status]}` : "none"}</div>
+        <div>using columns: requester=<code>{cols.requester}</code> addressee=<code>{cols.addressee}</code> status=<code>{cols.status}</code></div>
       </div>
     </div>
   );
