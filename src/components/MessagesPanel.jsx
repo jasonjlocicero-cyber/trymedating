@@ -85,21 +85,19 @@ export default function MessagesPanel({ connectionId }) {
 };
 
   return (
-    <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, height: 380 }}>
-      <div
-        ref={scrollerRef}
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 12,
-          overflowY: "auto",
-          background: "#fff",
-        }}
-      >
-        {items.length === 0 && (
-          <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>
-        )}
-        {items.map(m => {
+    <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 320 }}>
+  <div
+    ref={scrollerRef}
+    style={{
+      border: "1px solid var(--border)", borderRadius: 12, padding: 12,
+      overflowY: "auto", background: "#fff",
+      minHeight: 140, maxHeight: 240,  // keeps it compact
+    }}
+  >
+    {/* messages... */}
+  </div>
+  {/* input + Send */}
+</div>
           const mine = (m.sender_id === myId) || (m.sender === myId);
           return (
             <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
