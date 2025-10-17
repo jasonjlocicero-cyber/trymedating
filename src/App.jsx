@@ -301,7 +301,7 @@ export default function App() {
 
             {/* NEW: Direct chat route */}
             <Route
-              path="/chat/:peerId"
+              path="/chat/handle/:handle"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
             
