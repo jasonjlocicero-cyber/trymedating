@@ -442,14 +442,6 @@ export default function ChatDock() {
           </div>
         </div>
       )}
-
-      {/* tiny debug (remove if you want) */}
-      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
-        <div>me: {myId}</div>
-        <div>peer: {peer}</div>
-        <div>conn: {conn ? `${conn.id} • ${conn[C.status]}` : "none"}</div>
-      </div>
-    </div>
   );
 }
 
