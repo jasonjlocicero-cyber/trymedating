@@ -54,24 +54,26 @@ export default function MessagesPanel({ connectionId }) {
   }, [myId, connectionId, text, sending]);
 
   const send = async (e) => {
-    e?.preventDefault?.();
-    if (!canSend) return;
-    setSending(true);
-    try {
-      const { error } = await supabase.from("messages").insert({
-        connection_id: connectionId,
-        sender_id: myId,
-        body: text.trim(),
-      });
-      if (error) throw error;
-      setText("");
-    } catch (err) {
-      alert(err.message ?? "Failed to send");
-      console.error(err);
-    } finally {
-      setSending(false);
-    }
-  };
+  e?.preventDefault?.();
+  if (!canSend) return;
+  setSending(true);
+  try {
+    const payload = {
+      connection_id: connectionId,
+      sender_id: myId,  // keep
+      sender: myId,     // <-- NEW: fill legacy NOT NULL column
+      body: text.trim(),
+    };
+    const { error } = await supabase.from("messages").insert(payload);
+    if (error) throw error;
+    setText("");
+  } catch (err) {
+    alert(err.message ?? "Failed to send");
+    console.error(err);
+  } finally {
+    setSending(false);
+  }
+};
 
   return (
     <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, height: 380 }}>
@@ -89,7 +91,7 @@ export default function MessagesPanel({ connectionId }) {
           <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>
         )}
         {items.map(m => {
-          const mine = m.sender_id === myId;
+          const mine = (m.sender_id === myId) || (m.sender === myId);
           return (
             <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
               <div style={{
