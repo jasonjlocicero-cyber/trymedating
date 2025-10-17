@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
-import { ChatProvider } from './chat/ChatContext'  // ← NEW
+import { ChatProvider } from './chat/ChatContext'
 
 // Layout
 import Header from './components/Header'
@@ -17,12 +17,11 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
-import ChatDockPage from './pages/ChatDockPage'
+import ChatDockPage from './pages/ChatDockPage' // NEW
 
-// New (already in your imports, keeping it)
+// Components/Routes
 import ConnectionToast from './components/ConnectionToast'
-// NEW: QR route to create a connection request
-import Connect from './routes/Connect'
+import Connect from './routes/Connect' // QR route to create a connection request
 
 /** --------------------------
  * Home (hero + features + CTA)
@@ -267,7 +266,7 @@ export default function App() {
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
-      {/* NEW: global toast for inbound connection requests (Accept/Reject) */}
+      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
@@ -296,19 +295,23 @@ export default function App() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
 
-            {/* NEW: QR scan route to create a pending connection request */}
+            {/* Direct chat routes */}
+            <Route
+              path="/chat/:peerId"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat/handle/:handle"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+
+            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
-            {/* Direct chat with flexible inputs */}
-+            <Route
-+              path="/chat"
-+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-+            />
-+            <Route
-+              path="/chat/handle/:handle"
-+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-+            />
-            
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -317,8 +320,7 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble (render once).
-          It should already listen for open events and track unread internally. */}
+      {/* Bottom-right chat bubble (render once) */}
       <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </ChatProvider>
   )
