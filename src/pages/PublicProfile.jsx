@@ -3,9 +3,10 @@ import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { openChat } from '../chat/openChat' // adjust path
+import { Link } from "react-router-dom"
 
 <button
-  className="btn btn-primary"
+  <Link className="btn btn-primary" to={`/chat/handle/${profile.handle}`}>Message</Link>
   onClick={() => openChat(user.id, user.display_name)}
 >
   Message
