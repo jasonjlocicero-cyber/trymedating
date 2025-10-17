@@ -9,11 +9,11 @@ export default function ChatDockPage() {
   const [qs] = useSearchParams();
   const navigate = useNavigate();
 
-  // Gather possible inputs
-  const queryPeer = qs.get("peer") || qs.get("user") || qs.get("id") || "";
-  const queryHandle = qs.get("handle") || "";
-  const [peerId, setPeerId] = useState(peerFromPath || queryPeer || "");
-  const handle = handleFromPath || queryHandle || "";
+  // Accept peerId from path or query (?peer|?user|?id)
+  const [peerId, setPeerId] = useState(
+    peerFromPath || qs.get("peer") || qs.get("user") || qs.get("id") || ""
+  );
+  const handle = handleFromPath || qs.get("handle") || "";
 
   // If a handle is provided and we don't have an id yet, resolve it
   useEffect(() => {
@@ -26,31 +26,27 @@ export default function ChatDockPage() {
           .eq("handle", handle)
           .maybeSingle();
         if (!mounted) return;
-        if (error) {
-          console.warn("Handle lookup failed:", error);
-        } else if (data?.id) {
+        if (data?.id && !error) {
           setPeerId(data.id);
-          // Normalize to /chat/:peerId so refreshes keep working
-          navigate(`/chat/${data.id}`, { replace: true });
+          navigate(`/chat/${data.id}`, { replace: true }); // normalize URL
         }
       }
     })();
     return () => { mounted = false; };
   }, [handle, peerId, navigate]);
 
-  // Manual fallback
+  // Manual fallback box
   const [manual, setManual] = useState("");
-  const applyManual = () => {
+  const openManual = () => {
     const id = manual.trim();
     if (!id) return;
     setPeerId(id);
     navigate(`/chat/${id}`, { replace: true });
   };
 
-  // Debug banner so we can see what's resolved
   const Debug = () => (
     <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
-      <div><strong>Resolved peerId:</strong> {peerId || "(none)"}</div>
+      <div><strong>Resolved peerId:</strong> {peerId || "(none)"} </div>
       {handle && <div><strong>From handle:</strong> {handle}</div>}
     </div>
   );
@@ -60,16 +56,16 @@ export default function ChatDockPage() {
       <div className="p-4" style={{ maxWidth: 640 }}>
         <Debug />
         <div className="text-sm" style={{ marginBottom: 8 }}>
-          No peer selected. Paste the other user’s UUID or append <code>?handle=&lt;username&gt;</code> to the URL.
+          No peer selected. Paste the other user’s UUID or add <code>?handle=&lt;username&gt;</code>.
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
-            placeholder="Other user's UUID (profiles.id)"
             value={manual}
             onChange={(e) => setManual(e.target.value)}
+            placeholder="Other user's UUID (profiles.id)"
             style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}
           />
-          <button onClick={applyManual} className="btn btn-primary">Open</button>
+          <button onClick={openManual} className="btn btn-primary">Open</button>
         </div>
       </div>
     );
@@ -82,4 +78,5 @@ export default function ChatDockPage() {
     </div>
   );
 }
+
 
