@@ -17,6 +17,7 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
+import ChatDockPage from './pages/ChatDockPage'
 
 // New (already in your imports, keeping it)
 import ConnectionToast from './components/ConnectionToast'
@@ -298,6 +299,12 @@ export default function App() {
             {/* NEW: QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
+            {/* NEW: Direct chat route */}
+            <Route
+              path="/chat/:peerId"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
