@@ -468,7 +468,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
               >
                 {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
                 {items.map((m) => {
-                  const mine = m.sender_id === myId;
+                  const mine = (m.sender_id === myId) || (m.sender === myId);
                   return (
                     <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
                       <div
