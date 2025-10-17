@@ -1,122 +1,104 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
-import { openChat } from '../chat/openChat' // adjust path
-import { Link } from "react-router-dom"
-
-<button
-  <Link className="btn btn-primary" to={`/chat/handle/${profile.handle}`}>Message</Link>
-  onClick={() => openChat(user.id, user.display_name)}
->
-  Message
-</button>
+import React, { useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 
 export default function PublicProfile() {
-  const { handle } = useParams()
-  const [loading, setLoading] = useState(true)
-  const [profile, setProfile] = useState(null)
-  const [err, setErr] = useState('')
+  const { handle } = useParams();
+  const [me, setMe] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // load current user
   useEffect(() => {
-    let cancel = false
-    ;(async () => {
-      setLoading(true); setErr('')
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select(`
-            display_name, handle, bio, avatar_url,
-            location, birthdate, pronouns, interests, public_profile
-          `)
-          .eq('handle', handle)
-          .maybeSingle()
-        if (error) throw error
-        if (!cancel) setProfile(data)
-      } catch (e) {
-        if (!cancel) setErr(e.message || 'Profile not found')
-      } finally {
-        if (!cancel) setLoading(false)
-      }
-    })()
-    return () => { cancel = true }
-  }, [handle])
+    let mounted = true;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (mounted) setMe(user ?? null);
+    })();
+    return () => { mounted = false; };
+  }, []);
 
-  function calcAge(birthdate) {
-    if (!birthdate) return ''
-    const d = new Date(birthdate + 'T00:00:00')
-    if (isNaN(d.getTime())) return ''
-    const now = new Date()
-    let a = now.getFullYear() - d.getFullYear()
-    const m = now.getMonth() - d.getMonth()
-    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--
-    if (a < 0 || a > 120) return ''
-    return a
+  // load the profile by handle
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, handle, full_name, bio, avatar_url, is_public")
+        .eq("handle", handle)
+        .maybeSingle();
+      if (!mounted) return;
+      if (!error) setProfile(data ?? null);
+      setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [handle]);
+
+  const isOwner = me?.id && profile?.id && me.id === profile.id;
+
+  if (loading) return <div className="container" style={{ padding: 16 }}>Loading…</div>;
+  if (!profile) {
+    return (
+      <div className="container" style={{ padding: 16 }}>
+        <h2 style={{ margin: 0 }}>Profile not found</h2>
+        <div className="muted">No user with handle “{handle}”.</div>
+      </div>
+    );
   }
-
-  if (loading) return <div className="container"><p>Loading profile…</p></div>
-  if (err || !profile || !profile.public_profile) {
-    return <div className="container"><h1>Profile not found</h1><p>This user may be private or does not exist.</p></div>
-  }
-
-  const { display_name, bio, avatar_url, location, pronouns, birthdate, interests, handle: userHandle } = profile
-  const age = calcAge(birthdate)
 
   return (
-    <div className="container" style={{ maxWidth: 720, margin: '0 auto', padding: 24 }}>
-      {/* Avatar + name */}
-      <div style={{ textAlign: 'center', marginBottom: 20 }}>
-        {avatar_url ? (
-          <img
-            src={avatar_url}
-            alt={display_name || userHandle}
-            style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)' }}
-          />
-        ) : (
-          <div style={{
-            width: 120, height: 120, borderRadius: '50%',
-            background: '#ddd', display: 'flex', alignItems:'center', justifyContent:'center',
-            margin: '0 auto', fontSize: 40, fontWeight: 700
-          }}>
-            {display_name?.[0] || userHandle?.[0]}
+    <div className="container" style={{ padding: 16, maxWidth: 720 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        {/* avatar */}
+        <div
+          style={{
+            width: 72, height: 72, borderRadius: "50%", background: "#f3f4f6",
+            border: "1px solid var(--border)", overflow: "hidden", flex: "0 0 auto"
+          }}
+        >
+          {profile.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt={profile.full_name || profile.handle}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : null}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>
+            {profile.full_name || profile.handle}
           </div>
+          <div className="muted">@{profile.handle}</div>
+        </div>
+
+        {/* Message button (viewer must be signed in and not viewing self) */}
+        {me?.id && !isOwner && (
+          <Link className="btn btn-primary" to={`/chat/handle/${profile.handle}`}>
+            Message
+          </Link>
         )}
-        <h1 style={{ marginTop: 12 }}>{display_name || userHandle}</h1>
-        <div className="muted">@{userHandle}</div>
       </div>
 
-      {/* Pronouns, location, age */}
-      <div style={{ textAlign: 'center', marginBottom: 16, color:'var(--text)' }}>
-        {pronouns && <span style={{ marginRight: 8 }}>{pronouns}</span>}
-        {location && <span style={{ marginRight: 8 }}>📍 {location}</span>}
-        {age && <span>🎂 {age}</span>}
+      {/* Bio / visibility */}
+      <div style={{ marginTop: 16, lineHeight: 1.55 }}>
+        {profile.is_public === false && !isOwner ? (
+          <div className="muted">This profile is private.</div>
+        ) : (
+          <pre
+            style={{
+              margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              fontFamily: "inherit"
+            }}
+          >
+            {profile.bio || "No bio yet."}
+          </pre>
+        )}
       </div>
-
-      {/* Bio */}
-      {bio && (
-        <div style={{ marginBottom: 20, textAlign:'center', whiteSpace:'pre-line' }}>
-          {bio}
-        </div>
-      )}
-
-      {/* Interests as brand-colored tags */}
-      {Array.isArray(interests) && interests.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3 style={{ marginBottom: 8 }}>Interests</h3>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-            {interests.map((tag, i) => (
-              <span
-                key={`${tag}-${i}`}
-                className={`tag ${i % 2 === 0 ? 'tag--teal' : 'tag--coral'}`}
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
-  )
+  );
 }
 
 
