@@ -2,19 +2,14 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-/** Treat these as connected */
+/* -------------------- Constants & helpers -------------------- */
+
+// Treat these states as "connected"
 const ACCEPTED_STATES = new Set(["accepted", "connected", "approved"]);
 
-/** Helpers */
-const toUuid = (v) => {
-  if (!v) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "object" && typeof v.id === "string") return v.id;
-  return String(v);
-};
-
-const TABLE = "connections";
-const COLS = {
+// connections table + column mapping (canonical)
+const CONN_TABLE = "connections";
+const CONN_COLS = {
   requester: "requester_id",
   addressee: "addressee_id",
   status: "status",
@@ -22,37 +17,82 @@ const COLS = {
   updatedAt: "updated_at",
 };
 
+// Coerce any input to a UUID-like string; avoids "[object Object]" bugs
+const toUuid = (v) => {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && typeof v.id === "string") return v.id;
+  return String(v);
+};
+
+/**
+ * Robust handle → userId resolver.
+ * Tries common handle fields and id fields, case-insensitive,
+ * and accepts pasted profile URLs (e.g. /u/the_handle).
+ */
+async function resolveHandleToUserId(raw) {
+  if (!raw) throw new Error("Missing handle");
+
+  // normalize: strip @ and allow profile URLs
+  let h = String(raw).trim().replace(/^@/, "");
+  if (h.includes("/")) h = h.split("/").filter(Boolean).pop();
+
+  const handleFields = ["handle", "username"];
+  const idFields = ["id", "user_id", "uid", "profile_id"];
+
+  for (const hf of handleFields) {
+    for (const idf of idFields) {
+      // eslint-disable-next-line no-await-in-loop
+      const { data, error } = await supabase
+        .from("profiles")
+        .select(idf)
+        .ilike(hf, h) // case-insensitive match
+        .maybeSingle();
+
+      if (!error && data && data[idf]) {
+        return String(data[idf]);
+      }
+    }
+  }
+  throw new Error("No profile found for that handle.");
+}
+
+/* -------------------- Component -------------------- */
+
 /**
  * ChatDock
  * Props:
- *  - peerId?: string    // optional — component can resolve by handle if missing
- *  - onReadyChat?: (connectionId) => void
- *  - renderMessages?: (connectionId) => ReactNode  // if omitted, we render a simple composer
+ *  - peerId?: string             // optional; you can resolve by handle in-UI
+ *  - onReadyChat?: (connId)=>void
+ *  - renderMessages?: (connId)=>ReactNode  // if not provided, a simple composer is rendered
  */
 export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
+  // auth
   const [me, setMe] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const myId = toUuid(me?.id);
 
-  // ----- Peer resolution (works without peerId prop) -----
+  // peer + resolution inputs
   const [peer, setPeer] = useState(toUuid(peerId));
   const [handleInput, setHandleInput] = useState("");
   const [idInput, setIdInput] = useState("");
 
   // connection row
   const [conn, setConn] = useState(null);
-  const status = conn ? conn[COLS.status] : "none";
+  const status = conn ? conn[CONN_COLS.status] : "none";
 
-  // messages (inline fallback if renderMessages not provided)
+  // ui/busy
+  const [busy, setBusy] = useState(false);
+
+  // simple inline messages (fallback if no renderMessages prop)
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const scrollerRef = useRef(null);
 
-  const myId = toUuid(me?.id);
-  const isRequester = !!(conn && myId && conn[COLS.requester] === myId);
-  const isAddressee = !!(conn && myId && conn[COLS.addressee] === myId);
+  const isRequester = !!(conn && myId && conn[CONN_COLS.requester] === myId);
+  const isAddressee = !!(conn && myId && conn[CONN_COLS.addressee] === myId);
 
-  /* ---------------- auth ---------------- */
+  /* -------------------- Auth -------------------- */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -62,38 +102,49 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     return () => { mounted = false; };
   }, []);
 
-  /* ---------------- connection fetch + realtime ---------------- */
-  const fetchLatest = useCallback(async (uid) => {
-    uid = toUuid(uid);
-    if (!uid || !peer) return;
-    const pairOr =
-      `and(${COLS.requester}.eq.${uid},${COLS.addressee}.eq.${peer}),` +
-      `and(${COLS.requester}.eq.${peer},${COLS.addressee}.eq.${uid})`;
+  /* -------------------- Connection fetch + realtime -------------------- */
+  const fetchLatest = useCallback(
+    async (uid) => {
+      uid = toUuid(uid);
+      if (!uid || !peer) return;
 
-    let q = supabase.from(TABLE).select("*").or(pairOr);
-    if (COLS.createdAt) q = q.order(COLS.createdAt, { ascending: false });
-    const { data, error } = await q.limit(1);
-    if (!error) setConn(data?.[0] ?? null);
-  }, [peer]);
+      const C = CONN_COLS;
+      const pairOr =
+        `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
+        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
 
-  const subscribeRealtime = useCallback((uid) => {
-    uid = toUuid(uid);
-    if (!uid || !peer) return () => {};
-    const filter =
-      `or(` +
-      `and(${COLS.requester}=eq.${uid},${COLS.addressee}=eq.${peer}),` +
-      `and(${COLS.requester}=eq.${peer},${COLS.addressee}=eq.${uid})` +
-      `)`;
-    const ch = supabase
-      .channel(`conn:${uid}<->${peer}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: TABLE, filter },
-        () => fetchLatest(uid)
-      )
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [peer, fetchLatest]);
+      let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
+      if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+      const { data, error } = await q.limit(1);
+
+      if (!error) setConn(data?.[0] ?? null);
+    },
+    [peer]
+  );
+
+  const subscribeRealtime = useCallback(
+    (uid) => {
+      uid = toUuid(uid);
+      if (!uid || !peer) return () => {};
+      const C = CONN_COLS;
+      const filter =
+        `or(` +
+        `and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
+        `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid})` +
+        `)`;
+
+      const ch = supabase
+        .channel(`conn:${uid}<->${peer}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: CONN_TABLE, filter },
+          () => fetchLatest(uid)
+        )
+        .subscribe();
+      return () => supabase.removeChannel(ch);
+    },
+    [peer, fetchLatest]
+  );
 
   useEffect(() => {
     if (!myId || !peer) return;
@@ -103,31 +154,19 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   }, [myId, peer, fetchLatest, subscribeRealtime]);
 
   useEffect(() => {
-    if (conn && ACCEPTED_STATES.has(conn[COLS.status]) && onReadyChat) {
+    if (conn && ACCEPTED_STATES.has(conn[CONN_COLS.status]) && onReadyChat) {
       onReadyChat(conn.id);
     }
   }, [conn, onReadyChat]);
 
-  /* ---------------- resolve by handle / url / id ---------------- */
+  /* -------------------- Resolve by handle / id -------------------- */
   const openByHandle = async () => {
-    const raw = handleInput.trim().replace(/^@/, "");
-    if (!raw) return;
-
-    // If they paste a profile URL like /u/<handle>, pull last segment
-    const maybeHandle =
-      raw.includes("/") ? raw.split("/").filter(Boolean).pop() : raw;
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("handle", maybeHandle)
-      .maybeSingle();
-
-    if (error || !data?.id) {
-      alert("No profile found for that handle.");
-      return;
+    try {
+      const userId = await resolveHandleToUserId(handleInput);
+      setPeer(toUuid(userId));
+    } catch (e) {
+      alert(e.message || "No profile found for that handle.");
     }
-    setPeer(toUuid(data.id));
   };
 
   const openById = () => {
@@ -135,27 +174,25 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     if (id) setPeer(id);
   };
 
-  /* ---------------- connection actions ---------------- */
+  /* -------------------- Connection actions -------------------- */
   const requestConnect = async () => {
     if (!myId || !peer || myId === peer) return;
+    const C = CONN_COLS;
     setBusy(true);
     try {
-      // auto-accept if the other side already requested
+      // If the other side already requested, auto-accept
       if (
         conn &&
-        conn[COLS.status] === "pending" &&
-        toUuid(conn[COLS.requester]) === peer &&
-        toUuid(conn[COLS.addressee]) === myId
+        conn[C.status] === "pending" &&
+        toUuid(conn[C.requester]) === peer &&
+        toUuid(conn[C.addressee]) === myId
       ) {
         await acceptRequest(conn.id);
         return;
       }
-      const payload = {
-        [COLS.requester]: myId,
-        [COLS.addressee]: peer,
-        [COLS.status]: "pending",
-      };
-      const { data, error } = await supabase.from(TABLE).insert(payload).select();
+
+      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
@@ -167,13 +204,14 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   };
 
   const cancelPending = async () => {
-    if (!conn || conn[COLS.status] !== "pending" || !isRequester) return;
+    const C = CONN_COLS;
+    if (!conn || conn[C.status] !== "pending" || !isRequester) return;
     setBusy(true);
     try {
-      const payload = { [COLS.status]: "disconnected" };
-      if (COLS.updatedAt) payload[COLS.updatedAt] = new Date().toISOString();
+      const payload = { [C.status]: "disconnected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
       const { data, error } = await supabase
-        .from(TABLE)
+        .from(CONN_TABLE)
         .update(payload)
         .eq("id", toUuid(conn.id))
         .select();
@@ -188,17 +226,14 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   };
 
   const acceptRequest = async (id = conn?.id) => {
+    const C = CONN_COLS;
     const cid = toUuid(id);
-    if (!cid || !conn || conn[COLS.status] !== "pending" || !isAddressee) return;
+    if (!cid || !conn || conn[C.status] !== "pending" || !isAddressee) return;
     setBusy(true);
     try {
-      const payload = { [COLS.status]: "accepted" };
-      if (COLS.updatedAt) payload[COLS.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(TABLE)
-        .update(payload)
-        .eq("id", cid)
-        .select();
+      const payload = { [C.status]: "accepted" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
@@ -210,16 +245,13 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   };
 
   const rejectRequest = async () => {
-    if (!conn || conn[COLS.status] !== "pending" || !isAddressee) return;
+    const C = CONN_COLS;
+    if (!conn || conn[C.status] !== "pending" || !isAddressee) return;
     setBusy(true);
     try {
-      const payload = { [COLS.status]: "rejected" };
-      if (COLS.updatedAt) payload[COLS.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(TABLE)
-        .update(payload)
-        .eq("id", toUuid(conn.id))
-        .select();
+      const payload = { [C.status]: "rejected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", toUuid(conn.id)).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
@@ -231,16 +263,13 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   };
 
   const disconnect = async () => {
-    if (!conn || !ACCEPTED_STATES.has(conn[COLS.status])) return;
+    const C = CONN_COLS;
+    if (!conn || !ACCEPTED_STATES.has(conn[C.status])) return;
     setBusy(true);
     try {
-      const payload = { [COLS.status]: "disconnected" };
-      if (COLS.updatedAt) payload[COLS.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(TABLE)
-        .update(payload)
-        .eq("id", toUuid(conn.id))
-        .select();
+      const payload = { [C.status]: "disconnected" };
+      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", toUuid(conn.id)).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
@@ -252,15 +281,12 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   };
 
   const reconnect = async () => {
+    const C = CONN_COLS;
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      const payload = {
-        [COLS.requester]: myId,
-        [COLS.addressee]: peer,
-        [COLS.status]: "pending",
-      };
-      const { data, error } = await supabase.from(TABLE).insert(payload).select();
+      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
@@ -271,10 +297,10 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     }
   };
 
-  /* ---------------- messages (inline fallback) ---------------- */
+  /* -------------------- Messages (inline fallback) -------------------- */
   const canSend = useMemo(() => {
     return !!myId && !!conn?.id && ACCEPTED_STATES.has(status) && !!text.trim() && !sending;
-  }, [myId, conn, status, text, sending]);
+  }, [myId, conn?.id, status, text, sending]);
 
   const fetchMessages = useCallback(async () => {
     if (!conn?.id) return;
@@ -325,7 +351,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     }
   };
 
-  /* ---------------- UI helpers ---------------- */
+  /* -------------------- UI helpers -------------------- */
   const Btn = ({ onClick, label, tone = "primary", disabled }) => {
     const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
     return (
@@ -354,19 +380,19 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     </span>
   );
 
-  /* ---------------- early returns ---------------- */
+  /* -------------------- Early returns -------------------- */
   if (!me) return <div className="p-3 text-sm">Please sign in to use chat.</div>;
 
-  // If no peer yet, show a **handle-first** launcher
+  // If no peer yet, show a handle-first launcher (no UUIDs required)
   if (!peer) {
     return (
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 8 }}>Start a chat</div>
         <div className="text-sm" style={{ marginBottom: 8 }}>
-          Enter their <b>handle</b> (or paste their profile URL). You can also paste a UUID.
+          Enter their <b>handle</b> (or paste their profile URL). You can also paste a UUID if you have it.
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 600, marginBottom: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 640, marginBottom: 10 }}>
           <input
             value={handleInput}
             onChange={(e) => setHandleInput(e.target.value)}
@@ -376,7 +402,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
           <button className="btn btn-primary" onClick={openByHandle}>Open by handle</button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 600 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 640 }}>
           <input
             value={idInput}
             onChange={(e) => setIdInput(e.target.value)}
@@ -389,7 +415,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     );
   }
 
-  /* ---------------- main render ---------------- */
+  /* -------------------- Main render -------------------- */
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
@@ -429,7 +455,7 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
         )}
       </div>
 
-      {/* Messages */}
+      {/* Messages area */}
       {ACCEPTED_STATES.has(status) && (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           {typeof renderMessages === "function" ? (
@@ -441,15 +467,23 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
                 style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12, overflowY: "auto", background: "#fff" }}
               >
                 {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
-                {items.map(m => {
+                {items.map((m) => {
                   const mine = m.sender_id === myId;
                   return (
                     <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
-                      <div style={{
-                        maxWidth: 520, padding: "8px 10px", borderRadius: 12,
-                        border: "1px solid var(--border)", background: mine ? "#eef6ff" : "#f8fafc",
-                        whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4
-                      }}>
+                      <div
+                        style={{
+                          maxWidth: 520,
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: mine ? "#eef6ff" : "#f8fafc",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          fontSize: 14,
+                          lineHeight: 1.4,
+                        }}
+                      >
                         {m.body}
                         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
@@ -472,9 +506,13 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
                   type="submit"
                   disabled={!canSend}
                   style={{
-                    padding: "10px 14px", borderRadius: 12,
-                    background: canSend ? "#2563eb" : "#cbd5e1", color: "#fff", border: "none",
-                    cursor: canSend ? "pointer" : "not-allowed", fontWeight: 600
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    background: canSend ? "#2563eb" : "#cbd5e1",
+                    color: "#fff",
+                    border: "none",
+                    cursor: canSend ? "pointer" : "not-allowed",
+                    fontWeight: 600,
                   }}
                 >
                   Send
@@ -485,15 +523,16 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
         </div>
       )}
 
-      {/* Debug (helpful while we test; can remove later) */}
+      {/* Debug (remove later if you want) */}
       <div style={{ marginTop: 10, fontSize: 12, opacity: 0.6 }}>
         <div>me: {myId}</div>
         <div>peer: {peer}</div>
-        <div>conn: {conn ? `${toUuid(conn.id)} • ${conn[COLS.status]}` : "none"}</div>
+        <div>conn: {conn ? `${toUuid(conn.id)} • ${conn[CONN_COLS.status]}` : "none"}</div>
       </div>
     </div>
   );
 }
+
 
 
 
