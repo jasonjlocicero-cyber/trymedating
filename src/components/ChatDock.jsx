@@ -2,149 +2,83 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-/* -------------------- Constants & helpers -------------------- */
+const ACCEPTED = new Set(["accepted", "connected", "approved"]);
+const TABLE = "connections";
+const C = { requester: "requester_id", addressee: "addressee_id", status: "status", createdAt: "created_at", updatedAt: "updated_at" };
 
-// Treat these states as "connected"
-const ACCEPTED_STATES = new Set(["accepted", "connected", "approved"]);
+const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
 
-// connections table + column mapping (canonical)
-const CONN_TABLE = "connections";
-const CONN_COLS = {
-  requester: "requester_id",
-  addressee: "addressee_id",
-  status: "status",
-  createdAt: "created_at",
-  updatedAt: "updated_at",
-};
+const otherPartyId = (row, my) =>
+  row[C.requester] === my ? row[C.addressee] : row[C.requester];
 
-// Coerce any input to a UUID-like string; avoids "[object Object]" bugs
-const toUuid = (v) => {
-  if (!v) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "object" && typeof v.id === "string") return v.id;
-  return String(v);
-};
-
-/**
- * Robust handle → userId resolver.
- * Tries common handle fields and id fields, case-insensitive,
- * and accepts pasted profile URLs (e.g. /u/the_handle).
- */
-async function resolveHandleToUserId(raw) {
-  if (!raw) throw new Error("Missing handle");
-
-  // normalize: strip @ and allow profile URLs
-  let h = String(raw).trim().replace(/^@/, "");
-  if (h.includes("/")) h = h.split("/").filter(Boolean).pop();
-
-  const handleFields = ["handle", "username"];
-  const idFields = ["id", "user_id", "uid", "profile_id"];
-
-  for (const hf of handleFields) {
-    for (const idf of idFields) {
-      // eslint-disable-next-line no-await-in-loop
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(idf)
-        .ilike(hf, h) // case-insensitive match
-        .maybeSingle();
-
-      if (!error && data && data[idf]) {
-        return String(data[idf]);
-      }
-    }
-  }
-  throw new Error("No profile found for that handle.");
-}
-
-/* -------------------- Component -------------------- */
-
-/**
- * ChatDock
- * Props:
- *  - peerId?: string             // optional; you can resolve by handle in-UI
- *  - onReadyChat?: (connId)=>void
- *  - renderMessages?: (connId)=>ReactNode  // if not provided, a simple composer is rendered
- */
 export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
-  // auth
   const [me, setMe] = useState(null);
-  const myId = toUuid(me?.id);
+  const myId = toId(me?.id);
 
-  // peer + resolution inputs
-  const [peer, setPeer] = useState(toUuid(peerId));
-  const [handleInput, setHandleInput] = useState("");
-  const [idInput, setIdInput] = useState("");
-
-  // connection row
+  const [peer, setPeer] = useState(toId(peerId));
   const [conn, setConn] = useState(null);
-  const status = conn ? conn[CONN_COLS.status] : "none";
-
-  // ui/busy
+  const status = conn ? conn[C.status] : "none";
   const [busy, setBusy] = useState(false);
 
-  // simple inline messages (fallback if no renderMessages prop)
+  // inline composer (used only if renderMessages not provided)
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const scrollerRef = useRef(null);
 
-  const isRequester = !!(conn && myId && conn[CONN_COLS.requester] === myId);
-  const isAddressee = !!(conn && myId && conn[CONN_COLS.addressee] === myId);
-
-  /* -------------------- Auth -------------------- */
+  /* auth */
   useEffect(() => {
     let mounted = true;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (mounted) setMe(user || null);
+      if (mounted) setMe(user ?? null);
     })();
     return () => { mounted = false; };
   }, []);
 
-  /* -------------------- Connection fetch + realtime -------------------- */
-  const fetchLatest = useCallback(
-    async (uid) => {
-      uid = toUuid(uid);
-      if (!uid || !peer) return;
+  /* auto-resume last connection if no peer selected */
+  const [autoTried, setAutoTried] = useState(false);
+  useEffect(() => {
+    if (autoTried || !myId || peer) return;
+    (async () => {
+      const { data } = await supabase
+        .from(TABLE)
+        .select("*")
+        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
+        .in("status", ["accepted","connected","pending"])
+        .order("updated_at", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (data?.length) setPeer(otherPartyId(data[0], myId));
+      setAutoTried(true);
+    })();
+  }, [autoTried, myId, peer]);
 
-      const C = CONN_COLS;
-      const pairOr =
-        `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
-        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
+  /* fetch + realtime for the current pair */
+  const fetchLatest = useCallback(async (uid) => {
+    uid = toId(uid);
+    if (!uid || !peer) return;
+    const pairOr =
+      `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
+      `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
+    let q = supabase.from(TABLE).select("*").or(pairOr);
+    if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+    const { data } = await q.limit(1);
+    setConn(data?.[0] ?? null);
+  }, [peer]);
 
-      let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
-      if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
-      const { data, error } = await q.limit(1);
-
-      if (!error) setConn(data?.[0] ?? null);
-    },
-    [peer]
-  );
-
-  const subscribeRealtime = useCallback(
-    (uid) => {
-      uid = toUuid(uid);
-      if (!uid || !peer) return () => {};
-      const C = CONN_COLS;
-      const filter =
-        `or(` +
-        `and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
-        `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid})` +
-        `)`;
-
-      const ch = supabase
-        .channel(`conn:${uid}<->${peer}`)
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: CONN_TABLE, filter },
-          () => fetchLatest(uid)
-        )
-        .subscribe();
-      return () => supabase.removeChannel(ch);
-    },
-    [peer, fetchLatest]
-  );
+  const subscribeRealtime = useCallback((uid) => {
+    uid = toId(uid);
+    if (!uid || !peer) return () => {};
+    const filter =
+      `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
+      `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
+    const ch = supabase
+      .channel(`conn:${uid}<->${peer}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: TABLE, filter }, () => fetchLatest(uid))
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [peer, fetchLatest]);
 
   useEffect(() => {
     if (!myId || !peer) return;
@@ -154,162 +88,103 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
   }, [myId, peer, fetchLatest, subscribeRealtime]);
 
   useEffect(() => {
-    if (conn && ACCEPTED_STATES.has(conn[CONN_COLS.status]) && onReadyChat) {
-      onReadyChat(conn.id);
-    }
+    if (conn && ACCEPTED.has(conn[C.status]) && onReadyChat) onReadyChat(conn.id);
   }, [conn, onReadyChat]);
 
-  /* -------------------- Resolve by handle / id -------------------- */
-  const openByHandle = async () => {
-    try {
-      const userId = await resolveHandleToUserId(handleInput);
-      setPeer(toUuid(userId));
-    } catch (e) {
-      alert(e.message || "No profile found for that handle.");
-    }
-  };
-
-  const openById = () => {
-    const id = toUuid(idInput.trim());
-    if (id) setPeer(id);
-  };
-
-  /* -------------------- Connection actions -------------------- */
+  /* connect actions */
   const requestConnect = async () => {
     if (!myId || !peer || myId === peer) return;
-    const C = CONN_COLS;
     setBusy(true);
     try {
-      // If the other side already requested, auto-accept
-      if (
-        conn &&
-        conn[C.status] === "pending" &&
-        toUuid(conn[C.requester]) === peer &&
-        toUuid(conn[C.addressee]) === myId
-      ) {
+      // auto-accept if the other side already requested
+      if (conn && conn[C.status] === "pending" &&
+          toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
         await acceptRequest(conn.id);
         return;
       }
-
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
+      const { data, error } = await supabase.from(TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to send request.");
-      console.error("requestConnect error:", e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancelPending = async () => {
-    const C = CONN_COLS;
-    if (!conn || conn[C.status] !== "pending" || !isRequester) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "disconnected" };
-      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase
-        .from(CONN_TABLE)
-        .update(payload)
-        .eq("id", toUuid(conn.id))
-        .select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to cancel.");
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { alert(e.message || "Failed to connect."); }
+    finally { setBusy(false); }
   };
 
   const acceptRequest = async (id = conn?.id) => {
-    const C = CONN_COLS;
-    const cid = toUuid(id);
-    if (!cid || !conn || conn[C.status] !== "pending" || !isAddressee) return;
+    const cid = toId(id);
+    if (!cid || !conn || conn[C.status] !== "pending") return;
+    const iAmAddressee = toId(conn[C.addressee]) === myId;
+    if (!iAmAddressee) return;
     setBusy(true);
     try {
-      const payload = { [C.status]: "accepted" };
-      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
+      const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", cid).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to accept.");
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { alert(e.message || "Failed to accept."); }
+    finally { setBusy(false); }
   };
 
   const rejectRequest = async () => {
-    const C = CONN_COLS;
-    if (!conn || conn[C.status] !== "pending" || !isAddressee) return;
+    if (!conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
     setBusy(true);
     try {
-      const payload = { [C.status]: "rejected" };
-      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", toUuid(conn.id)).select();
+      const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to reject.");
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { alert(e.message || "Failed to reject."); }
+    finally { setBusy(false); }
+  };
+
+  const cancelPending = async () => {
+    if (!conn || conn[C.status] !== "pending" || toId(conn[C.requester]) !== myId) return;
+    setBusy(true);
+    try {
+      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) { alert(e.message || "Failed to cancel."); }
+    finally { setBusy(false); }
   };
 
   const disconnect = async () => {
-    const C = CONN_COLS;
-    if (!conn || !ACCEPTED_STATES.has(conn[C.status])) return;
+    if (!conn || !ACCEPTED.has(conn[C.status])) return;
     setBusy(true);
     try {
-      const payload = { [C.status]: "disconnected" };
-      if (C.updatedAt) payload[C.updatedAt] = new Date().toISOString();
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", toUuid(conn.id)).select();
+      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to disconnect.");
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { alert(e.message || "Failed to disconnect."); }
+    finally { setBusy(false); }
   };
 
   const reconnect = async () => {
-    const C = CONN_COLS;
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
+      const { data, error } = await supabase.from(TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message ?? "Failed to reconnect.");
-      console.error(e);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { alert(e.message || "Failed to reconnect."); }
+    finally { setBusy(false); }
   };
 
-  /* -------------------- Messages (inline fallback) -------------------- */
-  const canSend = useMemo(() => {
-    return !!myId && !!conn?.id && ACCEPTED_STATES.has(status) && !!text.trim() && !sending;
-  }, [myId, conn?.id, status, text, sending]);
+  /* messages (inline fallback) */
+  const canSend = useMemo(() =>
+    !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending, [myId, conn?.id, status, text, sending]);
 
   const fetchMessages = useCallback(async () => {
     if (!conn?.id) return;
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("messages")
       .select("*")
       .eq("connection_id", conn.id)
       .order("created_at", { ascending: true });
-    if (!error) setItems(data || []);
+    setItems(data || []);
   }, [conn?.id]);
 
   useEffect(() => {
@@ -317,11 +192,9 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on(
-        "postgres_changes",
+      .on("postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages()
-      )
+        () => fetchMessages())
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -336,154 +209,117 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
     if (!canSend) return;
     setSending(true);
     try {
-      const { error } = await supabase.from("messages").insert({
+      const recip = otherPartyId(conn, myId);
+      const payload = {
         connection_id: conn.id,
-        sender_id: myId,
         body: text.trim(),
-      });
+        // legacy + new columns (your DB has both and `recipient` is NOT NULL)
+        sender: myId,
+        sender_id: myId,
+        recipient: recip,
+        recipient_id: recip,
+      };
+      const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
     } catch (err) {
-      alert(err.message ?? "Failed to send (check messages table & RLS).");
+      alert(err.message ?? "Failed to send");
       console.error(err);
-    } finally {
-      setSending(false);
-    }
+    } finally { setSending(false); }
   };
 
-  /* -------------------- UI helpers -------------------- */
+  const Mine = (m) => (m.sender_id === myId) || (m.sender === myId);
+
+  /* UI helpers */
   const Btn = ({ onClick, label, tone = "primary", disabled }) => {
     const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
     return (
-      <button
-        onClick={onClick}
-        disabled={busy || disabled}
+      <button onClick={onClick} disabled={busy || disabled}
         style={{
-          padding: "8px 12px",
-          borderRadius: 16,
-          marginRight: 8,
-          border: "1px solid var(--border)",
-          background: disabled ? "#cbd5e1" : bg,
-          color: tone === "ghost" ? "#111" : "#fff",
-          cursor: busy || disabled ? "not-allowed" : "pointer",
-          fontWeight: 600, fontSize: 14,
-        }}
-      >
+          padding: "8px 12px", borderRadius: 16, marginRight: 8, border: "1px solid var(--border)",
+          background: disabled ? "#cbd5e1" : bg, color: tone === "ghost" ? "#111" : "#fff",
+          cursor: busy || disabled ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 14
+        }}>
         {label}
       </button>
     );
   };
-
-  const pill = (text, color) => (
-    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
-      {text}
-    </span>
+  const Pill = (txt, color) => (
+    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>{txt}</span>
   );
 
-  /* -------------------- Early returns -------------------- */
+  /* signed out */
   if (!me) return <div className="p-3 text-sm">Please sign in to use chat.</div>;
 
-  // If no peer yet, show a handle-first launcher (no UUIDs required)
+  /* no peer yet — we just wait for auto-resume; show tiny hint */
   if (!peer) {
     return (
       <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>Start a chat</div>
-        <div className="text-sm" style={{ marginBottom: 8 }}>
-          Enter their <b>handle</b> (or paste their profile URL). You can also paste a UUID if you have it.
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 640, marginBottom: 10 }}>
-          <input
-            value={handleInput}
-            onChange={(e) => setHandleInput(e.target.value)}
-            placeholder="their_handle or /u/their_handle or @their_handle"
-            style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px" }}
-          />
-          <button className="btn btn-primary" onClick={openByHandle}>Open by handle</button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, maxWidth: 640 }}>
-          <input
-            value={idInput}
-            onChange={(e) => setIdInput(e.target.value)}
-            placeholder="profile UUID (profiles.id)"
-            style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "10px" }}
-          />
-          <button className="btn btn-neutral" onClick={openById}>Open by id</button>
+        <div style={{ fontWeight: 700 }}>Messages</div>
+        <div className="muted" style={{ fontSize: 13 }}>
+          Loading your latest conversation…
         </div>
       </div>
     );
   }
 
-  /* -------------------- Main render -------------------- */
+  /* main */
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontWeight: 700 }}>Connection</div>
         <div>
-          {ACCEPTED_STATES.has(status) && pill("Connected", "#bbf7d0")}
-          {status === "pending" && pill("Pending", "#fde68a")}
-          {status === "rejected" && pill("Rejected", "#fecaca")}
-          {status === "disconnected" && pill("Disconnected", "#e5e7eb")}
-          {status === "none" && pill("No connection", "#f3f4f6")}
+          {ACCEPTED.has(status) && Pill("Connected", "#bbf7d0")}
+          {status === "pending" && Pill("Pending", "#fde68a")}
+          {status === "rejected" && Pill("Rejected", "#fecaca")}
+          {status === "disconnected" && Pill("Disconnected", "#e5e7eb")}
+          {status === "none" && Pill("No connection", "#f3f4f6")}
         </div>
       </div>
 
       <div style={{ marginBottom: 10 }}>
         {status === "none" && <Btn onClick={requestConnect} label="Connect" />}
-
-        {status === "pending" && isRequester && (
+        {status === "pending" && toId(conn?.[C.requester]) === myId && (
           <>
             <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
             <Btn tone="ghost" onClick={cancelPending} label="Cancel" />
           </>
         )}
-
-        {status === "pending" && isAddressee && (
+        {status === "pending" && toId(conn?.[C.addressee]) === myId && (
           <>
             <Btn onClick={() => acceptRequest()} label="Accept" />
             <Btn tone="danger" onClick={rejectRequest} label="Reject" />
           </>
         )}
-
-        {ACCEPTED_STATES.has(status) && (
-          <Btn tone="danger" onClick={disconnect} label="Disconnect" />
-        )}
-
-        {(status === "rejected" || status === "disconnected") && (
-          <Btn onClick={reconnect} label="Reconnect" />
-        )}
+        {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" />}
+        {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" />}
       </div>
 
-      {/* Messages area */}
-      {ACCEPTED_STATES.has(status) && (
+      {/* messages (small, not full page) */}
+      {ACCEPTED.has(status) && (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           {typeof renderMessages === "function" ? (
             renderMessages(conn.id)
           ) : (
-            <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, height: 360 }}>
+            <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 320 }}>
               <div
                 ref={scrollerRef}
-                style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 12, overflowY: "auto", background: "#fff" }}
+                style={{
+                  border: "1px solid var(--border)", borderRadius: 12, padding: 12,
+                  overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 240
+                }}
               >
                 {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
                 {items.map((m) => {
-                  const mine = (m.sender_id === myId) || (m.sender === myId);
+                  const mine = Mine(m);
                   return (
-                    <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
-                      <div
-                        style={{
-                          maxWidth: 520,
-                          padding: "8px 10px",
-                          borderRadius: 12,
-                          border: "1px solid var(--border)",
-                          background: mine ? "#eef6ff" : "#f8fafc",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          fontSize: 14,
-                          lineHeight: 1.4,
-                        }}
-                      >
+                    <div key={m.id}
+                         style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                      <div style={{
+                        maxWidth: 520, padding: "8px 10px", borderRadius: 12,
+                        border: "1px solid var(--border)", background: mine ? "#eef6ff" : "#f8fafc",
+                        whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4
+                      }}>
                         {m.body}
                         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
@@ -502,19 +338,9 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
                   onChange={(e) => setText(e.target.value)}
                   style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px", fontSize: 14 }}
                 />
-                <button
-                  type="submit"
-                  disabled={!canSend}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 12,
-                    background: canSend ? "#2563eb" : "#cbd5e1",
-                    color: "#fff",
-                    border: "none",
-                    cursor: canSend ? "pointer" : "not-allowed",
-                    fontWeight: 600,
-                  }}
-                >
+                <button type="submit" disabled={!canSend}
+                        style={{ padding: "10px 14px", borderRadius: 12, background: canSend ? "#2563eb" : "#cbd5e1",
+                                 color: "#fff", border: "none", cursor: canSend ? "pointer" : "not-allowed", fontWeight: 600 }}>
                   Send
                 </button>
               </form>
@@ -523,11 +349,11 @@ export default function ChatDock({ peerId, onReadyChat, renderMessages }) {
         </div>
       )}
 
-      {/* Debug (remove later if you want) */}
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.6 }}>
+      {/* tiny debug; remove later */}
+      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.6 }}>
         <div>me: {myId}</div>
         <div>peer: {peer}</div>
-        <div>conn: {conn ? `${toUuid(conn.id)} • ${conn[CONN_COLS.status]}` : "none"}</div>
+        <div>conn: {conn ? `${conn.id} • ${conn[C.status]}` : "none"}</div>
       </div>
     </div>
   );
