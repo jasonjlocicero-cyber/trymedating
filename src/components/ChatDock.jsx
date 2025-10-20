@@ -19,11 +19,60 @@ const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 
-// message body encodings
-const isAttachment = (b) => typeof b === "string" && b.startsWith("[[file:");
-const parseAttachment = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(7, -2))); } catch { return null; } };
+/* ---------------- message body encodings & parsing ---------------- */
 const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
 const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(10, -2))); } catch { return null; } };
+
+/** Normalize various historical/legacy attachment formats into a common meta */
+function getAttachmentMeta(body) {
+  if (typeof body !== "string") return null;
+
+  // NEW: [[file:<json>]]
+  if (body.startsWith("[[file:")) {
+    try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
+  }
+
+  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
+  if (body.startsWith("[[media:")) {
+    try {
+      const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
+      return {
+        name: v.name || v.filename || v.path?.split("/")?.pop(),
+        type: v.type || v.mime,
+        size: v.size || v.bytes,
+        // prefer path for signed URL; if only url exists, we use url fallback
+        path: v.path || undefined,
+        url: v.url || undefined,
+      };
+    } catch {}
+  }
+
+  // Legacy B: [[image:<url>]] or [[img:<url>]]
+  if (body.startsWith("[[image:") || body.startsWith("[[img:")) {
+    const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
+    if (raw.startsWith("http")) {
+      return { url: raw, name: raw.split("/").pop(), type: "image/*" };
+    }
+  }
+
+  // Legacy C: [[filepath:<storage-relative-path>]]
+  if (body.startsWith("[[filepath:")) {
+    const p = decodeURIComponent(body.slice(11, -2));
+    return { path: p, name: p.split("/").pop() };
+  }
+
+  // Legacy D: body is a direct public storage URL in plain text
+  //   e.g. .../storage/v1/object/public/<bucket>/<path/to/file>
+  const urlMatch = body.match(/https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/);
+  if (urlMatch) {
+    const url = body.trim();
+    const bucket = urlMatch[1];
+    const path = urlMatch[2].replace(/\]+$/, ""); // strip accidental trailing ]]
+    return { url, path, bucket, name: path.split("/").pop() };
+  }
+
+  return null;
+}
 
 /* ----------------------------- linkifying ---------------------------- */
 function linkifyJSX(text) {
@@ -89,26 +138,39 @@ function ProgressBar({ percent }) {
   );
 }
 
-/** Attachment bubble with auto-refreshing signed URL + optional delete (owner only) */
+/** Attachment bubble: uses signed URL when we have a storage path;
+ *  falls back to a direct URL if that's all we have (legacy). */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
-  const [url, setUrl] = useState(null);
+  const [url, setUrl] = useState(meta?.url || null);
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
+
     async function refresh() {
-      if (!meta?.path) return;
-      try {
-        const u = await signedUrlForPath(meta.path, 3600); // 1h
-        if (alive) setUrl(u);
-      } catch {}
+      // If a stable URL is provided (legacy public), use it directly.
+      if (meta?.url && !meta?.path) {
+        setUrl(meta.url);
+        return;
+      }
+      // If we have a path (private bucket), generate a signed URL.
+      if (meta?.path) {
+        try {
+          const u = await signedUrlForPath(meta.path, 3600); // 1h
+          if (alive) setUrl(u);
+        } catch {}
+      }
     }
+
     refresh();
+    // Refresh signed URL periodically (no-op for static URL)
     const id = setInterval(() => setRefreshTick((n) => n + 1), 55 * 60 * 1000);
     return () => { alive = false; clearInterval(id); };
-  }, [meta?.path, refreshTick]);
+  }, [meta?.path, meta?.url, refreshTick]);
 
   const handleImgError = () => setRefreshTick((n) => n + 1);
+
+  const canDelete = !!meta?.path && !!onDelete;
 
   return (
     <div
@@ -122,13 +184,15 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           Attachment: {meta?.name || "file"}{meta?.size ? ` (${Math.ceil(meta.size / 1024)} KB)` : ""}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button
-            type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
-            style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
-          >
-            ⟳
-          </button>
-          {mine && onDelete && (
+          {meta?.path && (
+            <button
+              type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
+              style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+            >
+              ⟳
+            </button>
+          )}
+          {mine && canDelete && (
             <button
               type="button" onClick={() => onDelete(meta)} disabled={deleting} title="Delete attachment"
               style={{ border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111", borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12 }}
@@ -141,13 +205,13 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 
       <div style={{ marginTop: 6 }}>
         {url ? (
-          meta?.type?.startsWith("image/") ? (
+          (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
             <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
           ) : (
             <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>Open file</a>
           )
         ) : (
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Generating link…</div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Link unavailable</div>
         )}
       </div>
     </div>
@@ -176,7 +240,6 @@ export default function ChatDock() {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
-  // 🔧 single declaration
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
 
@@ -367,6 +430,7 @@ export default function ChatDock() {
   };
 
   const deleteAttachment = async (meta) => {
+    // Only possible when we have a storage path (URL-only legacy items can’t be removed from storage here)
     if (!meta?.path || !conn?.id) return;
     setDeletingPaths((s) => { const n = new Set(s); n.add(meta.path); return n; });
     try {
@@ -544,7 +608,7 @@ export default function ChatDock() {
       {status === "pending" && toId(conn?.[C.addressee]) === myId && (
         <>
           <Btn onClick={() => acceptRequest()} label="Accept" disabled={busy} />
-        <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
+          <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
         </>
       )}
       {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
@@ -623,7 +687,7 @@ export default function ChatDock() {
                   );
                 }
 
-                const meta = isAttachment(m.body) ? parseAttachment(m.body) : null;
+                const meta = getAttachmentMeta(m.body);
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
                     {meta ? (
@@ -695,6 +759,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
