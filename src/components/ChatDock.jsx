@@ -1,7 +1,7 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
-import AttachmentButton from "../components/AttachmentButton";
+import AttachmentButton from "./AttachmentButton"; // <-- FIXED PATH
 import { uploadChatFile, signedUrlForPath } from "../lib/chatMedia";
 
 /** ----------------------------------------
@@ -21,7 +21,7 @@ const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 
-// Message body encodings for attachments
+// Body encodings for attachments
 const isAttachment = (body) => typeof body === "string" && body.startsWith("[[file:");
 const parseAttachment = (body) => {
   try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch { return null; }
@@ -31,9 +31,7 @@ const parseDeleted = (body) => {
   try { return JSON.parse(decodeURIComponent(body.slice(10, -2))); } catch { return null; }
 };
 
-/** ----------------------------------------
- * Small UI bits
- * -------------------------------------- */
+/** Small UI bits */
 const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
   const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
   return (
@@ -50,7 +48,7 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
         color: tone === "ghost" ? "#111" : "#fff",
         cursor: disabled ? "not-allowed" : "pointer",
         fontWeight: 600,
-        fontSize: 14,
+        fontSize: 14
       }}
     >
       {label}
@@ -62,7 +60,6 @@ const Pill = (txt, color) => (
     {txt}
   </span>
 );
-
 function ProgressBar({ percent }) {
   return (
     <div style={{ width: "100%", height: 8, background: "#eee", borderRadius: 8 }}>
@@ -71,7 +68,7 @@ function ProgressBar({ percent }) {
   );
 }
 
-/** Attachment bubble with optional delete control (for owner) */
+/** Attachment bubble with optional delete (owner only) */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(null);
   useEffect(() => {
@@ -91,13 +88,12 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
         fontSize: 14,
-        lineHeight: 1.4,
+        lineHeight: 1.4
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div style={{ fontSize: 13 }}>
-          Attachment: {meta?.name || "file"}
-          {meta?.size ? ` (${Math.ceil(meta.size / 1024)} KB)` : ""}
+          Attachment: {meta?.name || "file"}{meta?.size ? ` (${Math.ceil(meta.size / 1024)} KB)` : ""}
         </div>
         {mine && onDelete && (
           <button
@@ -113,7 +109,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               padding: "4px 8px",
               cursor: deleting ? "not-allowed" : "pointer",
               fontWeight: 700,
-              fontSize: 12,
+              fontSize: 12
             }}
           >
             🗑️ Delete
@@ -157,7 +153,7 @@ export default function ChatDock() {
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
   const scrollerRef = useRef(null);
 
-  /* -------------------- auth -------------------- */
+  /* auth */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -167,7 +163,7 @@ export default function ChatDock() {
     return () => { mounted = false; };
   }, []);
 
-  /* -------------------- auto-resume latest connection -------------------- */
+  /* auto-resume latest connection */
   const [autoTried, setAutoTried] = useState(false);
   useEffect(() => {
     if (autoTried || !myId || peer) return;
@@ -188,7 +184,7 @@ export default function ChatDock() {
     })();
   }, [autoTried, myId, peer]);
 
-  /* -------------------- fetch + subscribe connection -------------------- */
+  /* fetch + subscribe connection */
   const fetchLatestConn = useCallback(async (uid) => {
     uid = toId(uid);
     if (!uid || !peer) return;
@@ -221,7 +217,7 @@ export default function ChatDock() {
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  /* -------------------- messages: fetch + realtime + send -------------------- */
+  /* messages: fetch + realtime + send */
   const canSend = useMemo(
     () => !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending,
     [myId, conn?.id, status, text, sending]
@@ -242,9 +238,11 @@ export default function ChatDock() {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on("postgres_changes",
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages())
+        () => fetchMessages()
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -274,7 +272,7 @@ export default function ChatDock() {
 
   const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
-  /* -------------------- attachment: upload with optimistic progress -------------------- */
+  /* attachment: upload with optimistic progress */
   const pickAttachment = async (file) => {
     try {
       if (!conn?.id || !file) return;
@@ -283,7 +281,7 @@ export default function ChatDock() {
       setUploading(true);
       setUploadPct(5);
 
-      // optimistic progress (SDK doesn't expose byte progress)
+      // optimistic timer since SDK doesn't expose bytes progress
       const tick = setInterval(() => {
         setUploadPct((p) => (p < 85 ? p + 5 : p < 90 ? p + 2 : p));
       }, 200);
@@ -298,7 +296,7 @@ export default function ChatDock() {
       const body = `[[file:${encodeURIComponent(JSON.stringify(meta))}]]`;
 
       const { error } = await supabase.from("messages").insert({
-        connection_id: conn.id, sender: myId, recipient: recip, body,
+        connection_id: conn.id, sender: myId, recipient: recip, body
       });
       if (error) throw error;
 
@@ -313,20 +311,18 @@ export default function ChatDock() {
     }
   };
 
-  /* -------------------- attachment: delete (owner only) -------------------- */
+  /* attachment: delete (owner only) */
   const deleteAttachment = async (meta) => {
     if (!meta?.path || !conn?.id) return;
     setDeletingPaths((s) => new Set(s).add(meta.path));
     try {
-      // remove the file itself (RLS policy allows participants)
       const { error: delErr } = await supabase.storage.from("chat-media").remove([meta.path]);
       if (delErr) throw delErr;
 
-      // notify the room with a tombstone message (don’t rely on UPDATE policies)
       const recip = otherPartyId(conn, myId);
       const tomb = `[[deleted:${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}]]`;
       const { error: msgErr } = await supabase.from("messages").insert({
-        connection_id: conn.id, sender: myId, recipient: recip, body: tomb,
+        connection_id: conn.id, sender: myId, recipient: recip, body: tomb
       });
       if (msgErr) throw msgErr;
     } catch (err) {
@@ -339,7 +335,7 @@ export default function ChatDock() {
     }
   };
 
-  /* -------------------- render -------------------- */
+  /* render */
   if (!me) {
     return (
       <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
@@ -381,7 +377,7 @@ export default function ChatDock() {
     <div
       style={{
         maxWidth: 720, margin: "12px auto",
-        border: "1px solid var(--border)", borderRadius: 12, padding: 12, background: "#fff",
+        border: "1px solid var(--border)", borderRadius: 12, padding: 12, background: "#fff"
       }}
     >
       {/* Top: connection state */}
@@ -399,7 +395,7 @@ export default function ChatDock() {
       {/* Controls */}
       {connControls}
 
-      {/* Messages area (compact height) */}
+      {/* Messages area (compact) */}
       {ACCEPTED.has(status) && (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
@@ -408,13 +404,14 @@ export default function ChatDock() {
               style={{
                 border: "1px solid var(--border)", borderRadius: 12, padding: 12,
                 overflowY: "auto", background: "#fff",
-                minHeight: 140, maxHeight: 260,
+                minHeight: 140, maxHeight: 260
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
 
               {items.map((m) => {
                 const mine = isMine(m);
+
                 if (isDeletedAttachment(m.body)) {
                   const meta = parseDeleted(m.body);
                   return (
@@ -434,7 +431,7 @@ export default function ChatDock() {
                         meta={meta}
                         mine={mine}
                         onDelete={mine ? deleteAttachment : undefined}
-                        deleting={deletingPaths.has(meta.path)}
+                        deleting={deletingPaths.has(meta?.path)}
                       />
                     ) : (
                       <div
@@ -447,7 +444,7 @@ export default function ChatDock() {
                           whiteSpace: "pre-wrap",
                           wordBreak: "break-word",
                           fontSize: 14,
-                          lineHeight: 1.4,
+                          lineHeight: 1.4
                         }}
                       >
                         {m.body}
@@ -461,45 +458,9 @@ export default function ChatDock() {
               })}
             </div>
 
-            {/* composer with paperclip + progress */}
+            {/* composer */}
             <form onSubmit={send} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
-              <input
-                type="text"
-                placeholder={uploading ? "Uploading…" : "Type a message…"}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                disabled={uploading}
-                style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px", fontSize: 14 }}
-              />
-              <button
-                type="submit"
-                disabled={!canSend || uploading}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  background: (!canSend || uploading) ? "#cbd5e1" : "#2563eb",
-                  color: "#fff",
-                  border: "none",
-                  cursor: (!canSend || uploading) ? "not-allowed" : "pointer",
-                  fontWeight: 600,
-                }}
-              >
-                Send
-              </button>
-            </form>
-
-            {uploading && (
-              <div style={{ marginTop: 6 }}>
-                <ProgressBar percent={uploadPct} />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+              <AttachmentButton onPick={pickAttachment} d
 
 
 
