@@ -19,6 +19,17 @@ const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 
+/* ---------- NEW: human-readable file size ---------- */
+function humanSize(bytes) {
+  if (!(bytes > 0)) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let n = bytes;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  const fixed = n >= 100 || i === 0 ? 0 : 1; // 0 decimals for ≥100 or bytes, else 1
+  return `${n.toFixed(fixed)} ${units[i]}`;
+}
+
 /* ---------------- message body encodings & parsing ---------------- */
 const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
 const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(10, -2))); } catch { return null; } };
@@ -27,12 +38,12 @@ const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
-  // NEW: [[file:<json>]]
+  // NEW canonical: [[file:<json>]]
   if (body.startsWith("[[file:")) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
 
-  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
+  // Legacy A: [[media:<json>]]
   if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
@@ -40,7 +51,6 @@ function getAttachmentMeta(body) {
         name: v.name || v.filename || v.path?.split("/")?.pop(),
         type: v.type || v.mime,
         size: v.size || v.bytes,
-        // prefer path for signed URL; if only url exists, we use url fallback
         path: v.path || undefined,
         url: v.url || undefined,
       };
@@ -61,13 +71,12 @@ function getAttachmentMeta(body) {
     return { path: p, name: p.split("/").pop() };
   }
 
-  // Legacy D: body is a direct public storage URL in plain text
-  //   e.g. .../storage/v1/object/public/<bucket>/<path/to/file>
+  // Legacy D: direct public storage URL in plain text
   const urlMatch = body.match(/https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/);
   if (urlMatch) {
     const url = body.trim();
     const bucket = urlMatch[1];
-    const path = urlMatch[2].replace(/\]+$/, ""); // strip accidental trailing ]]
+    const path = urlMatch[2].replace(/\]+$/, "");
     return { url, path, bucket, name: path.split("/").pop() };
   }
 
@@ -138,22 +147,47 @@ function ProgressBar({ percent }) {
   );
 }
 
-/** Attachment bubble: uses signed URL when we have a storage path;
- *  falls back to a direct URL if that's all we have (legacy). */
+/* ---------- NEW: compact PDF card (thumbnail-style) ---------- */
+function PdfThumb({ url, name = "document.pdf" }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      style={{ display: "flex", gap: 10, alignItems: "center", textDecoration: "none" }}
+    >
+      <div
+        aria-hidden
+        style={{
+          width: 56, height: 72, border: "1px solid var(--border)", borderRadius: 6,
+          display: "grid", placeItems: "center", background: "#fff",
+        }}
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>
+          <path d="M6 2h7l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#ef4444"/>
+          <path d="M13 2v5h5" fill="#fff" opacity="0.35"/>
+          <text x="12" y="18" textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">PDF</text>
+        </svg>
+      </div>
+      <div style={{ display: "grid" }}>
+        <span style={{ fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {name}
+        </span>
+        <span style={{ fontSize: 12, color: "#374151" }}>Open</span>
+      </div>
+    </a>
+  );
+}
+
+/** Attachment bubble: signed URL when path available; falls back to direct URL (legacy). */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(meta?.url || null);
   const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
-
     async function refresh() {
-      // If a stable URL is provided (legacy public), use it directly.
-      if (meta?.url && !meta?.path) {
-        setUrl(meta.url);
-        return;
-      }
-      // If we have a path (private bucket), generate a signed URL.
+      if (meta?.url && !meta?.path) { setUrl(meta.url); return; }
       if (meta?.path) {
         try {
           const u = await signedUrlForPath(meta.path, 3600); // 1h
@@ -161,16 +195,19 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         } catch {}
       }
     }
-
     refresh();
-    // Refresh signed URL periodically (no-op for static URL)
     const id = setInterval(() => setRefreshTick((n) => n + 1), 55 * 60 * 1000);
     return () => { alive = false; clearInterval(id); };
   }, [meta?.path, meta?.url, refreshTick]);
 
   const handleImgError = () => setRefreshTick((n) => n + 1);
-
   const canDelete = !!meta?.path && !!onDelete;
+
+  /* ---------- NEW: detect PDF ---------- */
+  const isPDF =
+    (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
+    /\.pdf$/i.test(meta?.name || "") ||
+    (meta?.url && /\.pdf(?:$|\?)/i.test(meta.url));
 
   return (
     <div
@@ -179,9 +216,11 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         background: mine ? "#eef6ff" : "#f8fafc", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4,
       }}
     >
+      {/* header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div style={{ fontSize: 13 }}>
-          Attachment: {meta?.name || "file"}{meta?.size ? ` (${Math.ceil(meta.size / 1024)} KB)` : ""}
+          Attachment: {meta?.name || "file"}
+          {meta?.size ? ` (${humanSize(meta.size)})` : ""}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {meta?.path && (
@@ -203,12 +242,17 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         </div>
       </div>
 
+      {/* body */}
       <div style={{ marginTop: 6 }}>
         {url ? (
-          (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
+          isPDF ? (
+            <PdfThumb url={url} name={meta?.name || "document.pdf"} />
+          ) : (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
             <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
           ) : (
-            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>Open file</a>
+            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
+              Open file
+            </a>
           )
         ) : (
           <div style={{ fontSize: 12, opacity: 0.7 }}>Link unavailable</div>
@@ -430,7 +474,6 @@ export default function ChatDock() {
   };
 
   const deleteAttachment = async (meta) => {
-    // Only possible when we have a storage path (URL-only legacy items can’t be removed from storage here)
     if (!meta?.path || !conn?.id) return;
     setDeletingPaths((s) => { const n = new Set(s); n.add(meta.path); return n; });
     try {
@@ -573,7 +616,6 @@ export default function ChatDock() {
     }
   };
 
-  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -759,6 +801,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
