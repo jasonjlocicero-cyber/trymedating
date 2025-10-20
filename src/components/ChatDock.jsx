@@ -267,8 +267,19 @@ export default function ChatDock() {
       .select("*")
       .eq("connection_id", conn.id)
       .order("created_at", { ascending: true });
+
     setItems(data || []);
-  }, [conn?.id]);
+
+    // STEP #2: mark all messages addressed to me in this connection as read
+    if (myId) {
+      await supabase
+        .from("messages")
+        .update({ read_at: new Date().toISOString() })
+        .eq("connection_id", conn.id)
+        .eq("recipient", myId)
+        .is("read_at", null);
+    }
+  }, [conn?.id, myId]);
 
   useEffect(() => {
     if (!conn?.id) return;
