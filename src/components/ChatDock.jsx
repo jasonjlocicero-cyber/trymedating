@@ -217,7 +217,7 @@ export default function ChatDock() {
       `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
       `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
     let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
-    if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+    q = q.order(C.updatedAt, { ascending: false }).order(C.createdAt, { ascending: false });
     const { data } = await q.limit(1);
     setConn(data?.[0] ?? null);
   }, [peer]);
@@ -225,9 +225,8 @@ export default function ChatDock() {
   const subscribeConn = useCallback((uid) => {
     uid = toId(uid);
     if (!uid || !peer) return () => {};
-    const filter =
-      `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
-      `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
+    // ✅ correct Realtime OR filter
+    const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
     const ch = supabase
       .channel(`conn:${uid}<->${peer}`)
       .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
@@ -241,6 +240,13 @@ export default function ChatDock() {
     const off = subscribeConn(myId);
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
+
+  // Light polling as a safety net (helps surface incoming "Reconnect" -> "pending")
+  useEffect(() => {
+    if (!myId || !peer) return;
+    const id = setInterval(() => fetchLatestConn(myId), 4000);
+    return () => clearInterval(id);
+  }, [myId, peer, fetchLatestConn]);
 
   /* messages: fetch + realtime + send */
   const canSend = useMemo(
@@ -374,11 +380,12 @@ export default function ChatDock() {
     if (f) pickAttachment(f);
   }, [conn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------- actions (defined BEFORE connControls to avoid hoist issues) ---------- */
+  /* ---------- actions (defined BEFORE connControls) ---------- */
   const requestConnect = async () => {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
+      // if the other side already requested me, accepting auto-bridges
       if (conn && conn[C.status] === "pending" && toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
         await acceptRequest(conn.id);
         return;
@@ -470,7 +477,7 @@ export default function ChatDock() {
     }
   };
 
-  /* connection controls (now AFTER actions) */
+  /* connection controls (AFTER actions) */
   const connControls = (
     <div style={{ marginBottom: 10 }}>
       {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
@@ -490,6 +497,24 @@ export default function ChatDock() {
       {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
     </div>
   );
+
+  /* UI guards */
+  if (!me) {
+    return (
+      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div className="muted" style={{ fontSize: 13 }}>Please sign in to use chat.</div>
+      </div>
+    );
+  }
+
+  if (!peer) {
+    return (
+      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Messages</div>
+        <div className="muted" style={{ fontSize: 13 }}>Loading your latest conversation…</div>
+      </div>
+    );
+  }
 
   /* UI */
   return (
@@ -587,9 +612,7 @@ export default function ChatDock() {
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-                }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 disabled={uploading}
                 style={{
                   flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px",
@@ -619,6 +642,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
