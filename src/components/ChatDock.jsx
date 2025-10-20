@@ -17,13 +17,55 @@ const C = {
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
 const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
-const ALLOWED = /^(image\/.*|application\/pdf)$/; // drag/drop + pick guard
+const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 
 // message body encodings
 const isAttachment = (b) => typeof b === "string" && b.startsWith("[[file:");
 const parseAttachment = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(7, -2))); } catch { return null; } };
 const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
 const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(10, -2))); } catch { return null; } };
+
+/* ----------------------------- linkifying ---------------------------- */
+/** Safely convert URLs/emails in plain text to <a> elements (no innerHTML). */
+function linkifyJSX(text) {
+  if (!text) return null;
+  const LINK_RE = /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
+  const out = [];
+  let last = 0;
+  let m;
+  let key = 0;
+
+  while ((m = LINK_RE.exec(text))) {
+    const raw = m[0];
+    const pre = text.slice(last, m.index);
+    if (pre) out.push(pre);
+
+    // Trim common trailing punctuation from the match only
+    const trimmed = raw.replace(/[)\].,!?;:]+$/g, "");
+    const trailing = raw.slice(trimmed.length);
+
+    const isUrl = !!m[1];
+    const href = isUrl
+      ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed)
+      : `mailto:${trimmed}`;
+
+    out.push(
+      <a
+        key={`lnk-${key++}`}
+        href={href}
+        target="_blank"
+        rel="nofollow noopener noreferrer"
+        style={{ textDecoration: "underline" }}
+      >
+        {trimmed}
+      </a>
+    );
+    if (trailing) out.push(trailing);
+    last = m.index + raw.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 
 /* ------------------------------ UI bits ------------------------------ */
 const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
@@ -388,102 +430,6 @@ export default function ChatDock() {
     </div>
   );
 
-  /* actions */
-  const requestConnect = async () => {
-    if (!myId || !peer || myId === peer) return;
-    setBusy(true);
-    try {
-      if (conn && conn[C.status] === "pending" && toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
-        await acceptRequest(conn.id);
-        return;
-      }
-      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to connect."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const acceptRequest = async (id = conn?.id) => {
-    const cid = toId(id);
-    if (!cid || !conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to accept."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const rejectRequest = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to reject."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cancelPending = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.requester]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to cancel."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const disconnect = async () => {
-    if (!conn || !ACCEPTED.has(conn[C.status])) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to disconnect."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const reconnect = async () => {
-    if (!myId || !peer || myId === peer) return;
-    setBusy(true);
-    try {
-      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) {
-      alert(e.message || "Failed to reconnect."); console.error(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div
       onDragOver={(e) => e.preventDefault()}
@@ -506,23 +452,7 @@ export default function ChatDock() {
       </div>
 
       {/* controls */}
-      <div style={{ marginBottom: 10 }}>
-        {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
-        {status === "pending" && toId(conn?.[C.requester]) === myId && (
-          <>
-            <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
-            <Btn tone="ghost" onClick={cancelPending} label="Cancel" disabled={busy} />
-          </>
-        )}
-        {status === "pending" && toId(conn?.[C.addressee]) === myId && (
-          <>
-            <Btn onClick={() => acceptRequest()} label="Accept" disabled={busy} />
-            <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
-          </>
-        )}
-        {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
-        {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
-      </div>
+      <div style={{ marginBottom: 10 }}>{connControls}</div>
 
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
@@ -571,7 +501,8 @@ export default function ChatDock() {
                           fontSize: 14, lineHeight: 1.4,
                         }}
                       >
-                        {m.body}
+                        {/* linkified plain text */}
+                        {linkifyJSX(m.body)}
                         <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
                         </div>
