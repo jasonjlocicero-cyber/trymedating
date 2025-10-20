@@ -176,6 +176,7 @@ export default function ChatDock() {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
+  // 🔧 single declaration
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
 
@@ -240,7 +241,7 @@ export default function ChatDock() {
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  // Light polling as a safety net (helps surface incoming reconnect->pending)
+  // Light polling as a safety net
   useEffect(() => {
     if (!myId || !peer) return;
     const id = setInterval(() => fetchLatestConn(myId), 4000);
@@ -295,7 +296,6 @@ export default function ChatDock() {
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
 
-  const scrollerRef = useRef(null);
   useEffect(() => {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -509,7 +509,7 @@ export default function ChatDock() {
     }
   };
 
-  // ✅ Reuse the SAME row on reconnect so connection_id stays stable
+  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -544,7 +544,7 @@ export default function ChatDock() {
       {status === "pending" && toId(conn?.[C.addressee]) === myId && (
         <>
           <Btn onClick={() => acceptRequest()} label="Accept" disabled={busy} />
-          <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
+        <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
         </>
       )}
       {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
