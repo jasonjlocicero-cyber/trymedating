@@ -1,2 +1,5 @@
-/*  /index.html  200
+# Force HTTPS to apex (switch to www if you prefer)
+http:*  https://trymedating.com/:splat  301!
 
+# SPA fallback for client routing
+/*   /index.html   200
