@@ -225,7 +225,6 @@ export default function ChatDock() {
   const subscribeConn = useCallback((uid) => {
     uid = toId(uid);
     if (!uid || !peer) return () => {};
-    // ✅ correct Realtime OR filter
     const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
     const ch = supabase
       .channel(`conn:${uid}<->${peer}`)
@@ -241,39 +240,48 @@ export default function ChatDock() {
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  // Light polling as a safety net (helps surface incoming "Reconnect" -> "pending")
+  // Light polling as a safety net (helps surface incoming reconnect->pending)
   useEffect(() => {
     if (!myId || !peer) return;
     const id = setInterval(() => fetchLatestConn(myId), 4000);
     return () => clearInterval(id);
   }, [myId, peer, fetchLatestConn]);
 
-  /* messages: fetch + realtime + send */
-  const canSend = useMemo(
-    () => !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending,
-    [myId, conn?.id, status, text, sending]
-  );
+  /* ---------------------- messages: fetch + realtime ---------------------- */
+  const fetchAllConnIdsForPair = useCallback(async () => {
+    if (!myId || !peer) return [];
+    const pairOr =
+      `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
+      `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
+    const { data } = await supabase
+      .from(CONN_TABLE)
+      .select("id")
+      .or(pairOr)
+      .order(C.createdAt, { ascending: true });
+    return (data || []).map((r) => r.id);
+  }, [myId, peer]);
 
   const fetchMessages = useCallback(async () => {
-    if (!conn?.id) return;
+    if (!myId || !peer) return;
+    const connIds = await fetchAllConnIdsForPair();
+    if (!connIds.length) { setItems([]); return; }
+
     const { data } = await supabase
       .from("messages")
       .select("*")
-      .eq("connection_id", conn.id)
+      .in("connection_id", connIds)
       .order("created_at", { ascending: true });
 
     setItems(data || []);
 
-    // mark messages addressed to me as read
-    if (myId) {
-      await supabase
-        .from("messages")
-        .update({ read_at: new Date().toISOString() })
-        .eq("connection_id", conn.id)
-        .eq("recipient", myId)
-        .is("read_at", null);
-    }
-  }, [conn?.id, myId]);
+    // mark all unread (for me) across the pair as read
+    await supabase
+      .from("messages")
+      .update({ read_at: new Date().toISOString() })
+      .in("connection_id", connIds)
+      .eq("recipient", myId)
+      .is("read_at", null);
+  }, [fetchAllConnIdsForPair, myId, peer]);
 
   useEffect(() => {
     if (!conn?.id) return;
@@ -287,10 +295,17 @@ export default function ChatDock() {
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
 
+  const scrollerRef = useRef(null);
   useEffect(() => {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
+
+  /* -------------------------------- send -------------------------------- */
+  const canSend = useMemo(
+    () => !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending,
+    [myId, conn?.id, status, text, sending]
+  );
 
   const send = async (e) => {
     e?.preventDefault?.();
@@ -312,7 +327,7 @@ export default function ChatDock() {
 
   const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
-  /* attachments: upload (optimistic progress) */
+  /* -------------------- attachments: upload / delete -------------------- */
   const pickAttachment = async (file) => {
     try {
       if (!conn?.id || !file) return;
@@ -351,7 +366,6 @@ export default function ChatDock() {
     }
   };
 
-  /* attachments: delete (owner only) */
   const deleteAttachment = async (meta) => {
     if (!meta?.path || !conn?.id) return;
     setDeletingPaths((s) => { const n = new Set(s); n.add(meta.path); return n; });
@@ -373,7 +387,7 @@ export default function ChatDock() {
     }
   };
 
-  /* drag & drop upload */
+  /* ------------------------------ drag & drop ------------------------------ */
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0];
@@ -385,17 +399,46 @@ export default function ChatDock() {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      // if the other side already requested me, accepting auto-bridges
-      if (conn && conn[C.status] === "pending" && toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
-        await acceptRequest(conn.id);
+      // If there's a previous row for this pair (disconnected/rejected), REUSE it
+      const pairOr =
+        `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
+        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
+      const { data: prev } = await supabase
+        .from(CONN_TABLE)
+        .select("*")
+        .or(pairOr)
+        .order(C.updatedAt, { ascending: false })
+        .order(C.createdAt, { ascending: false })
+        .limit(1);
+
+      const row = prev?.[0];
+      if (row && (row[C.status] === "disconnected" || row[C.status] === "rejected")) {
+        const payload = {
+          [C.status]: "pending",
+          [C.requester]: myId,
+          [C.addressee]: peer,
+          [C.updatedAt]: new Date().toISOString(),
+        };
+        const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", row.id).select();
+        if (error) throw error;
+        setConn(Array.isArray(data) ? data[0] : data);
         return;
       }
+
+      // If the other side already requested me, accept that one
+      if (row && row[C.status] === "pending" && toId(row[C.requester]) === peer && toId(row[C.addressee]) === myId) {
+        await acceptRequest(row.id);
+        return;
+      }
+
+      // Otherwise, create fresh pending
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
       const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to connect."); console.error(e);
+      alert(e.message || "Failed to connect.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
@@ -403,7 +446,7 @@ export default function ChatDock() {
 
   const acceptRequest = async (id = conn?.id) => {
     const cid = toId(id);
-    if (!cid || !conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
+    if (!cid) return;
     setBusy(true);
     try {
       const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
@@ -411,14 +454,15 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to accept."); console.error(e);
+      alert(e.message || "Failed to accept.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
   const rejectRequest = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
+    if (!conn || conn[C.status] !== "pending") return;
     setBusy(true);
     try {
       const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
@@ -426,14 +470,15 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to reject."); console.error(e);
+      alert(e.message || "Failed to reject.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
   const cancelPending = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.requester]) !== myId) return;
+    if (!conn || conn[C.status] !== "pending") return;
     setBusy(true);
     try {
       const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
@@ -441,7 +486,8 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to cancel."); console.error(e);
+      alert(e.message || "Failed to cancel.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
@@ -456,22 +502,30 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to disconnect."); console.error(e);
+      alert(e.message || "Failed to disconnect.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
+  // ✅ Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
-    if (!myId || !peer || myId === peer) return;
+    if (!conn || !myId || !peer) return;
     setBusy(true);
     try {
-      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
+      const payload = {
+        [C.status]: "pending",
+        [C.requester]: myId,
+        [C.addressee]: peer,
+        [C.updatedAt]: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to reconnect."); console.error(e);
+      alert(e.message || "Failed to reconnect.");
+      console.error(e);
     } finally {
       setBusy(false);
     }
@@ -506,7 +560,6 @@ export default function ChatDock() {
       </div>
     );
   }
-
   if (!peer) {
     return (
       <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
