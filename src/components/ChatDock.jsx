@@ -1,7 +1,7 @@
 // src/components/ChatDock.jsx
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
-import AttachmentButton from "./AttachmentButton"; // same folder
+import AttachmentButton from "./AttachmentButton";
 import { uploadChatFile, signedUrlForPath } from "../lib/chatMedia";
 
 /* ------------------------ helpers & constants ------------------------ */
@@ -17,16 +17,13 @@ const C = {
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
 const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+const ALLOWED = /^(image\/.*|application\/pdf)$/; // drag/drop + pick guard
 
 // message body encodings
-const isAttachment = (body) => typeof body === "string" && body.startsWith("[[file:");
-const parseAttachment = (body) => {
-  try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch { return null; }
-};
-const isDeletedAttachment = (body) => typeof body === "string" && body.startsWith("[[deleted:");
-const parseDeleted = (body) => {
-  try { return JSON.parse(decodeURIComponent(body.slice(10, -2))); } catch { return null; }
-};
+const isAttachment = (b) => typeof b === "string" && b.startsWith("[[file:");
+const parseAttachment = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(7, -2))); } catch { return null; } };
+const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
+const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(10, -2))); } catch { return null; } };
 
 /* ------------------------------ UI bits ------------------------------ */
 const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
@@ -54,9 +51,7 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
 };
 
 const Pill = (txt, color) => (
-  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
-    {txt}
-  </span>
+  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>{txt}</span>
 );
 
 function ProgressBar({ percent }) {
@@ -71,9 +66,8 @@ function ProgressBar({ percent }) {
 /** Attachment bubble with auto-refreshing signed URL + optional delete (owner only) */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(null);
-  const [refreshTick, setRefreshTick] = useState(0); // bump to force refresh
+  const [refreshTick, setRefreshTick] = useState(0);
 
-  // Fetch/refresh the signed URL
   useEffect(() => {
     let alive = true;
     async function refresh() {
@@ -81,13 +75,9 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
       try {
         const u = await signedUrlForPath(meta.path, 3600); // 1h
         if (alive) setUrl(u);
-      } catch {
-        // keep UI quiet; user can click refresh
-      }
+      } catch {}
     }
     refresh();
-
-    // Refresh every ~55 minutes to stay ahead of expiry
     const id = setInterval(() => setRefreshTick((n) => n + 1), 55 * 60 * 1000);
     return () => { alive = false; clearInterval(id); };
   }, [meta?.path, refreshTick]);
@@ -97,15 +87,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   return (
     <div
       style={{
-        maxWidth: 520,
-        padding: "8px 10px",
-        borderRadius: 12,
-        border: "1px solid var(--border)",
-        background: mine ? "#eef6ff" : "#f8fafc",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-        fontSize: 14,
-        lineHeight: 1.4,
+        maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)",
+        background: mine ? "#eef6ff" : "#f8fafc", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -114,38 +97,15 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <button
-            type="button"
-            title="Refresh link"
-            onClick={() => setRefreshTick((n) => n + 1)}
-            style={{
-              border: "1px solid var(--border)",
-              background: "#f3f4f6",
-              color: "#111",
-              borderRadius: 8,
-              padding: "4px 8px",
-              fontWeight: 700,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
+            type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
+            style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
           >
             ⟳
           </button>
           {mine && onDelete && (
             <button
-              type="button"
-              onClick={() => onDelete(meta)}
-              disabled={deleting}
-              title="Delete attachment"
-              style={{
-                border: "1px solid var(--border)",
-                background: deleting ? "#cbd5e1" : "#fee2e2",
-                color: "#111",
-                borderRadius: 8,
-                padding: "4px 8px",
-                cursor: deleting ? "not-allowed" : "pointer",
-                fontWeight: 700,
-                fontSize: 12,
-              }}
+              type="button" onClick={() => onDelete(meta)} disabled={deleting} title="Delete attachment"
+              style={{ border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111", borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12 }}
             >
               🗑️
             </button>
@@ -158,15 +118,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           meta?.type?.startsWith("image/") ? (
             <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
           ) : (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setRefreshTick((n) => n + 1)} // ensure fresh right before open
-              style={{ fontWeight: 600 }}
-            >
-              Open file
-            </a>
+            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>Open file</a>
           )
         ) : (
           <div style={{ fontSize: 12, opacity: 0.7 }}>Generating link…</div>
@@ -333,10 +285,12 @@ export default function ChatDock() {
     try {
       if (!conn?.id || !file) return;
       if (file.size > MAX_UPLOAD_BYTES) { alert("File is too large (max 10MB)."); return; }
+      if (!ALLOWED.test(file.type)) { alert("Images or PDFs only."); return; }
+
       setUploading(true);
       setUploadPct(5);
 
-      // optimistic progress (SDK doesn't emit bytes)
+      // optimistic progress
       const tick = setInterval(() => {
         setUploadPct((p) => (p < 85 ? p + 5 : p < 90 ? p + 2 : p));
       }, 200);
@@ -388,6 +342,13 @@ export default function ChatDock() {
     }
   };
 
+  /* drag & drop upload */
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) pickAttachment(f);
+  }, [conn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* UI guards */
   if (!me) {
     return (
@@ -432,12 +393,7 @@ export default function ChatDock() {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      if (
-        conn &&
-        conn[C.status] === "pending" &&
-        toId(conn[C.requester]) === peer &&
-        toId(conn[C.addressee]) === myId
-      ) {
+      if (conn && conn[C.status] === "pending" && toId(conn[C.requester]) === peer && toId(conn[C.addressee]) === myId) {
         await acceptRequest(conn.id);
         return;
       }
@@ -446,8 +402,7 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to connect.");
-      console.error(e);
+      alert(e.message || "Failed to connect."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -463,8 +418,7 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to accept.");
-      console.error(e);
+      alert(e.message || "Failed to accept."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -479,8 +433,7 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to reject.");
-      console.error(e);
+      alert(e.message || "Failed to reject."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -495,8 +448,7 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to cancel.");
-      console.error(e);
+      alert(e.message || "Failed to cancel."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -511,8 +463,7 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to disconnect.");
-      console.error(e);
+      alert(e.message || "Failed to disconnect."); console.error(e);
     } finally {
       setBusy(false);
     }
@@ -527,23 +478,19 @@ export default function ChatDock() {
       if (error) throw error;
       setConn(Array.isArray(data) ? data[0] : data);
     } catch (e) {
-      alert(e.message || "Failed to reconnect.");
-      console.error(e);
+      alert(e.message || "Failed to reconnect."); console.error(e);
     } finally {
       setBusy(false);
     }
   };
 
-  /* UI */
   return (
     <div
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
       style={{
-        maxWidth: 720,
-        margin: "12px auto",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        padding: 12,
-        background: "#fff",
+        maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)",
+        borderRadius: 12, padding: 12, background: "#fff",
       }}
     >
       {/* header */}
@@ -583,14 +530,11 @@ export default function ChatDock() {
           <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
             <div
               ref={scrollerRef}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
               style={{
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                padding: 12,
-                overflowY: "auto",
-                background: "#fff",
-                minHeight: 140,
-                maxHeight: 260,
+                border: "1px solid var(--border)", borderRadius: 12, padding: 12,
+                overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 260,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
@@ -622,15 +566,9 @@ export default function ChatDock() {
                     ) : (
                       <div
                         style={{
-                          maxWidth: 520,
-                          padding: "8px 10px",
-                          borderRadius: 12,
-                          border: "1px solid var(--border)",
-                          background: mine ? "#eef6ff" : "#f8fafc",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          fontSize: 14,
-                          lineHeight: 1.4,
+                          maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)",
+                          background: mine ? "#eef6ff" : "#f8fafc", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                          fontSize: 14, lineHeight: 1.4,
                         }}
                       >
                         {m.body}
@@ -644,27 +582,34 @@ export default function ChatDock() {
               })}
             </div>
 
-            <form onSubmit={send} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {/* composer (Enter=send, Shift+Enter=newline) */}
+            <form
+              onSubmit={send}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              style={{ display: "flex", gap: 8, alignItems: "center" }}
+            >
               <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
-              <input
-                type="text"
+              <textarea
+                rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+                }}
                 disabled={uploading}
-                style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px", fontSize: 14 }}
+                style={{
+                  flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px",
+                  fontSize: 14, resize: "none", lineHeight: 1.35, maxHeight: 120, overflowY: "auto",
+                }}
               />
               <button
                 type="submit"
                 disabled={!canSend || uploading}
                 style={{
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
-                  color: "#fff",
-                  border: "none",
-                  cursor: !canSend || uploading ? "not-allowed" : "pointer",
-                  fontWeight: 600,
+                  padding: "10px 14px", borderRadius: 12, background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
+                  color: "#fff", border: "none", cursor: !canSend || uploading ? "not-allowed" : "pointer", fontWeight: 600,
                 }}
               >
                 Send
@@ -682,6 +627,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
