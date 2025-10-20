@@ -1,3 +1,4 @@
+// src/components/ChatDock.jsx
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
 import AttachmentButton from "../components/AttachmentButton";
@@ -20,25 +21,62 @@ const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 
-// Attachment helpers (encode metadata in body)
+// Message body encodings for attachments
 const isAttachment = (body) => typeof body === "string" && body.startsWith("[[file:");
 const parseAttachment = (body) => {
-  try {
-    const json = decodeURIComponent(body.slice(7, -2)); // strip [[file:  and ]]
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch { return null; }
+};
+const isDeletedAttachment = (body) => typeof body === "string" && body.startsWith("[[deleted:");
+const parseDeleted = (body) => {
+  try { return JSON.parse(decodeURIComponent(body.slice(10, -2))); } catch { return null; }
 };
 
-/** Preview bubble for attachments (image or generic link) */
-function AttachmentPreview({ meta, mine }) {
+/** ----------------------------------------
+ * Small UI bits
+ * -------------------------------------- */
+const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
+  const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        padding: "8px 12px",
+        borderRadius: 16,
+        marginRight: 8,
+        border: "1px solid var(--border)",
+        background: disabled ? "#cbd5e1" : bg,
+        color: tone === "ghost" ? "#111" : "#fff",
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontWeight: 600,
+        fontSize: 14,
+      }}
+    >
+      {label}
+    </button>
+  );
+};
+const Pill = (txt, color) => (
+  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
+    {txt}
+  </span>
+);
+
+function ProgressBar({ percent }) {
+  return (
+    <div style={{ width: "100%", height: 8, background: "#eee", borderRadius: 8 }}>
+      <div style={{ width: `${Math.min(100, Math.max(0, percent))}%`, height: 8, borderRadius: 8, background: "#2563eb" }} />
+    </div>
+  );
+}
+
+/** Attachment bubble with optional delete control (for owner) */
+function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(null);
   useEffect(() => {
     let alive = true;
-    if (meta?.path) {
-      signedUrlForPath(meta.path, 3600).then((u) => alive && setUrl(u));
-    }
+    if (meta?.path) signedUrlForPath(meta.path, 3600).then((u) => alive && setUrl(u));
     return () => { alive = false; };
   }, [meta?.path]);
 
@@ -56,16 +94,42 @@ function AttachmentPreview({ meta, mine }) {
         lineHeight: 1.4,
       }}
     >
-      <div style={{ fontSize: 13, marginBottom: 6 }}>
-        Attachment: {meta?.name || "file"}{meta?.size ? ` (${Math.ceil(meta.size/1024)} KB)` : ""}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ fontSize: 13 }}>
+          Attachment: {meta?.name || "file"}
+          {meta?.size ? ` (${Math.ceil(meta.size / 1024)} KB)` : ""}
+        </div>
+        {mine && onDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(meta)}
+            disabled={deleting}
+            title="Delete attachment"
+            style={{
+              border: "1px solid var(--border)",
+              background: deleting ? "#cbd5e1" : "#fee2e2",
+              color: "#111",
+              borderRadius: 8,
+              padding: "4px 8px",
+              cursor: deleting ? "not-allowed" : "pointer",
+              fontWeight: 700,
+              fontSize: 12,
+            }}
+          >
+            🗑️ Delete
+          </button>
+        )}
       </div>
-      {url ? (
-        meta?.type?.startsWith("image/")
-          ? <img src={url} alt={meta?.name || "image"} style={{ maxWidth: 360, borderRadius: 8 }} />
-          : <a href={url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>Open file</a>
-      ) : (
-        <div style={{ fontSize: 12, opacity: 0.7 }}>Generating link…</div>
-      )}
+
+      <div style={{ marginTop: 6 }}>
+        {url ? (
+          meta?.type?.startsWith("image/")
+            ? <img src={url} alt={meta?.name || "image"} style={{ maxWidth: 360, borderRadius: 8 }} />
+            : <a href={url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>Open file</a>
+        ) : (
+          <div style={{ fontSize: 12, opacity: 0.7 }}>Generating link…</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -89,6 +153,8 @@ export default function ChatDock() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [deletingPaths, setDeletingPaths] = useState(() => new Set());
   const scrollerRef = useRef(null);
 
   /* -------------------- auth -------------------- */
@@ -106,15 +172,14 @@ export default function ChatDock() {
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from(CONN_TABLE)
         .select("*")
         .or(`${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`)
         .order(C.updatedAt, { ascending: false })
         .order(C.createdAt, { ascending: false })
         .limit(10);
-
-      if (!error && data?.length) {
+      if (data?.length) {
         const accepted = data.find((r) => ACCEPTED.has(r[C.status]));
         const latest = accepted || data[0];
         setPeer(otherPartyId(latest, myId));
@@ -124,40 +189,30 @@ export default function ChatDock() {
   }, [autoTried, myId, peer]);
 
   /* -------------------- fetch + subscribe connection -------------------- */
-  const fetchLatestConn = useCallback(
-    async (uid) => {
-      uid = toId(uid);
-      if (!uid || !peer) return;
-      const pairOr =
-        `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
-        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
-      let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
-      if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
-      const { data, error } = await q.limit(1);
-      if (!error) setConn(data?.[0] ?? null);
-    },
-    [peer]
-  );
+  const fetchLatestConn = useCallback(async (uid) => {
+    uid = toId(uid);
+    if (!uid || !peer) return;
+    const pairOr =
+      `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
+      `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
+    let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
+    if (C.createdAt) q = q.order(C.createdAt, { ascending: false });
+    const { data } = await q.limit(1);
+    setConn(data?.[0] ?? null);
+  }, [peer]);
 
-  const subscribeConn = useCallback(
-    (uid) => {
-      uid = toId(uid);
-      if (!uid || !peer) return () => {};
-      const filter =
-        `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
-        `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
-      const ch = supabase
-        .channel(`conn:${uid}<->${peer}`)
-        .on(
-          "postgres_changes",
-          { event: "*", schema: "public", table: CONN_TABLE, filter },
-          () => fetchLatestConn(uid)
-        )
-        .subscribe();
-      return () => supabase.removeChannel(ch);
-    },
-    [peer, fetchLatestConn]
-  );
+  const subscribeConn = useCallback((uid) => {
+    uid = toId(uid);
+    if (!uid || !peer) return () => {};
+    const filter =
+      `or(and(${C.requester}=eq.${uid},${C.addressee}=eq.${peer}),` +
+      `and(${C.requester}=eq.${peer},${C.addressee}=eq.${uid}))`;
+    const ch = supabase
+      .channel(`conn:${uid}<->${peer}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [peer, fetchLatestConn]);
 
   useEffect(() => {
     if (!myId || !peer) return;
@@ -165,89 +220,6 @@ export default function ChatDock() {
     const off = subscribeConn(myId);
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
-
-  /* -------------------- connection actions -------------------- */
-  const requestConnect = async () => {
-    if (!myId || !peer || myId === peer) return;
-    setBusy(true);
-    try {
-      if (
-        conn &&
-        conn[C.status] === "pending" &&
-        toId(conn[C.requester]) === peer &&
-        toId(conn[C.addressee]) === myId
-      ) {
-        await acceptRequest(conn.id);
-        return;
-      }
-      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to connect."); }
-    finally { setBusy(false); }
-  };
-
-  const acceptRequest = async (id = conn?.id) => {
-    const cid = toId(id);
-    if (!cid || !conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to accept."); }
-    finally { setBusy(false); }
-  };
-
-  const rejectRequest = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to reject."); }
-    finally { setBusy(false); }
-  };
-
-  const cancelPending = async () => {
-    if (!conn || conn[C.status] !== "pending" || toId(conn[C.requester]) !== myId) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to cancel."); }
-    finally { setBusy(false); }
-  };
-
-  const disconnect = async () => {
-    if (!conn || !ACCEPTED.has(conn[C.status])) return;
-    setBusy(true);
-    try {
-      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
-      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to disconnect."); }
-    finally { setBusy(false); }
-  };
-
-  const reconnect = async () => {
-    if (!myId || !peer || myId === peer) return;
-    setBusy(true);
-    try {
-      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
-      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
-      if (error) throw error;
-      setConn(Array.isArray(data) ? data[0] : data);
-    } catch (e) { alert(e.message || "Failed to reconnect."); }
-    finally { setBusy(false); }
-  };
 
   /* -------------------- messages: fetch + realtime + send -------------------- */
   const canSend = useMemo(
@@ -257,12 +229,12 @@ export default function ChatDock() {
 
   const fetchMessages = useCallback(async () => {
     if (!conn?.id) return;
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("messages")
       .select("*")
       .eq("connection_id", conn.id)
       .order("created_at", { ascending: true });
-    if (!error) setItems(data || []);
+    setItems(data || []);
   }, [conn?.id]);
 
   useEffect(() => {
@@ -270,11 +242,9 @@ export default function ChatDock() {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on(
-        "postgres_changes",
+      .on("postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages()
-      )
+        () => fetchMessages())
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -290,12 +260,7 @@ export default function ChatDock() {
     setSending(true);
     try {
       const recip = otherPartyId(conn, myId);
-      const payload = {
-        connection_id: conn.id,
-        sender: myId,     // legacy NOT NULL column
-        recipient: recip, // legacy NOT NULL column
-        body: text.trim(),
-      };
+      const payload = { connection_id: conn.id, sender: myId, recipient: recip, body: text.trim() };
       const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
@@ -309,67 +274,70 @@ export default function ChatDock() {
 
   const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
-  /* -------------------- attachment flow -------------------- */
+  /* -------------------- attachment: upload with optimistic progress -------------------- */
   const pickAttachment = async (file) => {
     try {
       if (!conn?.id || !file) return;
-      if (file.size > MAX_UPLOAD_BYTES) {
-        alert("File is too large (max 10MB).");
-        return;
-      }
-      setUploading(true);
+      if (file.size > MAX_UPLOAD_BYTES) { alert("File is too large (max 10MB)."); return; }
 
-      // Upload to chat-media/<connectionId>/<timestamp>-<filename>
+      setUploading(true);
+      setUploadPct(5);
+
+      // optimistic progress (SDK doesn't expose byte progress)
+      const tick = setInterval(() => {
+        setUploadPct((p) => (p < 85 ? p + 5 : p < 90 ? p + 2 : p));
+      }, 200);
+
       const { path } = await uploadChatFile(conn.id, file);
 
-      // Insert a special "attachment" message with encoded metadata in body
+      clearInterval(tick);
+      setUploadPct(95);
+
       const recip = otherPartyId(conn, myId);
       const meta = { name: file.name, type: file.type, size: file.size, path };
       const body = `[[file:${encodeURIComponent(JSON.stringify(meta))}]]`;
 
       const { error } = await supabase.from("messages").insert({
-        connection_id: conn.id,
-        sender: myId,
-        recipient: recip,
-        body,
+        connection_id: conn.id, sender: myId, recipient: recip, body,
       });
       if (error) throw error;
+
+      setUploadPct(100);
+      setTimeout(() => setUploadPct(0), 400);
     } catch (err) {
       alert(err.message ?? "Upload failed");
       console.error(err);
+      setUploadPct(0);
     } finally {
       setUploading(false);
     }
   };
 
-  /* -------------------- small UI helpers -------------------- */
-  const Btn = ({ onClick, label, tone = "primary", disabled }) => {
-    const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
-    return (
-      <button
-        onClick={onClick}
-        disabled={busy || disabled}
-        style={{
-          padding: "8px 12px",
-          borderRadius: 16,
-          marginRight: 8,
-          border: "1px solid var(--border)",
-          background: disabled ? "#cbd5e1" : bg,
-          color: tone === "ghost" ? "#111" : "#fff",
-          cursor: busy || disabled ? "not-allowed" : "pointer",
-          fontWeight: 600,
-          fontSize: 14,
-        }}
-      >
-        {label}
-      </button>
-    );
+  /* -------------------- attachment: delete (owner only) -------------------- */
+  const deleteAttachment = async (meta) => {
+    if (!meta?.path || !conn?.id) return;
+    setDeletingPaths((s) => new Set(s).add(meta.path));
+    try {
+      // remove the file itself (RLS policy allows participants)
+      const { error: delErr } = await supabase.storage.from("chat-media").remove([meta.path]);
+      if (delErr) throw delErr;
+
+      // notify the room with a tombstone message (don’t rely on UPDATE policies)
+      const recip = otherPartyId(conn, myId);
+      const tomb = `[[deleted:${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}]]`;
+      const { error: msgErr } = await supabase.from("messages").insert({
+        connection_id: conn.id, sender: myId, recipient: recip, body: tomb,
+      });
+      if (msgErr) throw msgErr;
+    } catch (err) {
+      alert(err.message ?? "Delete failed");
+      console.error(err);
+    } finally {
+      setDeletingPaths((s) => {
+        const n = new Set(s); n.delete(meta.path); return n;
+      });
+    }
   };
-  const Pill = (txt, color) => (
-    <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
-      {txt}
-    </span>
-  );
 
   /* -------------------- render -------------------- */
   if (!me) {
@@ -388,6 +356,26 @@ export default function ChatDock() {
       </div>
     );
   }
+
+  const connControls = (
+    <div style={{ marginBottom: 10 }}>
+      {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
+      {status === "pending" && toId(conn?.[C.requester]) === myId && (
+        <>
+          <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
+          <Btn tone="ghost" onClick={cancelPending} label="Cancel" disabled={busy} />
+        </>
+      )}
+      {status === "pending" && toId(conn?.[C.addressee]) === myId && (
+        <>
+          <Btn onClick={() => acceptRequest()} label="Accept" disabled={busy} />
+          <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
+        </>
+      )}
+      {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
+      {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
+    </div>
+  );
 
   return (
     <div
@@ -409,23 +397,7 @@ export default function ChatDock() {
       </div>
 
       {/* Controls */}
-      <div style={{ marginBottom: 10 }}>
-        {status === "none" && <Btn onClick={requestConnect} label="Connect" />}
-        {status === "pending" && toId(conn?.[C.requester]) === myId && (
-          <>
-            <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
-            <Btn tone="ghost" onClick={cancelPending} label="Cancel" />
-          </>
-        )}
-        {status === "pending" && toId(conn?.[C.addressee]) === myId && (
-          <>
-            <Btn onClick={() => acceptRequest()} label="Accept" />
-            <Btn tone="danger" onClick={rejectRequest} label="Reject" />
-          </>
-        )}
-        {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" />}
-        {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" />}
-      </div>
+      {connControls}
 
       {/* Messages area (compact height) */}
       {ACCEPTED.has(status) && (
@@ -443,12 +415,27 @@ export default function ChatDock() {
 
               {items.map((m) => {
                 const mine = isMine(m);
-                const meta = isAttachment(m.body) ? parseAttachment(m.body) : null;
+                if (isDeletedAttachment(m.body)) {
+                  const meta = parseDeleted(m.body);
+                  return (
+                    <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                      <div style={{ maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)", background: "#f3f4f6", fontSize: 13 }}>
+                        Attachment deleted{meta?.name ? `: ${meta.name}` : ""}.
+                      </div>
+                    </div>
+                  );
+                }
 
+                const meta = isAttachment(m.body) ? parseAttachment(m.body) : null;
                 return (
                   <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
                     {meta ? (
-                      <AttachmentPreview meta={meta} mine={mine} />
+                      <AttachmentPreview
+                        meta={meta}
+                        mine={mine}
+                        onDelete={mine ? deleteAttachment : undefined}
+                        deleting={deletingPaths.has(meta.path)}
+                      />
                     ) : (
                       <div
                         style={{
@@ -474,8 +461,8 @@ export default function ChatDock() {
               })}
             </div>
 
-            {/* composer with paperclip */}
-            <form onSubmit={send} style={{ display: "flex", gap: 8 }}>
+            {/* composer with paperclip + progress */}
+            <form onSubmit={send} style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
               <input
                 type="text"
@@ -501,6 +488,12 @@ export default function ChatDock() {
                 Send
               </button>
             </form>
+
+            {uploading && (
+              <div style={{ marginTop: 6 }}>
+                <ProgressBar percent={uploadPct} />
+              </div>
+            )}
           </div>
         </div>
       )}
