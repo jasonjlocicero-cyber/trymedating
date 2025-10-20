@@ -81,9 +81,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
       try {
         const u = await signedUrlForPath(meta.path, 3600); // 1h
         if (alive) setUrl(u);
-      } catch (e) {
-        // noop: UI shows "Generating link…" and user can retry via refresh button (below)
-        // console.error(e);
+      } catch {
+        // keep UI quiet; user can click refresh
       }
     }
     refresh();
@@ -93,7 +92,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     return () => { alive = false; clearInterval(id); };
   }, [meta?.path, refreshTick]);
 
-  // If an <img> URL ever expires in-view, try a manual refresh on error
   const handleImgError = () => setRefreshTick((n) => n + 1);
 
   return (
@@ -282,7 +280,7 @@ export default function ChatDock() {
 
     setItems(data || []);
 
-    // Mark messages to me as read
+    // mark messages addressed to me as read
     if (myId) {
       await supabase
         .from("messages")
@@ -331,8 +329,6 @@ export default function ChatDock() {
   const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
   /* attachments: upload (optimistic progress) */
-  const [uploading, setUploadingState] = useState(uploading); // shadow to appease lint — no functional change
-
   const pickAttachment = async (file) => {
     try {
       if (!conn?.id || !file) return;
@@ -392,7 +388,7 @@ export default function ChatDock() {
     }
   };
 
-  /* UI */
+  /* UI guards */
   if (!me) {
     return (
       <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
@@ -410,6 +406,7 @@ export default function ChatDock() {
     );
   }
 
+  /* connection controls */
   const connControls = (
     <div style={{ marginBottom: 10 }}>
       {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
@@ -430,6 +427,114 @@ export default function ChatDock() {
     </div>
   );
 
+  /* actions */
+  const requestConnect = async () => {
+    if (!myId || !peer || myId === peer) return;
+    setBusy(true);
+    try {
+      if (
+        conn &&
+        conn[C.status] === "pending" &&
+        toId(conn[C.requester]) === peer &&
+        toId(conn[C.addressee]) === myId
+      ) {
+        await acceptRequest(conn.id);
+        return;
+      }
+      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to connect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptRequest = async (id = conn?.id) => {
+    const cid = toId(id);
+    if (!cid || !conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
+    setBusy(true);
+    try {
+      const payload = { [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", cid).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to accept.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectRequest = async () => {
+    if (!conn || conn[C.status] !== "pending" || toId(conn[C.addressee]) !== myId) return;
+    setBusy(true);
+    try {
+      const payload = { [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to reject.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelPending = async () => {
+    if (!conn || conn[C.status] !== "pending" || toId(conn[C.requester]) !== myId) return;
+    setBusy(true);
+    try {
+      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to cancel.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    if (!conn || !ACCEPTED.has(conn[C.status])) return;
+    setBusy(true);
+    try {
+      const payload = { [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() };
+      const { data, error } = await supabase.from(CONN_TABLE).update(payload).eq("id", conn.id).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to disconnect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reconnect = async () => {
+    if (!myId || !peer || myId === peer) return;
+    setBusy(true);
+    try {
+      const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
+      const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
+      if (error) throw error;
+      setConn(Array.isArray(data) ? data[0] : data);
+    } catch (e) {
+      alert(e.message || "Failed to reconnect.");
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* UI */
   return (
     <div
       style={{
@@ -454,7 +559,23 @@ export default function ChatDock() {
       </div>
 
       {/* controls */}
-      {connControls}
+      <div style={{ marginBottom: 10 }}>
+        {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
+        {status === "pending" && toId(conn?.[C.requester]) === myId && (
+          <>
+            <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
+            <Btn tone="ghost" onClick={cancelPending} label="Cancel" disabled={busy} />
+          </>
+        )}
+        {status === "pending" && toId(conn?.[C.addressee]) === myId && (
+          <>
+            <Btn onClick={() => acceptRequest()} label="Accept" disabled={busy} />
+            <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
+          </>
+        )}
+        {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
+        {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
+      </div>
 
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
