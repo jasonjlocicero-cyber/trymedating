@@ -2,8 +2,38 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
-import { openChat } from '../chat/openChat' // adjust path
-<button onClick={() => openChat(user.id, user.display_name)}>Message</button>
+// NOTE: removed the stray top-level <button> that was outside any component
+
+/* Tiny unread badge overlay */
+function UnreadBadge({ count }) {
+  if (!Number.isFinite(count) || count <= 0) return null
+  const txt = count > 99 ? '99+' : String(count)
+  return (
+    <span
+      title={`${count} unread`}
+      style={{
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        minWidth: 20,
+        height: 20,
+        padding: '0 6px',
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: 9999,
+        background: '#ef4444',
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: 800,
+        lineHeight: 1,
+        boxShadow: '0 0 0 2px #fff',
+        pointerEvents: 'none'
+      }}
+    >
+      {txt}
+    </span>
+  )
+}
 
 export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null)
@@ -13,6 +43,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [loadingList, setLoadingList] = useState(false)
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
+  const [unread, setUnread] = useState(0) // ← NEW: local unread for badge
 
   // ------- auth -------
   useEffect(() => {
@@ -135,18 +166,18 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     return () => { cancel = true }
   }, [open, me?.id])
 
-  // ------- unread count -------
+  // ------- unread count (fixed to use Supabase 'count') -------
   async function computeUnread(userId) {
-    if (!userId) { onUnreadChange(0); return }
-    // We use head:true just to trigger a count; Supabase JS v2 does not expose the header count,
-    // so fall back to length (0 or 1) — for a precise count, consider an RPC later.
-    const { data, error } = await supabase
+    if (!userId) { setUnread(0); onUnreadChange(0); return }
+    const { count, error } = await supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
       .eq('recipient', userId)
       .is('read_at', null)
-    if (error) return onUnreadChange(0)
-    onUnreadChange(data?.length ?? 0)
+    if (error) { setUnread(0); onUnreadChange(0); return }
+    const n = count || 0
+    setUnread(n)
+    onUnreadChange(n)
   }
 
   // On mount + when user changes, do a lightweight unread recalc
@@ -177,7 +208,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         type="button"
         onClick={() => setOpen(o => !o)}
         title="Messages"
-        aria-label="Messages"
+        aria-label={unread > 0 ? `Messages, ${unread} unread` : 'Messages'}
         style={{
           position:'fixed', right:16, bottom:16,
           width:56, height:56, borderRadius:'50%',
@@ -187,6 +218,8 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         }}
       >
         <span style={{ fontSize:24 }}>💬</span>
+        {/* NEW: unread badge */}
+        <UnreadBadge count={unread} />
       </button>
 
       {/* Inbox picker */}
@@ -259,3 +292,4 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     </>
   )
 }
+
