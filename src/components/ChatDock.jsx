@@ -18,6 +18,7 @@ const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? Stri
 const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
+const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -283,8 +284,11 @@ export default function ChatDock() {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
-  // NEW: sessions count (for banner)
+  // sessions count (for banner)
   const [sessionCount, setSessionCount] = useState(1);
+
+  // NEW: banner visibility persisted per pair
+  const [hidePrevBanner, setHidePrevBanner] = useState(false);
 
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
@@ -298,6 +302,22 @@ export default function ChatDock() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  /* when peer/myId change, load banner hidden flag */
+  useEffect(() => {
+    if (!myId || !peer) { setHidePrevBanner(false); return; }
+    try {
+      const stored = localStorage.getItem(bannerKey(myId, peer));
+      setHidePrevBanner(stored === "1");
+    } catch {
+      setHidePrevBanner(false);
+    }
+  }, [myId, peer]);
+
+  const dismissBanner = () => {
+    setHidePrevBanner(true);
+    try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
+  };
 
   /* auto-resume latest connection */
   useEffect(() => {
@@ -374,7 +394,7 @@ export default function ChatDock() {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length); // ← NEW: banner count
+    setSessionCount(connIds.length); // banner count
     if (!connIds.length) { setItems([]); return; }
 
     const { data } = await supabase
@@ -707,8 +727,8 @@ export default function ChatDock() {
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          {/* NEW: sessions banner */}
-          {sessionCount > 1 && (
+          {/* sessions banner (dismissible, persisted per pair) */}
+          {sessionCount > 1 && !hidePrevBanner && (
             <div
               style={{
                 margin: "0 0 8px",
@@ -718,9 +738,32 @@ export default function ChatDock() {
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 padding: "6px 8px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
               }}
             >
-              Showing messages from previous sessions ({sessionCount})
+              <span>Showing messages from previous sessions ({sessionCount})</span>
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={dismissBanner}
+                style={{
+                  border: "1px solid var(--border)",
+                  background: "#fff",
+                  color: "#111",
+                  borderRadius: 6,
+                  padding: "2px 8px",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  lineHeight: 1,
+                }}
+                title="Hide this notice"
+              >
+                ×
+              </button>
             </div>
           )}
 
