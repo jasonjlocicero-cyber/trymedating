@@ -19,14 +19,14 @@ const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 
-/* ---------- NEW: human-readable file size ---------- */
+/* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
   if (!(bytes > 0)) return "";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let n = bytes;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  const fixed = n >= 100 || i === 0 ? 0 : 1; // 0 decimals for ≥100 or bytes, else 1
+  const fixed = n >= 100 || i === 0 ? 0 : 1;
   return `${n.toFixed(fixed)} ${units[i]}`;
 }
 
@@ -38,12 +38,12 @@ const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
-  // NEW canonical: [[file:<json>]]
+  // Canonical: [[file:<json>]]
   if (body.startsWith("[[file:")) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
 
-  // Legacy A: [[media:<json>]]
+  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
   if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
@@ -147,7 +147,7 @@ function ProgressBar({ percent }) {
   );
 }
 
-/* ---------- NEW: compact PDF card (thumbnail-style) ---------- */
+/* ---------- compact PDF card (thumbnail-style) ---------- */
 function PdfThumb({ url, name = "document.pdf" }) {
   return (
     <a
@@ -203,7 +203,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const handleImgError = () => setRefreshTick((n) => n + 1);
   const canDelete = !!meta?.path && !!onDelete;
 
-  /* ---------- NEW: detect PDF ---------- */
   const isPDF =
     (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
     /\.pdf$/i.test(meta?.name || "") ||
@@ -283,6 +282,9 @@ export default function ChatDock() {
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
+
+  // NEW: sessions count (for banner)
+  const [sessionCount, setSessionCount] = useState(1);
 
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
@@ -372,6 +374,7 @@ export default function ChatDock() {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
+    setSessionCount(connIds.length); // ← NEW: banner count
     if (!connIds.length) { setItems([]); return; }
 
     const { data } = await supabase
@@ -506,7 +509,7 @@ export default function ChatDock() {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      // If there's a previous row for this pair (disconnected/rejected), REUSE it
+      // Reuse existing row if previously disconnected/rejected
       const pairOr =
         `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
         `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
@@ -616,6 +619,7 @@ export default function ChatDock() {
     }
   };
 
+  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -703,6 +707,23 @@ export default function ChatDock() {
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+          {/* NEW: sessions banner */}
+          {sessionCount > 1 && (
+            <div
+              style={{
+                margin: "0 0 8px",
+                fontSize: 12,
+                color: "#374151",
+                background: "#f8fafc",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "6px 8px",
+              }}
+            >
+              Showing messages from previous sessions ({sessionCount})
+            </div>
+          )}
+
           <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
             <div
               ref={scrollerRef}
