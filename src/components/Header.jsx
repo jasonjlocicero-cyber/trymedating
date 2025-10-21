@@ -1,140 +1,151 @@
 // src/components/Header.jsx
-import React, { useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import logo from '../assets/tmdlogo.png'
+import React from "react";
+import { Link } from "react-router-dom";
 
-// Open a specific chat from anywhere (optional helper)
-export function openChatWith(partnerId, partnerName = '') {
-  if (window.openChat) return window.openChat(partnerId, partnerName)
-  window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
-}
-
+/**
+ * Header
+ * Props:
+ *  - me: auth user object (or null)
+ *  - unread: number of unread messages (default 0)
+ *  - onSignOut: () => Promise<void> | void
+ */
 export default function Header({ me, unread = 0, onSignOut }) {
-  const loc = useLocation()
-  const authed = !!me?.id
-  const isActive = (to) => (loc.pathname === to ? { opacity: 1 } : {})
+  const authed = !!me?.id;
 
-  // fade-in animation for tagline
-  const [fadeIn, setFadeIn] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setFadeIn(true), 200)
-    return () => clearTimeout(t)
-  }, [])
+  function openMessages() {
+    // Try multiple event names / hooks so we don't couple tightly
+    try {
+      window.dispatchEvent(new CustomEvent("open-chat"));
+      window.dispatchEvent(new CustomEvent("chat:open"));
+      window.dispatchEvent(new CustomEvent("tmd:open-chat"));
+    } catch (_) {
+      /* no-op */
+    }
+    // Optional global hook, if provided by ChatLauncher
+    if (typeof window.__openChat === "function") {
+      try { window.__openChat(); } catch (_) {}
+    }
+  }
+
+  const badge =
+    unread > 0 ? (
+      <span
+        title={`${unread} unread`}
+        style={{
+          position: "absolute",
+          top: -6,
+          right: -6,
+          minWidth: 18,
+          height: 18,
+          padding: "0 6px",
+          display: "grid",
+          placeItems: "center",
+          borderRadius: 9999,
+          background: "#ef4444",
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 800,
+          lineHeight: 1,
+          boxShadow: "0 0 0 2px #fff",
+        }}
+      >
+        {unread > 99 ? "99+" : unread}
+      </span>
+    ) : null;
 
   return (
-    <header style={{ position:'sticky', top:0, zIndex:30, background:'#fff', borderBottom:'1px solid var(--border)' }}>
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
+        background: "#fff",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
       <div
         className="container"
         style={{
-          display:'flex',
-          alignItems:'center',
-          justifyContent:'space-between',
-          gap:12,
-          padding:'10px 0'
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 0",
         }}
       >
-        {/* Brand: logo with animated tagline underneath */}
-        <Link
-          to="/"
-          style={{
-            display:'flex',
-            flexDirection:'column',
-            alignItems:'center',
-            textDecoration:'none',
-            lineHeight:1.1
-          }}
-          aria-label="Go to home"
-        >
-          <img
-            src={logo}
-            alt="TryMeDating"
-            style={{
-              height: 80,
-              width: 'auto',
-              objectFit:'contain',
-              display:'block'
-            }}
-          />
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: 20,
-              color:'#f9735b',
-              marginTop: 6,
-              textAlign: 'center',
-              letterSpacing: 0.5,
-              opacity: fadeIn ? 1 : 0,
-              transform: fadeIn ? 'translateY(0px)' : 'translateY(8px)',
-              transition: 'opacity 1.4s ease, transform 1.4s ease',
-              textShadow: fadeIn ? '0 0 8px rgba(249,115,91,0.35)' : 'none'
-            }}
-          >
-            meet intentionally
+        {/* Brand */}
+        <Link to="/" style={{ textDecoration: "none", color: "inherit" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              aria-hidden
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                display: "grid",
+                placeItems: "center",
+                background: "#f1f5f9",
+                border: "1px solid var(--border)",
+                fontWeight: 900,
+                fontSize: 14,
+              }}
+            >
+              💟
+            </div>
+            <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1 }}>
+              <span style={{ color: "#0f766e" }}>Try</span>
+              <span style={{ color: "#0f766e" }}>Me</span>
+              <span style={{ color: "#f43f5e" }}>Dating</span>
+            </div>
           </div>
         </Link>
 
         {/* Nav */}
-        <nav style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <Link className="btn btn-neutral" to="/" style={isActive('/')}>Home</Link>
-          {authed && <Link className="btn btn-neutral" to="/profile" style={isActive('/profile')}>Profile</Link>}
-          {authed && <Link className="btn btn-neutral" to="/settings" style={isActive('/settings')}>Settings</Link>}
-          <Link className="btn btn-neutral" to="/contact" style={isActive('/contact')}>Contact</Link>
-        </nav>
-
-        {/* Right controls */}
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <button
-            type="button"
-            className="btn btn-header"
-            onClick={() => {
-              if (window.openChat) window.openChat()
-              else window.dispatchEvent(new CustomEvent('open-chat', { detail: {} }))
-            }}
-            aria-label="Open messages"
-            title="Messages"
-            style={{ position:'relative' }}
-          >
-            Messages
-            {unread > 0 && (
-              <span
-                title={`${unread} unread`}
-                style={{
-                  position:'absolute',
-                  top:-6,
-                  right:-6,
-                  minWidth:18,
-                  height:18,
-                  lineHeight:'18px',
-                  textAlign:'center',
-                  fontSize:11,
-                  fontWeight:700,
-                  background:'#ef4444',
-                  color:'#fff',
-                  borderRadius:999,
-                  padding:'0 6px',
-                  boxShadow:'0 1px 3px rgba(0,0,0,0.2)'
-                }}
+        <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {authed ? (
+            <>
+              {/* Messages (opens ChatLauncher) with unread badge */}
+              <button
+                type="button"
+                onClick={openMessages}
+                className="btn btn-secondary"
+                aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
+                style={{ position: "relative" }}
               >
-                {unread}
-              </span>
-            )}
-          </button>
+                <span>Messages</span>
+                {badge}
+              </button>
 
-          {!authed ? (
-            <Link className="btn btn-primary" to="/auth" style={isActive('/auth')}>Sign in</Link>
+              <Link className="btn btn-neutral" to="/profile">
+                Profile
+              </Link>
+              <Link className="btn btn-neutral" to="/settings">
+                Settings
+              </Link>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={onSignOut}
+                title="Sign out"
+              >
+                Sign out
+              </button>
+            </>
           ) : (
-            <button
-              className="btn btn-secondary"
-              onClick={onSignOut}
-              title="Sign out"
-              aria-label="Sign out"
-            >
-              Sign out
-            </button>
+            <>
+              <Link className="btn btn-primary" to="/auth">
+                Sign in / Sign up
+              </Link>
+              <a className="btn btn-neutral" href="#how-it-works">
+                How it works
+              </a>
+            </>
           )}
-        </div>
+        </nav>
       </div>
     </header>
-  )
+  );
 }
+
 
