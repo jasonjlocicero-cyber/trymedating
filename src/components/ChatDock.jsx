@@ -39,12 +39,9 @@ const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
-  // Canonical: [[file:<json>]]
   if (body.startsWith("[[file:")) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
-
-  // Legacy A: [[media:<json>]]
   if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
@@ -57,22 +54,14 @@ function getAttachmentMeta(body) {
       };
     } catch {}
   }
-
-  // Legacy B: [[image:<url>]] or [[img:<url>]]
   if (body.startsWith("[[image:") || body.startsWith("[[img:")) {
     const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
-    if (raw.startsWith("http")) {
-      return { url: raw, name: raw.split("/").pop(), type: "image/*" };
-    }
+    if (raw.startsWith("http")) return { url: raw, name: raw.split("/").pop(), type: "image/*" };
   }
-
-  // Legacy C: [[filepath:<storage-relative-path>]]
   if (body.startsWith("[[filepath:")) {
     const p = decodeURIComponent(body.slice(11, -2));
     return { path: p, name: p.split("/").pop() };
   }
-
-  // Legacy D: direct public storage URL in plain text
   const urlMatch = body.match(/https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/);
   if (urlMatch) {
     const url = body.trim();
@@ -80,7 +69,6 @@ function getAttachmentMeta(body) {
     const path = urlMatch[2].replace(/\]+$/, "");
     return { url, path, bucket, name: path.split("/").pop() };
   }
-
   return null;
 }
 
@@ -184,6 +172,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(meta?.url || null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [zoomUrl, setZoomUrl] = useState(null); // NEW: zoom modal
 
   useEffect(() => {
     let alive = true;
@@ -208,6 +197,14 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
     /\.pdf$/i.test(meta?.name || "") ||
     (meta?.url && /\.pdf(?:$|\?)/i.test(meta.url));
+
+  // ESC to close zoom
+  useEffect(() => {
+    if (!zoomUrl) return;
+    const onKey = (e) => { if (e.key === 'Escape') setZoomUrl(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomUrl]);
 
   return (
     <div
@@ -248,7 +245,30 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           isPDF ? (
             <PdfThumb url={url} name={meta?.name || "document.pdf"} />
           ) : (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
-            <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
+            <>
+              <img
+                src={url}
+                alt={meta?.name || "image"}
+                onError={handleImgError}
+                onClick={() => setZoomUrl(url)}                 // NEW: open modal
+                style={{ maxWidth: 360, borderRadius: 8, cursor: 'zoom-in' }}
+              />
+              {zoomUrl && (
+                <div
+                  onClick={() => setZoomUrl(null)}
+                  style={{
+                    position:'fixed', inset:0, background:'rgba(0,0,0,.65)',
+                    display:'grid', placeItems:'center', zIndex:1200, cursor:'zoom-out'
+                  }}
+                >
+                  <img
+                    src={zoomUrl}
+                    alt={meta?.name || 'image'}
+                    style={{ maxWidth:'90vw', maxHeight:'90vh', borderRadius:12, boxShadow:'0 10px 30px rgba(0,0,0,.3)' }}
+                  />
+                </div>
+              )}
+            </>
           ) : (
             <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
               Open file
@@ -277,7 +297,7 @@ export default function ChatDock({ partnerId }) {
   // messages
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
+  thead: const [sending, setSending] = useState(false);
 
   // attachments
   const [uploading, setUploading] = useState(false);
@@ -308,12 +328,12 @@ export default function ChatDock({ partnerId }) {
     return () => { mounted = false; };
   }, []);
 
-  /* NEW: if partnerId is provided (from ChatLauncher), honor it */
+  /* honor partnerId */
   useEffect(() => {
     if (partnerId) setPeer(String(partnerId));
   }, [partnerId]);
 
-  /* when peer/myId change, load banner hidden flag */
+  /* banner hidden flag load */
   useEffect(() => {
     if (!myId || !peer) { setHidePrevBanner(false); return; }
     try {
@@ -329,7 +349,7 @@ export default function ChatDock({ partnerId }) {
     try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
   };
 
-  /* auto-resume latest connection (fallback when no partnerId) */
+  /* auto-resume fallback */
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
@@ -380,14 +400,14 @@ export default function ChatDock({ partnerId }) {
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  // Light polling as a safety net
+  // Light polling safety net
   useEffect(() => {
     if (!myId || !peer) return;
     const id = setInterval(() => fetchLatestConn(myId), 4000);
     return () => clearInterval(id);
   }, [myId, peer, fetchLatestConn]);
 
-  /* ---------------------- messages: fetch + realtime ---------------------- */
+  /* -------- messages: fetch + realtime -------- */
   const fetchAllConnIdsForPair = useCallback(async () => {
     if (!myId || !peer) return [];
     const pairOr =
@@ -404,7 +424,7 @@ export default function ChatDock({ partnerId }) {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length); // banner count
+    setSessionCount(connIds.length);
     if (!connIds.length) { setItems([]); return; }
 
     const { data } = await supabase
@@ -415,7 +435,7 @@ export default function ChatDock({ partnerId }) {
 
     setItems(data || []);
 
-    // mark all unread (for me) across the pair as read
+    // mark read across the pair
     await supabase
       .from("messages")
       .update({ read_at: new Date().toISOString() })
@@ -567,7 +587,6 @@ export default function ChatDock({ partnerId }) {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
-      // Reuse existing row if previously disconnected/rejected
       const pairOr =
         `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
         `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
@@ -593,13 +612,11 @@ export default function ChatDock({ partnerId }) {
         return;
       }
 
-      // If the other side already requested me, accept that one
       if (row && row[C.status] === "pending" && toId(row[C.requester]) === peer && toId(row[C.addressee]) === myId) {
         await acceptRequest(row.id);
         return;
       }
 
-      // Otherwise, create fresh pending
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
       const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
@@ -677,7 +694,6 @@ export default function ChatDock({ partnerId }) {
     }
   };
 
-  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -765,7 +781,7 @@ export default function ChatDock({ partnerId }) {
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          {/* sessions banner (dismissible, persisted per pair) */}
+          {/* sessions banner */}
           {sessionCount > 1 && !hidePrevBanner && (
             <div
               style={{
@@ -868,7 +884,7 @@ export default function ChatDock({ partnerId }) {
               <div style={{ fontSize: 12, opacity: 0.7, marginTop: -2, marginLeft: 4 }}>Typing…</div>
             )}
 
-            {/* composer (Enter=send, Shift+Enter=newline) */}
+            {/* composer */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
@@ -911,6 +927,7 @@ export default function ChatDock({ partnerId }) {
     </div>
   );
 }
+
 
 
 
