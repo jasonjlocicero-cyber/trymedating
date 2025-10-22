@@ -15,7 +15,9 @@ const C = {
   updatedAt: "updated_at",
 };
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
-const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
+const otherPartyId = (row, my) =>
+  (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
+
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
@@ -39,10 +41,13 @@ const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
-  if (body.startsWith("[[file:")) {
+  // Canonical: [[file:<json>]]
+  if (body.startsWith("[[file:"])) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
-  if (body.startsWith("[[media:")) {
+
+  // Legacy A: [[media:<json>]]
+  if (body.startsWith("[[media:"])) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
       return {
@@ -54,14 +59,20 @@ function getAttachmentMeta(body) {
       };
     } catch {}
   }
-  if (body.startsWith("[[image:") || body.startsWith("[[img:")) {
+
+  // Legacy B: [[image:<url>]] or [[img:<url>]]
+  if (body.startsWith("[[image:") || body.startsWith("[[img:"])) {
     const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
     if (raw.startsWith("http")) return { url: raw, name: raw.split("/").pop(), type: "image/*" };
   }
-  if (body.startsWith("[[filepath:")) {
+
+  // Legacy C: [[filepath:<storage-relative-path>]]
+  if (body.startsWith("[[filepath:"])) {
     const p = decodeURIComponent(body.slice(11, -2));
     return { path: p, name: p.split("/").pop() };
   }
+
+  // Legacy D: direct storage URL in plain text
   const urlMatch = body.match(/https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/);
   if (urlMatch) {
     const url = body.trim();
@@ -69,6 +80,7 @@ function getAttachmentMeta(body) {
     const path = urlMatch[2].replace(/\]+$/, "");
     return { url, path, bucket, name: path.split("/").pop() };
   }
+
   return null;
 }
 
@@ -87,7 +99,13 @@ function linkifyJSX(text) {
     const isUrl = !!m[1];
     const href = isUrl ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed) : `mailto:${trimmed}`;
     out.push(
-      <a key={`lnk-${key++}`} href={href} target="_blank" rel="nofollow noopener noreferrer" style={{ textDecoration: "underline" }}>
+      <a
+        key={`lnk-${key++}`}
+        href={href}
+        target="_blank"
+        rel="nofollow noopener noreferrer"
+        style={{ textDecoration: "underline" }}
+      >
         {trimmed}
       </a>
     );
@@ -124,7 +142,18 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
 };
 
 const Pill = (txt, color) => (
-  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>{txt}</span>
+  <span
+    style={{
+      padding: "2px 8px",
+      borderRadius: 999,
+      fontSize: 12,
+      fontWeight: 700,
+      background: color,
+      color: "#111",
+    }}
+  >
+    {txt}
+  </span>
 );
 
 function ProgressBar({ percent }) {
@@ -159,7 +188,12 @@ function PdfThumb({ url, name = "document.pdf" }) {
         </svg>
       </div>
       <div style={{ display: "grid" }}>
-        <span style={{ fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span
+          style={{
+            fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap"
+          }}
+        >
           {name}
         </span>
         <span style={{ fontSize: 12, color: "#374151" }}>Open</span>
@@ -168,7 +202,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
   );
 }
 
-/** Attachment bubble: signed URL when path available; falls back to direct URL (legacy). */
+/** Attachment bubble (supports image zoom) */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(meta?.url || null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -201,9 +235,9 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   // ESC to close zoom
   useEffect(() => {
     if (!zoomUrl) return;
-    const onKey = (e) => { if (e.key === 'Escape') setZoomUrl(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const onKey = (e) => { if (e.key === "Escape") setZoomUrl(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [zoomUrl]);
 
   return (
@@ -223,7 +257,10 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           {meta?.path && (
             <button
               type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
-              style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+              style={{
+                border: "1px solid var(--border)", background: "#f3f4f6", color: "#111",
+                borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer"
+              }}
             >
               ⟳
             </button>
@@ -231,7 +268,10 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           {mine && canDelete && (
             <button
               type="button" onClick={() => onDelete(meta)} disabled={deleting} title="Delete attachment"
-              style={{ border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111", borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12 }}
+              style={{
+                border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111",
+                borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12
+              }}
             >
               🗑️
             </button>
@@ -250,27 +290,33 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
                 src={url}
                 alt={meta?.name || "image"}
                 onError={handleImgError}
-                onClick={() => setZoomUrl(url)}                 // NEW: open modal
-                style={{ maxWidth: 360, borderRadius: 8, cursor: 'zoom-in' }}
+                onClick={() => setZoomUrl(url)}
+                style={{ maxWidth: 360, borderRadius: 8, cursor: "zoom-in" }}
               />
               {zoomUrl && (
                 <div
                   onClick={() => setZoomUrl(null)}
                   style={{
-                    position:'fixed', inset:0, background:'rgba(0,0,0,.65)',
-                    display:'grid', placeItems:'center', zIndex:1200, cursor:'zoom-out'
+                    position: "fixed", inset: 0, background: "rgba(0,0,0,.65)",
+                    display: "grid", placeItems: "center", zIndex: 1200, cursor: "zoom-out"
                   }}
                 >
                   <img
                     src={zoomUrl}
-                    alt={meta?.name || 'image'}
-                    style={{ maxWidth:'90vw', maxHeight:'90vh', borderRadius:12, boxShadow:'0 10px 30px rgba(0,0,0,.3)' }}
+                    alt={meta?.name || "image"}
+                    style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.3)" }}
                   />
                 </div>
               )}
             </>
           ) : (
-            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setRefreshTick((n) => n + 1)}
+              style={{ fontWeight: 600 }}
+            >
               Open file
             </a>
           )
@@ -297,7 +343,7 @@ export default function ChatDock({ partnerId }) {
   // messages
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
-  thead: const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState(false);
 
   // attachments
   const [uploading, setUploading] = useState(false);
@@ -328,12 +374,12 @@ export default function ChatDock({ partnerId }) {
     return () => { mounted = false; };
   }, []);
 
-  /* honor partnerId */
+  /* honor partnerId from launcher */
   useEffect(() => {
     if (partnerId) setPeer(String(partnerId));
   }, [partnerId]);
 
-  /* banner hidden flag load */
+  /* load banner hidden flag */
   useEffect(() => {
     if (!myId || !peer) { setHidePrevBanner(false); return; }
     try {
@@ -349,7 +395,7 @@ export default function ChatDock({ partnerId }) {
     try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
   };
 
-  /* auto-resume fallback */
+  /* auto-resume latest connection if no partnerId */
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
@@ -385,7 +431,8 @@ export default function ChatDock({ partnerId }) {
   const subscribeConn = useCallback((uid) => {
     uid = toId(uid);
     if (!uid || !peer) return () => {};
-    const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
+    const filter =
+      `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
     const ch = supabase
       .channel(`conn:${uid}<->${peer}`)
       .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
@@ -400,14 +447,14 @@ export default function ChatDock({ partnerId }) {
     return off;
   }, [myId, peer, fetchLatestConn, subscribeConn]);
 
-  // Light polling safety net
+  // Light polling as a safety net
   useEffect(() => {
     if (!myId || !peer) return;
     const id = setInterval(() => fetchLatestConn(myId), 4000);
     return () => clearInterval(id);
   }, [myId, peer, fetchLatestConn]);
 
-  /* -------- messages: fetch + realtime -------- */
+  /* ---------------------- messages: fetch + realtime ---------------------- */
   const fetchAllConnIdsForPair = useCallback(async () => {
     if (!myId || !peer) return [];
     const pairOr =
@@ -424,7 +471,7 @@ export default function ChatDock({ partnerId }) {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length);
+    setSessionCount(connIds.length); // banner count
     if (!connIds.length) { setItems([]); return; }
 
     const { data } = await supabase
@@ -435,7 +482,7 @@ export default function ChatDock({ partnerId }) {
 
     setItems(data || []);
 
-    // mark read across the pair
+    // mark all unread (for me) across the pair as read
     await supabase
       .from("messages")
       .update({ read_at: new Date().toISOString() })
@@ -449,9 +496,11 @@ export default function ChatDock({ partnerId }) {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on("postgres_changes",
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages())
+        () => fetchMessages()
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -513,7 +562,7 @@ export default function ChatDock({ partnerId }) {
     }
   };
 
-  const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
+  const isMine = (m) => m.sender === myId || m.sender_id === myId;
 
   /* -------------------- attachments: upload / delete -------------------- */
   const pickAttachment = async (file) => {
@@ -587,6 +636,7 @@ export default function ChatDock({ partnerId }) {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
+      // Reuse existing row if previously disconnected/rejected
       const pairOr =
         `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
         `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
@@ -612,11 +662,13 @@ export default function ChatDock({ partnerId }) {
         return;
       }
 
+      // If the other side already requested me, accept that one
       if (row && row[C.status] === "pending" && toId(row[C.requester]) === peer && toId(row[C.addressee]) === myId) {
         await acceptRequest(row.id);
         return;
       }
 
+      // Otherwise, create fresh pending
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
       const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
@@ -694,6 +746,7 @@ export default function ChatDock({ partnerId }) {
     }
   };
 
+  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -781,7 +834,7 @@ export default function ChatDock({ partnerId }) {
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
         <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          {/* sessions banner */}
+          {/* sessions banner (dismissible, persisted per pair) */}
           {sessionCount > 1 && !hidePrevBanner && (
             <div
               style={{
@@ -884,7 +937,7 @@ export default function ChatDock({ partnerId }) {
               <div style={{ fontSize: 12, opacity: 0.7, marginTop: -2, marginLeft: 4 }}>Typing…</div>
             )}
 
-            {/* composer */}
+            {/* composer (Enter=send, Shift+Enter=newline) */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
