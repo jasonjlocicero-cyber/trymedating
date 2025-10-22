@@ -15,12 +15,21 @@ const C = {
   updatedAt: "updated_at",
 };
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
-const otherPartyId = (row, my) =>
-  (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
+const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
+
+/* Precompiled regex (string form to avoid literal parsing issues) */
+const URL_STORAGE_RE = new RegExp(
+  "https?:\\/\\/[^\\s]+\\/storage\\/v1\\/object\\/(?:public|sign)\\/([^\\/]+)\\/([^\\s\\]]+)",
+  "i"
+);
+const LINK_RE = new RegExp(
+  "((https?:\\/\\/|www\\.)[^\\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[A-Za-z]{2,})",
+  "gi"
+);
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -42,12 +51,12 @@ function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
   // Canonical: [[file:<json>]]
-  if (body.startsWith("[[file:"])) {
+  if (body.startsWith("[[file:")) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
 
   // Legacy A: [[media:<json>]]
-  if (body.startsWith("[[media:"])) {
+  if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
       return {
@@ -61,21 +70,21 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy B: [[image:<url>]] or [[img:<url>]]
-  if (body.startsWith("[[image:") || body.startsWith("[[img:"])) {
+  if (body.startsWith("[[image:"]) || body.startsWith("[[img:"])) {
     const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
-    if (raw.startsWith("http")) return { url: raw, name: raw.split("/").pop(), type: "image/*" };
+    if (raw.startsWith("http")) {
+      return { url: raw, name: raw.split("/").pop(), type: "image/*" };
+    }
   }
 
   // Legacy C: [[filepath:<storage-relative-path>]]
-  if (body.startsWith("[[filepath:"])) {
+  if (body.startsWith("[[filepath:")) {
     const p = decodeURIComponent(body.slice(11, -2));
     return { path: p, name: p.split("/").pop() };
   }
 
   // Legacy D: direct public storage URL in plain text
-  const urlMatch = body.match(
-    /https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/
-  );
+  const urlMatch = body.match(URL_STORAGE_RE);
   if (urlMatch) {
     const url = body.trim();
     const bucket = urlMatch[1];
@@ -89,8 +98,6 @@ function getAttachmentMeta(body) {
 /* ----------------------------- linkifying ---------------------------- */
 function linkifyJSX(text) {
   if (!text) return null;
-  const LINK_RE =
-    /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
   const out = [];
   let last = 0, m, key = 0;
   while ((m = LINK_RE.exec(text))) {
@@ -100,17 +107,9 @@ function linkifyJSX(text) {
     const trimmed = raw.replace(/[)\].,!?;:]+$/g, "");
     const trailing = raw.slice(trimmed.length);
     const isUrl = !!m[1];
-    const href = isUrl
-      ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed)
-      : `mailto:${trimmed}`;
+    const href = isUrl ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed) : `mailto:${trimmed}`;
     out.push(
-      <a
-        key={`lnk-${key++}`}
-        href={href}
-        target="_blank"
-        rel="nofollow noopener noreferrer"
-        style={{ textDecoration: "underline" }}
-      >
+      <a key={`lnk-${key++}`} href={href} target="_blank" rel="nofollow noopener noreferrer" style={{ textDecoration: "underline" }}>
         {trimmed}
       </a>
     );
@@ -147,16 +146,7 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
 };
 
 const Pill = (txt, color) => (
-  <span
-    style={{
-      padding: "2px 8px",
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 700,
-      background: color,
-      color: "#111",
-    }}
-  >
+  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
     {txt}
   </span>
 );
@@ -193,12 +183,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
         </svg>
       </div>
       <div style={{ display: "grid" }}>
-        <span
-          style={{
-            fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden",
-            textOverflow: "ellipsis", whiteSpace: "nowrap"
-          }}
-        >
+        <span style={{ fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {name}
         </span>
         <span style={{ fontSize: 12, color: "#374151" }}>Open</span>
@@ -262,10 +247,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           {meta?.path && (
             <button
               type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
-              style={{
-                border: "1px solid var(--border)", background: "#f3f4f6", color: "#111",
-                borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer"
-              }}
+              style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
             >
               ⟳
             </button>
@@ -273,10 +255,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           {mine && canDelete && (
             <button
               type="button" onClick={() => onDelete(meta)} disabled={deleting} title="Delete attachment"
-              style={{
-                border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111",
-                borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12
-              }}
+              style={{ border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111", borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12 }}
             >
               🗑️
             </button>
@@ -436,8 +415,7 @@ export default function ChatDock({ partnerId }) {
   const subscribeConn = useCallback((uid) => {
     uid = toId(uid);
     if (!uid || !peer) return () => {};
-    const filter =
-      `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
+    const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
     const ch = supabase
       .channel(`conn:${uid}<->${peer}`)
       .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
@@ -567,7 +545,7 @@ export default function ChatDock({ partnerId }) {
     }
   };
 
-  const isMine = (m) => m.sender === myId || m.sender_id === myId;
+  const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
 
   /* -------------------- attachments: upload / delete -------------------- */
   const pickAttachment = async (file) => {
@@ -924,10 +902,7 @@ export default function ChatDock({ partnerId }) {
                         }}
                       >
                         {linkifyJSX(m.body)}
-                        <div
-                          title={m.read_at ? new Date(m.read_at).toLocaleString() : ""}
-                          style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}
-                        >
+                        <div title={m.read_at ? new Date(m.read_at).toLocaleString() : ""} style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
                         </div>
                       </div>
