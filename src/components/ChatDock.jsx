@@ -263,7 +263,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 }
 
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock() {
+export default function ChatDock({ partnerId }) {
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -303,6 +303,11 @@ export default function ChatDock() {
     return () => { mounted = false; };
   }, []);
 
+  /* NEW: if partnerId is provided (from ChatLauncher), honor it */
+  useEffect(() => {
+    if (partnerId) setPeer(String(partnerId));
+  }, [partnerId]);
+
   /* when peer/myId change, load banner hidden flag */
   useEffect(() => {
     if (!myId || !peer) { setHidePrevBanner(false); return; }
@@ -319,7 +324,7 @@ export default function ChatDock() {
     try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
   };
 
-  /* auto-resume latest connection */
+  /* auto-resume latest connection (fallback when no partnerId) */
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
@@ -865,6 +870,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
