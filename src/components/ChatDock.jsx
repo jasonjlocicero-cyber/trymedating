@@ -15,23 +15,68 @@ const C = {
   updatedAt: "updated_at",
 };
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
-const otherPartyId = (row, my) => (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
+const otherPartyId = (row, my) =>
+  (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
-const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
 
-/* Safe regexes (use RegExp to avoid parser tripping on ] in literals) */
-const URL_STORAGE_RE = new RegExp(
-  "https?:\\/\\/[^\\s]+\\/storage\\/v1\\/object\\/(?:public|sign)\\/([^\\/]+)\\/([^\\s\\]]+)",
-  "i"
-);
-const LINK_RE = new RegExp(
-  "((https?:\\/\\/|www\\.)[^\\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[A-Za-z]{2,})",
-  "gi"
-);
-const TRAIL_PUNCT_RE = new RegExp("[)\\].,!?;:]+$");
-const TRAIL_END_BRACKETS_RE = new RegExp("\\]+$");
+/* ---------- tiny helpers (no regex literals) ---------- */
+function isAllowedMime(m) {
+  return !!m && (m.startsWith("image/") || m === "application/pdf");
+}
+function isPdfName(name) {
+  const n = (name || "").toLowerCase();
+  return n.endsWith(".pdf");
+}
+function isImageName(name) {
+  const n = (name || "").toLowerCase();
+  return (
+    n.endsWith(".png") ||
+    n.endsWith(".jpg") ||
+    n.endsWith(".jpeg") ||
+    n.endsWith(".gif") ||
+    n.endsWith(".webp") ||
+    n.endsWith(".svg")
+  );
+}
+function trimTrailing(s, chars) {
+  if (!s) return { trimmed: s, trailing: "" };
+  let i = s.length - 1;
+  while (i >= 0 && chars.indexOf(s[i]) !== -1) i--;
+  return { trimmed: s.slice(0, i + 1), trailing: s.slice(i + 1) };
+}
+function isWhitespace(ch) {
+  return ch === " " || ch === "\n" || ch === "\t" || ch === "\r";
+}
+function splitPreserveWhitespace(str) {
+  const out = [];
+  let tok = "";
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (isWhitespace(ch)) {
+      if (tok) out.push(tok);
+      out.push(ch);
+      tok = "";
+    } else {
+      tok += ch;
+    }
+  }
+  if (tok) out.push(tok);
+  return out;
+}
+function isLikelyURL(s) {
+  return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("www.");
+}
+function isLikelyEmail(s) {
+  const at = s.indexOf("@");
+  if (at <= 0) return false;
+  const lastDot = s.lastIndexOf(".");
+  return lastDot > at + 1 && lastDot < s.length - 1;
+}
+function toAbsUrl(s) {
+  return s.startsWith("www.") ? `https://${s}` : s;
+}
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -86,12 +131,24 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy D: direct public storage URL in plain text
-  const urlMatch = body.match(URL_STORAGE_RE);
-  if (urlMatch) {
-    const url = body.trim();
-    const bucket = urlMatch[1];
-    const path = urlMatch[2].replace(TRAIL_END_BRACKETS_RE, "");
-    return { url, path, bucket, name: path.split("/").pop() };
+  let raw = (body || "").trim();
+  // strip trailing ']' that might be left if pasted from [[...]]
+  while (raw.endsWith("]")) raw = raw.slice(0, -1);
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    try {
+      const u = new URL(raw);
+      const parts = u.pathname.split("/").filter(Boolean); // e.g. ['storage','v1','object','public','chat-media','path','to','file']
+      const objIdx = parts.findIndex((p) => p === "object");
+      if (objIdx !== -1 && parts.length >= objIdx + 4) {
+        const bucket = parts[objIdx + 2];
+        const path = parts.slice(objIdx + 3).join("/");
+        return { url: u.href, path, bucket, name: path.split("/").pop() };
+      }
+      // Not a standard storage URL; still render as link
+      return { url: u.href, name: u.pathname.split("/").pop() || "file" };
+    } catch {
+      // fall through
+    }
   }
 
   return null;
@@ -100,25 +157,45 @@ function getAttachmentMeta(body) {
 /* ----------------------------- linkifying ---------------------------- */
 function linkifyJSX(text) {
   if (!text) return null;
+  const pieces = splitPreserveWhitespace(text);
   const out = [];
-  let last = 0, m, key = 0;
-  while ((m = LINK_RE.exec(text))) {
-    const raw = m[0];
-    const pre = text.slice(last, m.index);
-    if (pre) out.push(pre);
-    const trimmed = raw.replace(TRAIL_PUNCT_RE, "");
-    const trailing = raw.slice(trimmed.length);
-    const isUrl = !!m[1];
-    const href = isUrl ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed) : `mailto:${trimmed}`;
-    out.push(
-      <a key={`lnk-${key++}`} href={href} target="_blank" rel="nofollow noopener noreferrer" style={{ textDecoration: "underline" }}>
-        {trimmed}
-      </a>
-    );
-    if (trailing) out.push(trailing);
-    last = m.index + raw.length;
+  let key = 0;
+  for (const piece of pieces) {
+    if (piece.length === 0) continue;
+    if (isWhitespace(piece)) {
+      out.push(piece);
+      continue;
+    }
+    const { trimmed, trailing } = trimTrailing(piece, ").,!?;:]");
+    if (isLikelyURL(trimmed)) {
+      const href = toAbsUrl(trimmed);
+      out.push(
+        <a
+          key={`lnk-${key++}`}
+          href={href}
+          target="_blank"
+          rel="nofollow noopener noreferrer"
+          style={{ textDecoration: "underline" }}
+        >
+          {trimmed}
+        </a>
+      );
+      if (trailing) out.push(trailing);
+    } else if (isLikelyEmail(trimmed)) {
+      out.push(
+        <a
+          key={`lnk-${key++}`}
+          href={`mailto:${trimmed}`}
+          style={{ textDecoration: "underline" }}
+        >
+          {trimmed}
+        </a>
+      );
+      if (trailing) out.push(trailing);
+    } else {
+      out.push(piece);
+    }
   }
-  if (last < text.length) out.push(text.slice(last));
   return out;
 }
 
@@ -220,8 +297,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 
   const isPDF =
     (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
-    /\.pdf$/i.test(meta?.name || "") ||
-    (meta?.url && /\.pdf(?:$|\?)/i.test(meta.url));
+    isPdfName(meta?.name || "") ||
+    (meta?.url && isPdfName(meta.url));
 
   return (
     <div
@@ -261,7 +338,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         {url ? (
           isPDF ? (
             <PdfThumb url={url} name={meta?.name || "document.pdf"} />
-          ) : (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
+          ) : (meta?.type?.startsWith?.("image/") || isImageName(meta?.name || "")) ? (
             <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
           ) : (
             <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
@@ -433,9 +510,11 @@ export default function ChatDock() {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on("postgres_changes",
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages())
+        () => fetchMessages()
+      )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -476,7 +555,7 @@ export default function ChatDock() {
     try {
       if (!conn?.id || !file) return;
       if (file.size > MAX_UPLOAD_BYTES) { alert("File is too large (max 10MB)."); return; }
-      if (!ALLOWED.test(file.type)) { alert("Images or PDFs only."); return; }
+      if (!isAllowedMime(file.type)) { alert("Images or PDFs only."); return; }
 
       setUploading(true);
       setUploadPct(5);
