@@ -21,6 +21,17 @@ const otherPartyId = (row, my) =>
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
 
+/* ---------- avoid literal [ and ] in strings ---------- */
+const LB = "\x5B"; // '['
+const RB = "\x5D"; // ']'
+const TAG_END = RB + RB;           // "]]"
+const TAG_FILE = LB + LB + "file:";        // "[[file:"
+const TAG_MEDIA = LB + LB + "media:";      // "[[media:"
+const TAG_IMAGE = LB + LB + "image:";      // "[[image:"
+const TAG_IMG = LB + LB + "img:";          // "[[img:"
+const TAG_FILEPATH = LB + LB + "filepath:";// "[[filepath:"
+const TAG_DELETED = LB + LB + "deleted:";  // "[[deleted:"
+
 /* ---------- tiny helpers (no regex literals) ---------- */
 function isAllowedMime(m) {
   return !!m && (m.startsWith("image/") || m === "application/pdf");
@@ -90,22 +101,22 @@ function humanSize(bytes) {
 }
 
 /* ---------------- message body encodings & parsing ---------------- */
-const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
-const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(10, -2))); } catch { return null; } };
+const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith(TAG_DELETED);
+const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(TAG_DELETED.length, -2))); } catch { return null; } };
 
 /** Normalize various historical/legacy attachment formats into a common meta */
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
   // Canonical: [[file:<json>]]
-  if (body.startsWith("[[file:")) {
-    try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
+  if (body.startsWith(TAG_FILE)) {
+    try { return JSON.parse(decodeURIComponent(body.slice(TAG_FILE.length, -2))); } catch {}
   }
 
   // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
-  if (body.startsWith("[[media:")) {
+  if (body.startsWith(TAG_MEDIA)) {
     try {
-      const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
+      const v = JSON.parse(decodeURIComponent(body.slice(TAG_MEDIA.length, -2)));
       return {
         name: v.name || v.filename || v.path?.split("/")?.pop(),
         type: v.type || v.mime,
@@ -117,7 +128,7 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy B: [[image:<url>]] or [[img:<url>]]
-  if (body.startsWith("[[image:"]) || body.startsWith("[[img:"])) {
+  if (body.startsWith(TAG_IMAGE) || body.startsWith(TAG_IMG)) {
     const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
     if (raw.startsWith("http")) {
       return { url: raw, name: raw.split("/").pop(), type: "image/*" };
@@ -125,19 +136,20 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy C: [[filepath:<storage-relative-path>]]
-  if (body.startsWith("[[filepath:")) {
-    const p = decodeURIComponent(body.slice(11, -2));
+  if (body.startsWith(TAG_FILEPATH)) {
+    const p = decodeURIComponent(body.slice(TAG_FILEPATH.length, -2));
     return { path: p, name: p.split("/").pop() };
   }
 
   // Legacy D: direct public storage URL in plain text
   let raw = (body || "").trim();
   // strip trailing ']' that might be left if pasted from [[...]]
-  while (raw.endsWith("]")) raw = raw.slice(0, -1);
+  const rb = RB; // "]"
+  while (raw.endsWith(rb)) raw = raw.slice(0, -1);
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     try {
       const u = new URL(raw);
-      const parts = u.pathname.split("/").filter(Boolean); // e.g. ['storage','v1','object','public','chat-media','path','to','file']
+      const parts = u.pathname.split("/").filter(Boolean);
       const objIdx = parts.findIndex((p) => p === "object");
       if (objIdx !== -1 && parts.length >= objIdx + 4) {
         const bucket = parts[objIdx + 2];
@@ -155,6 +167,7 @@ function getAttachmentMeta(body) {
 }
 
 /* ----------------------------- linkifying ---------------------------- */
+const TRAIL_CHARS = ").,!?;:" + RB; // includes ']'
 function linkifyJSX(text) {
   if (!text) return null;
   const pieces = splitPreserveWhitespace(text);
@@ -166,7 +179,7 @@ function linkifyJSX(text) {
       out.push(piece);
       continue;
     }
-    const { trimmed, trailing } = trimTrailing(piece, ").,!?;:]");
+    const { trimmed, trailing } = trimTrailing(piece, TRAIL_CHARS);
     if (isLikelyURL(trimmed)) {
       const href = toAbsUrl(trimmed);
       out.push(
@@ -571,7 +584,7 @@ export default function ChatDock() {
 
       const recip = otherPartyId(conn, myId);
       const meta = { name: file.name, type: file.type, size: file.size, path };
-      const body = `[[file:${encodeURIComponent(JSON.stringify(meta))}]]`;
+      const body = `${TAG_FILE}${encodeURIComponent(JSON.stringify(meta))}${TAG_END}`;
 
       const { error } = await supabase.from("messages").insert({
         connection_id: conn.id, sender: myId, recipient: recip, body,
@@ -597,7 +610,7 @@ export default function ChatDock() {
       if (delErr) throw delErr;
 
       const recip = otherPartyId(conn, myId);
-      const tomb = `[[deleted:${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}]]`;
+      const tomb = `${TAG_DELETED}${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}${TAG_END}`;
       const { error: msgErr } = await supabase.from("messages").insert({
         connection_id: conn.id, sender: myId, recipient: recip, body: tomb,
       });
