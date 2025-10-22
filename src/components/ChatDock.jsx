@@ -44,7 +44,7 @@ function getAttachmentMeta(body) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
 
-  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
+  // Legacy A: [[media:<json>]]
   if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
@@ -290,6 +290,11 @@ export default function ChatDock({ partnerId }) {
   // NEW: banner visibility persisted per pair
   const [hidePrevBanner, setHidePrevBanner] = useState(false);
 
+  // Typing indicator
+  const [partnerTypingAt, setPartnerTypingAt] = useState(0);
+  const typingRef = useRef(null);
+  const lastTypingPingRef = useRef(0);
+
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
 
@@ -435,6 +440,34 @@ export default function ChatDock({ partnerId }) {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
+
+  /* -------------------------- typing indicator -------------------------- */
+  useEffect(() => {
+    if (!myId || !peer) return;
+    const key = [myId, peer].sort().join(":");
+    const ch = supabase
+      .channel(`typing-${key}`)
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        if (payload?.from !== myId) setPartnerTypingAt(Date.now());
+      })
+      .subscribe();
+    typingRef.current = ch;
+    return () => {
+      if (typingRef.current) supabase.removeChannel(typingRef.current);
+      typingRef.current = null;
+    };
+  }, [myId, peer]);
+
+  function typingPing() {
+    const now = Date.now();
+    if (now - lastTypingPingRef.current < 800) return; // throttle
+    lastTypingPingRef.current = now;
+    typingRef.current?.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { from: myId, at: now },
+    });
+  }
 
   /* -------------------------------- send -------------------------------- */
   const canSend = useMemo(
@@ -817,7 +850,10 @@ export default function ChatDock({ partnerId }) {
                         }}
                       >
                         {linkifyJSX(m.body)}
-                        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
+                        <div
+                          title={m.read_at ? new Date(m.read_at).toLocaleString() : ""}
+                          style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}
+                        >
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
                         </div>
                       </div>
@@ -826,6 +862,11 @@ export default function ChatDock({ partnerId }) {
                 );
               })}
             </div>
+
+            {/* typing indicator (3s fade) */}
+            {Date.now() - partnerTypingAt < 3000 && (
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: -2, marginLeft: 4 }}>Typing…</div>
+            )}
 
             {/* composer (Enter=send, Shift+Enter=newline) */}
             <form
@@ -839,7 +880,7 @@ export default function ChatDock({ partnerId }) {
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => { setText(e.target.value); typingPing(); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 disabled={uploading}
                 style={{
