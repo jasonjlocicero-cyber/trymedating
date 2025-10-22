@@ -21,7 +21,7 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
 const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
 
-/* Precompiled regex (string form to avoid literal parsing issues) */
+/* Safe regexes (use RegExp to avoid parser tripping on ] in literals) */
 const URL_STORAGE_RE = new RegExp(
   "https?:\\/\\/[^\\s]+\\/storage\\/v1\\/object\\/(?:public|sign)\\/([^\\/]+)\\/([^\\s\\]]+)",
   "i"
@@ -30,6 +30,8 @@ const LINK_RE = new RegExp(
   "((https?:\\/\\/|www\\.)[^\\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[A-Za-z]{2,})",
   "gi"
 );
+const TRAIL_PUNCT_RE = new RegExp("[)\\].,!?;:]+$");
+const TRAIL_END_BRACKETS_RE = new RegExp("\\]+$");
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -55,7 +57,7 @@ function getAttachmentMeta(body) {
     try { return JSON.parse(decodeURIComponent(body.slice(7, -2))); } catch {}
   }
 
-  // Legacy A: [[media:<json>]]
+  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
   if (body.startsWith("[[media:")) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
@@ -88,7 +90,7 @@ function getAttachmentMeta(body) {
   if (urlMatch) {
     const url = body.trim();
     const bucket = urlMatch[1];
-    const path = urlMatch[2].replace(/\]+$/, "");
+    const path = urlMatch[2].replace(TRAIL_END_BRACKETS_RE, "");
     return { url, path, bucket, name: path.split("/").pop() };
   }
 
@@ -104,7 +106,7 @@ function linkifyJSX(text) {
     const raw = m[0];
     const pre = text.slice(last, m.index);
     if (pre) out.push(pre);
-    const trimmed = raw.replace(/[)\].,!?;:]+$/g, "");
+    const trimmed = raw.replace(TRAIL_PUNCT_RE, "");
     const trailing = raw.slice(trimmed.length);
     const isUrl = !!m[1];
     const href = isUrl ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed) : `mailto:${trimmed}`;
@@ -192,11 +194,10 @@ function PdfThumb({ url, name = "document.pdf" }) {
   );
 }
 
-/** Attachment bubble (supports image zoom) */
+/** Attachment bubble: signed URL when path available; falls back to direct URL (legacy). */
 function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   const [url, setUrl] = useState(meta?.url || null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [zoomUrl, setZoomUrl] = useState(null); // NEW: zoom modal
 
   useEffect(() => {
     let alive = true;
@@ -221,14 +222,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
     /\.pdf$/i.test(meta?.name || "") ||
     (meta?.url && /\.pdf(?:$|\?)/i.test(meta.url));
-
-  // ESC to close zoom
-  useEffect(() => {
-    if (!zoomUrl) return;
-    const onKey = (e) => { if (e.key === "Escape") setZoomUrl(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoomUrl]);
 
   return (
     <div
@@ -269,38 +262,9 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
           isPDF ? (
             <PdfThumb url={url} name={meta?.name || "document.pdf"} />
           ) : (meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "")) ? (
-            <>
-              <img
-                src={url}
-                alt={meta?.name || "image"}
-                onError={handleImgError}
-                onClick={() => setZoomUrl(url)}
-                style={{ maxWidth: 360, borderRadius: 8, cursor: "zoom-in" }}
-              />
-              {zoomUrl && (
-                <div
-                  onClick={() => setZoomUrl(null)}
-                  style={{
-                    position: "fixed", inset: 0, background: "rgba(0,0,0,.65)",
-                    display: "grid", placeItems: "center", zIndex: 1200, cursor: "zoom-out"
-                  }}
-                >
-                  <img
-                    src={zoomUrl}
-                    alt={meta?.name || "image"}
-                    style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,.3)" }}
-                  />
-                </div>
-              )}
-            </>
+            <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
           ) : (
-            <a
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setRefreshTick((n) => n + 1)}
-              style={{ fontWeight: 600 }}
-            >
+            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
               Open file
             </a>
           )
@@ -313,7 +277,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 }
 
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock({ partnerId }) {
+export default function ChatDock() {
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -340,11 +304,6 @@ export default function ChatDock({ partnerId }) {
   // NEW: banner visibility persisted per pair
   const [hidePrevBanner, setHidePrevBanner] = useState(false);
 
-  // Typing indicator
-  const [partnerTypingAt, setPartnerTypingAt] = useState(0);
-  const typingRef = useRef(null);
-  const lastTypingPingRef = useRef(0);
-
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
 
@@ -358,12 +317,7 @@ export default function ChatDock({ partnerId }) {
     return () => { mounted = false; };
   }, []);
 
-  /* honor partnerId from launcher */
-  useEffect(() => {
-    if (partnerId) setPeer(String(partnerId));
-  }, [partnerId]);
-
-  /* load banner hidden flag */
+  /* when peer/myId change, load banner hidden flag */
   useEffect(() => {
     if (!myId || !peer) { setHidePrevBanner(false); return; }
     try {
@@ -379,7 +333,7 @@ export default function ChatDock({ partnerId }) {
     try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
   };
 
-  /* auto-resume latest connection if no partnerId */
+  /* auto-resume latest connection */
   useEffect(() => {
     if (autoTried || !myId || peer) return;
     (async () => {
@@ -479,11 +433,9 @@ export default function ChatDock({ partnerId }) {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on(
-        "postgres_changes",
+      .on("postgres_changes",
         { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages()
-      )
+        () => fetchMessages())
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
@@ -492,34 +444,6 @@ export default function ChatDock({ partnerId }) {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
-
-  /* -------------------------- typing indicator -------------------------- */
-  useEffect(() => {
-    if (!myId || !peer) return;
-    const key = [myId, peer].sort().join(":");
-    const ch = supabase
-      .channel(`typing-${key}`)
-      .on("broadcast", { event: "typing" }, ({ payload }) => {
-        if (payload?.from !== myId) setPartnerTypingAt(Date.now());
-      })
-      .subscribe();
-    typingRef.current = ch;
-    return () => {
-      if (typingRef.current) supabase.removeChannel(typingRef.current);
-      typingRef.current = null;
-    };
-  }, [myId, peer]);
-
-  function typingPing() {
-    const now = Date.now();
-    if (now - lastTypingPingRef.current < 800) return; // throttle
-    lastTypingPingRef.current = now;
-    typingRef.current?.send({
-      type: "broadcast",
-      event: "typing",
-      payload: { from: myId, at: now },
-    });
-  }
 
   /* -------------------------------- send -------------------------------- */
   const canSend = useMemo(
@@ -902,7 +826,7 @@ export default function ChatDock({ partnerId }) {
                         }}
                       >
                         {linkifyJSX(m.body)}
-                        <div title={m.read_at ? new Date(m.read_at).toLocaleString() : ""} style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
+                        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
                           {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
                         </div>
                       </div>
@@ -911,11 +835,6 @@ export default function ChatDock({ partnerId }) {
                 );
               })}
             </div>
-
-            {/* typing indicator (3s fade) */}
-            {Date.now() - partnerTypingAt < 3000 && (
-              <div style={{ fontSize: 12, opacity: 0.7, marginTop: -2, marginLeft: 4 }}>Typing…</div>
-            )}
 
             {/* composer (Enter=send, Shift+Enter=newline) */}
             <form
@@ -929,7 +848,7 @@ export default function ChatDock({ partnerId }) {
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
-                onChange={(e) => { setText(e.target.value); typingPing(); }}
+                onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
                 disabled={uploading}
                 style={{
