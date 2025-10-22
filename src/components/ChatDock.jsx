@@ -72,8 +72,10 @@ function getAttachmentMeta(body) {
     return { path: p, name: p.split("/").pop() };
   }
 
-  // Legacy D: direct storage URL in plain text
-  const urlMatch = body.match(/https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/);
+  // Legacy D: direct public storage URL in plain text
+  const urlMatch = body.match(
+    /https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/
+  );
   if (urlMatch) {
     const url = body.trim();
     const bucket = urlMatch[1];
@@ -87,7 +89,8 @@ function getAttachmentMeta(body) {
 /* ----------------------------- linkifying ---------------------------- */
 function linkifyJSX(text) {
   if (!text) return null;
-  const LINK_RE = /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
+  const LINK_RE =
+    /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
   const out = [];
   let last = 0, m, key = 0;
   while ((m = LINK_RE.exec(text))) {
@@ -97,7 +100,9 @@ function linkifyJSX(text) {
     const trimmed = raw.replace(/[)\].,!?;:]+$/g, "");
     const trailing = raw.slice(trimmed.length);
     const isUrl = !!m[1];
-    const href = isUrl ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed) : `mailto:${trimmed}`;
+    const href = isUrl
+      ? (trimmed.startsWith("www.") ? `https://${trimmed}` : trimmed)
+      : `mailto:${trimmed}`;
     out.push(
       <a
         key={`lnk-${key++}`}
