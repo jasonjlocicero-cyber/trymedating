@@ -1,9 +1,10 @@
 // src/components/Header.jsx
 import React from "react";
-import { Link, NavLink } from "react-router-dom";
-import logoMark from "../assets/logo.png"; // <-- real image in src/assets
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
+  const loc = useLocation();
+
   const navLinkStyle = ({ isActive }) => ({
     padding: "6px 10px",
     borderRadius: 10,
@@ -15,29 +16,86 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
   });
 
   return (
-    <header style={{ position: "sticky", top: 0, zIndex: 40, background: "#fff", borderBottom: "1px solid var(--border)" }}>
-      <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 0" }}>
-        <Link to="/" aria-label="TryMeDating home" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10, lineHeight: 1 }}>
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 40,
+        background: "#fff",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      <div
+        className="container"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 0",
+        }}
+      >
+        {/* Brand: logo image + wordmark */}
+        <Link
+          to="/"
+          aria-label="TryMeDating home"
+          style={{
+            textDecoration: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            lineHeight: 1,
+          }}
+        >
+          {/* If you saved as SVG, change src to /logo-mark.svg */}
           <img
-            src={logoMark}
+            src="/logo-mark.png"
             alt="TryMeDating logo"
-            style={{ height: "clamp(22px, 2.2vw, 28px)", width: "auto", display: "block" }}
+            style={{
+              height: "clamp(22px, 2.2vw, 28px)",
+              width: "auto",
+              display: "block",
+            }}
           />
-          <div style={{ fontWeight: 900, fontSize: "clamp(18px, 2.3vw, 22px)", letterSpacing: 0.2, display: "flex", gap: 2 }}>
+          <div
+            style={{
+              fontWeight: 900,
+              fontSize: "clamp(18px, 2.3vw, 22px)",
+              letterSpacing: 0.2,
+              display: "flex",
+              gap: 2,
+            }}
+          >
             <span style={{ color: "#0f766e" }}>Try</span>
             <span style={{ color: "#0f766e" }}>Me</span>
             <span style={{ color: "#f43f5e" }}>Dating</span>
           </div>
         </Link>
 
+        {/* Right side */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" style={navLinkStyle} end>Home</NavLink>
-          <NavLink to="/contact" style={navLinkStyle}>Contact</NavLink>
+          <NavLink to="/" style={navLinkStyle} end>
+            Home
+          </NavLink>
+
+          <NavLink to="/contact" style={navLinkStyle}>
+            Contact
+          </NavLink>
+
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={navLinkStyle}>Profile</NavLink>
-              <NavLink to="/settings" style={navLinkStyle}>Settings</NavLink>
-              <button type="button" className="btn btn-neutral" onClick={onSignOut} style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}>
+              <NavLink to="/profile" style={navLinkStyle}>
+                Profile
+              </NavLink>
+              <NavLink to="/settings" style={navLinkStyle}>
+                Settings
+              </NavLink>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={onSignOut}
+                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
+              >
                 Sign out
               </button>
             </>
@@ -46,8 +104,25 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               Sign in
             </NavLink>
           )}
-          {unread > 0 && (
-            <span title={`${unread} unread`} style={{ display: "inline-grid", placeItems: "center", minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 800, border: "1px solid var(--border)" }}>
+
+          {/* Optional tiny unread badge */}
+          {typeof unread === "number" && unread > 0 && (
+            <span
+              title={`${unread} unread`}
+              style={{
+                display: "inline-grid",
+                placeItems: "center",
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                borderRadius: 999,
+                background: "#ef4444",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+                border: "1px solid var(--border)",
+              }}
+            >
               {unread > 99 ? "99+" : unread}
             </span>
           )}
