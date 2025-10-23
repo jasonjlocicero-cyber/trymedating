@@ -35,13 +35,37 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand — forced back to the original text logo */}
+        {/* Brand: logo image + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
-          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 8 }}
+          style={{
+            textDecoration: "none",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            lineHeight: 1,
+          }}
         >
-          <div style={{ fontWeight: 900, fontSize: 20, lineHeight: 1 }}>
+          {/* If you saved as SVG, change src to /logo-mark.svg */}
+          <img
+            src="/logo-mark.png"
+            alt="TryMeDating logo"
+            style={{
+              height: "clamp(22px, 2.2vw, 28px)",
+              width: "auto",
+              display: "block",
+            }}
+          />
+          <div
+            style={{
+              fontWeight: 900,
+              fontSize: "clamp(18px, 2.3vw, 22px)",
+              letterSpacing: 0.2,
+              display: "flex",
+              gap: 2,
+            }}
+          >
             <span style={{ color: "#0f766e" }}>Try</span>
             <span style={{ color: "#0f766e" }}>Me</span>
             <span style={{ color: "#f43f5e" }}>Dating</span>
@@ -81,8 +105,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
             </NavLink>
           )}
 
-          {/* Optional: unread bubble next to a future Messages link
-              (kept here in case you decide to surface inbox in the header later) */}
+          {/* Optional tiny unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
@@ -108,6 +131,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
