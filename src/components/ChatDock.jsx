@@ -1011,7 +1011,6 @@ export default function ChatDock() {
                 onChange={(e) => { setText(e.target.value); pingTyping(); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); return; }
-                  // light ping on any other key
                   pingTyping();
                 }}
                 onBlur={stopTyping}
