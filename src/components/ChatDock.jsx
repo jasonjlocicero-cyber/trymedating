@@ -24,13 +24,13 @@ const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}
 /* ---------- avoid literal [ and ] in strings ---------- */
 const LB = "\x5B"; // '['
 const RB = "\x5D"; // ']'
-const TAG_END = RB + RB;           // "]]"
-const TAG_FILE = LB + LB + "file:";        // "[[file:"
-const TAG_MEDIA = LB + LB + "media:";      // "[[media:"
-const TAG_IMAGE = LB + LB + "image:";      // "[[image:"
-const TAG_IMG = LB + LB + "img:";          // "[[img:"
-const TAG_FILEPATH = LB + LB + "filepath:";// "[[filepath:"
-const TAG_DELETED = LB + LB + "deleted:";  // "[[deleted:"
+const TAG_END = RB + RB;                 // "]]"
+const TAG_FILE = LB + LB + "file:";      // "[[file:"
+const TAG_MEDIA = LB + LB + "media:";    // "[[media:"
+const TAG_IMAGE = LB + LB + "image:";    // "[[image:"
+const TAG_IMG = LB + LB + "img:";        // "[[img:"
+const TAG_FILEPATH = LB + LB + "filepath:"; // "[[filepath:"
+const TAG_DELETED = LB + LB + "deleted:";   // "[[deleted:"
 
 /* ---------- tiny helpers (no regex literals) ---------- */
 function isAllowedMime(m) {
@@ -113,7 +113,7 @@ function getAttachmentMeta(body) {
     try { return JSON.parse(decodeURIComponent(body.slice(TAG_FILE.length, -2))); } catch {}
   }
 
-  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
+  // Legacy A: [[media:<json>]]
   if (body.startsWith(TAG_MEDIA)) {
     try {
       const v = JSON.parse(decodeURIComponent(body.slice(TAG_MEDIA.length, -2)));
@@ -143,7 +143,6 @@ function getAttachmentMeta(body) {
 
   // Legacy D: direct public storage URL in plain text
   let raw = (body || "").trim();
-  // strip trailing ']' that might be left if pasted from [[...]]
   const rb = RB; // "]"
   while (raw.endsWith(rb)) raw = raw.slice(0, -1);
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
@@ -156,18 +155,15 @@ function getAttachmentMeta(body) {
         const path = parts.slice(objIdx + 3).join("/");
         return { url: u.href, path, bucket, name: path.split("/").pop() };
       }
-      // Not a standard storage URL; still render as link
       return { url: u.href, name: u.pathname.split("/").pop() || "file" };
-    } catch {
-      // fall through
-    }
+    } catch {}
   }
 
   return null;
 }
 
 /* ----------------------------- linkifying ---------------------------- */
-const TRAIL_CHARS = ").,!?;:" + RB; // includes ']'
+const TRAIL_CHARS = ").,!?;:" + RB; // include ']'
 function linkifyJSX(text) {
   if (!text) return null;
   const pieces = splitPreserveWhitespace(text);
@@ -196,11 +192,7 @@ function linkifyJSX(text) {
       if (trailing) out.push(trailing);
     } else if (isLikelyEmail(trimmed)) {
       out.push(
-        <a
-          key={`lnk-${key++}`}
-          href={`mailto:${trimmed}`}
-          style={{ textDecoration: "underline" }}
-        >
+        <a key={`lnk-${key++}`} href={`mailto:${trimmed}`} style={{ textDecoration: "underline" }}>
           {trimmed}
         </a>
       );
@@ -388,14 +380,18 @@ export default function ChatDock() {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
-  // sessions count (for banner)
+  // sessions banner + typing
   const [sessionCount, setSessionCount] = useState(1);
-
-  // NEW: banner visibility persisted per pair
   const [hidePrevBanner, setHidePrevBanner] = useState(false);
+  const [partnerTyping, setPartnerTyping] = useState(false);
 
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
+
+  // typing channel refs
+  const typingChRef = useRef(null);
+  const typingTimerRef = useRef(null);
+  const lastTypingSentRef = useRef(0);
 
   /* auth */
   useEffect(() => {
@@ -498,7 +494,7 @@ export default function ChatDock() {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length); // banner count
+    setSessionCount(connIds.length);
     if (!connIds.length) { setItems([]); return; }
 
     const { data } = await supabase
@@ -537,6 +533,45 @@ export default function ChatDock() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
 
+  /* ------------------------ typing indicator (realtime) ------------------------ */
+  useEffect(() => {
+    if (!conn?.id || !myId || !peer) return;
+    const name = `typing:${conn.id}`;
+    const ch = supabase
+      .channel(name)
+      .on("broadcast", { event: "typing" }, (payload) => {
+        const s = payload?.payload?.sender;
+        if (s && s !== myId) {
+          setPartnerTyping(true);
+          if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+          typingTimerRef.current = setTimeout(() => setPartnerTyping(false), 2000);
+        }
+      })
+      .on("broadcast", { event: "stop" }, (payload) => {
+        const s = payload?.payload?.sender;
+        if (s && s !== myId) setPartnerTyping(false);
+      })
+      .subscribe();
+    typingChRef.current = ch;
+    return () => {
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingChRef.current && supabase.removeChannel(typingChRef.current);
+      typingChRef.current = null;
+    };
+  }, [conn?.id, myId, peer]);
+
+  const pingTyping = () => {
+    const now = Date.now();
+    if (!typingChRef.current) return;
+    if (now - (lastTypingSentRef.current || 0) < 1200) return; // throttle ~1.2s
+    lastTypingSentRef.current = now;
+    typingChRef.current.send({ type: "broadcast", event: "typing", payload: { sender: myId } });
+  };
+  const stopTyping = () => {
+    if (!typingChRef.current) return;
+    typingChRef.current.send({ type: "broadcast", event: "stop", payload: { sender: myId } });
+  };
+
   /* -------------------------------- send -------------------------------- */
   const canSend = useMemo(
     () => !!myId && !!conn?.id && ACCEPTED.has(status) && !!text.trim() && !sending,
@@ -553,6 +588,7 @@ export default function ChatDock() {
       const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
+      stopTyping();
     } catch (err) {
       alert(err.message ?? "Failed to send");
       console.error(err);
@@ -873,14 +909,14 @@ export default function ChatDock() {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
+          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 380 }}>
             <div
               ref={scrollerRef}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
               style={{
                 border: "1px solid var(--border)", borderRadius: 12, padding: 12,
-                overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 260,
+                overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 280,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
@@ -918,14 +954,46 @@ export default function ChatDock() {
                         }}
                       >
                         {linkifyJSX(m.body)}
-                        <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4, textAlign: mine ? "right" : "left" }}>
-                          {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 10,
+                            alignItems: "center",
+                            fontSize: 11,
+                            opacity: 0.6,
+                            marginTop: 4,
+                            justifyContent: mine ? "flex-end" : "flex-start",
+                          }}
+                        >
+                          <span>{new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}</span>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard?.writeText?.(m.body || "")}
+                            title="Copy message"
+                            style={{
+                              border: "1px solid var(--border)",
+                              background: "#fff",
+                              color: "#111",
+                              borderRadius: 6,
+                              padding: "2px 6px",
+                              cursor: "pointer",
+                              fontWeight: 700,
+                              fontSize: 10,
+                              lineHeight: 1,
+                            }}
+                          >
+                            Copy
+                          </button>
                         </div>
                       </div>
                     )}
                   </div>
                 );
               })}
+
+              {partnerTyping && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#374151" }}>Typing…</div>
+              )}
             </div>
 
             {/* composer (Enter=send, Shift+Enter=newline) */}
@@ -940,8 +1008,13 @@ export default function ChatDock() {
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                onChange={(e) => { setText(e.target.value); pingTyping(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); return; }
+                  // light ping on any other key
+                  pingTyping();
+                }}
+                onBlur={stopTyping}
                 disabled={uploading}
                 style={{
                   flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px",
