@@ -16,78 +16,10 @@ const C = {
 };
 const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
 const otherPartyId = (row, my) =>
-  (row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester]);
-
+  row?.[C.requester] === my ? row?.[C.addressee] : row?.[C.requester];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
+const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
-
-/* ---------- avoid literal [ and ] in strings ---------- */
-const LB = "\x5B"; // '['
-const RB = "\x5D"; // ']'
-const TAG_END = RB + RB;                 // "]]"
-const TAG_FILE = LB + LB + "file:";      // "[[file:"
-const TAG_MEDIA = LB + LB + "media:";    // "[[media:"
-const TAG_IMAGE = LB + LB + "image:";    // "[[image:"
-const TAG_IMG = LB + LB + "img:";        // "[[img:"
-const TAG_FILEPATH = LB + LB + "filepath:"; // "[[filepath:"
-const TAG_DELETED = LB + LB + "deleted:";   // "[[deleted:"
-
-/* ---------- tiny helpers (no regex literals) ---------- */
-function isAllowedMime(m) {
-  return !!m && (m.startsWith("image/") || m === "application/pdf");
-}
-function isPdfName(name) {
-  const n = (name || "").toLowerCase();
-  return n.endsWith(".pdf");
-}
-function isImageName(name) {
-  const n = (name || "").toLowerCase();
-  return (
-    n.endsWith(".png") ||
-    n.endsWith(".jpg") ||
-    n.endsWith(".jpeg") ||
-    n.endsWith(".gif") ||
-    n.endsWith(".webp") ||
-    n.endsWith(".svg")
-  );
-}
-function trimTrailing(s, chars) {
-  if (!s) return { trimmed: s, trailing: "" };
-  let i = s.length - 1;
-  while (i >= 0 && chars.indexOf(s[i]) !== -1) i--;
-  return { trimmed: s.slice(0, i + 1), trailing: s.slice(i + 1) };
-}
-function isWhitespace(ch) {
-  return ch === " " || ch === "\n" || ch === "\t" || ch === "\r";
-}
-function splitPreserveWhitespace(str) {
-  const out = [];
-  let tok = "";
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    if (isWhitespace(ch)) {
-      if (tok) out.push(tok);
-      out.push(ch);
-      tok = "";
-    } else {
-      tok += ch;
-    }
-  }
-  if (tok) out.push(tok);
-  return out;
-}
-function isLikelyURL(s) {
-  return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("www.");
-}
-function isLikelyEmail(s) {
-  const at = s.indexOf("@");
-  if (at <= 0) return false;
-  const lastDot = s.lastIndexOf(".");
-  return lastDot > at + 1 && lastDot < s.length - 1;
-}
-function toAbsUrl(s) {
-  return s.startsWith("www.") ? `https://${s}` : s;
-}
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -95,28 +27,39 @@ function humanSize(bytes) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   let n = bytes;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
   const fixed = n >= 100 || i === 0 ? 0 : 1;
   return `${n.toFixed(fixed)} ${units[i]}`;
 }
 
 /* ---------------- message body encodings & parsing ---------------- */
-const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith(TAG_DELETED);
-const parseDeleted = (b) => { try { return JSON.parse(decodeURIComponent(b.slice(TAG_DELETED.length, -2))); } catch { return null; } };
+const isDeletedAttachment = (b) => typeof b === "string" && b.startsWith("[[deleted:");
+const parseDeleted = (b) => {
+  try {
+    return JSON.parse(decodeURIComponent(b.slice(10, -2)));
+  } catch {
+    return null;
+  }
+};
 
 /** Normalize various historical/legacy attachment formats into a common meta */
 function getAttachmentMeta(body) {
   if (typeof body !== "string") return null;
 
   // Canonical: [[file:<json>]]
-  if (body.startsWith(TAG_FILE)) {
-    try { return JSON.parse(decodeURIComponent(body.slice(TAG_FILE.length, -2))); } catch {}
+  if (body.startsWith("[[file:"))) {
+    try {
+      return JSON.parse(decodeURIComponent(body.slice(7, -2)));
+    } catch {}
   }
 
-  // Legacy A: [[media:<json>]]
-  if (body.startsWith(TAG_MEDIA)) {
+  // Legacy A: [[media:<json>]]  (e.g., { bucket, path, name, mime, bytes })
+  if (body.startsWith("[[media:"))) {
     try {
-      const v = JSON.parse(decodeURIComponent(body.slice(TAG_MEDIA.length, -2)));
+      const v = JSON.parse(decodeURIComponent(body.slice(8, -2)));
       return {
         name: v.name || v.filename || v.path?.split("/")?.pop(),
         type: v.type || v.mime,
@@ -128,7 +71,7 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy B: [[image:<url>]] or [[img:<url>]]
-  if (body.startsWith(TAG_IMAGE) || body.startsWith(TAG_IMG)) {
+  if (body.startsWith("[[image:") || body.startsWith("[[img:")) {
     const raw = decodeURIComponent(body.slice(body.indexOf(":") + 1, -2));
     if (raw.startsWith("http")) {
       return { url: raw, name: raw.split("/").pop(), type: "image/*" };
@@ -136,71 +79,61 @@ function getAttachmentMeta(body) {
   }
 
   // Legacy C: [[filepath:<storage-relative-path>]]
-  if (body.startsWith(TAG_FILEPATH)) {
-    const p = decodeURIComponent(body.slice(TAG_FILEPATH.length, -2));
+  if (body.startsWith("[[filepath:")) {
+    const p = decodeURIComponent(body.slice(11, -2));
     return { path: p, name: p.split("/").pop() };
   }
 
   // Legacy D: direct public storage URL in plain text
-  let raw = (body || "").trim();
-  const rb = RB; // "]"
-  while (raw.endsWith(rb)) raw = raw.slice(0, -1);
-  if (raw.startsWith("http://") || raw.startsWith("https://")) {
-    try {
-      const u = new URL(raw);
-      const parts = u.pathname.split("/").filter(Boolean);
-      const objIdx = parts.findIndex((p) => p === "object");
-      if (objIdx !== -1 && parts.length >= objIdx + 4) {
-        const bucket = parts[objIdx + 2];
-        const path = parts.slice(objIdx + 3).join("/");
-        return { url: u.href, path, bucket, name: path.split("/").pop() };
-      }
-      return { url: u.href, name: u.pathname.split("/").pop() || "file" };
-    } catch {}
+  const urlMatch = body.match(
+    /https?:\/\/[^\s]+\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^\s\]]+)/
+  );
+  if (urlMatch) {
+    const url = body.trim();
+    const bucket = urlMatch[1];
+    const path = urlMatch[2].replace(/\]+$/, "");
+    return { url, path, bucket, name: path.split("/").pop() };
   }
 
   return null;
 }
 
 /* ----------------------------- linkifying ---------------------------- */
-const TRAIL_CHARS = ").,!?;:" + RB; // include ']'
 function linkifyJSX(text) {
   if (!text) return null;
-  const pieces = splitPreserveWhitespace(text);
+  const LINK_RE =
+    /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
   const out = [];
-  let key = 0;
-  for (const piece of pieces) {
-    if (piece.length === 0) continue;
-    if (isWhitespace(piece)) {
-      out.push(piece);
-      continue;
-    }
-    const { trimmed, trailing } = trimTrailing(piece, TRAIL_CHARS);
-    if (isLikelyURL(trimmed)) {
-      const href = toAbsUrl(trimmed);
-      out.push(
-        <a
-          key={`lnk-${key++}`}
-          href={href}
-          target="_blank"
-          rel="nofollow noopener noreferrer"
-          style={{ textDecoration: "underline" }}
-        >
-          {trimmed}
-        </a>
-      );
-      if (trailing) out.push(trailing);
-    } else if (isLikelyEmail(trimmed)) {
-      out.push(
-        <a key={`lnk-${key++}`} href={`mailto:${trimmed}`} style={{ textDecoration: "underline" }}>
-          {trimmed}
-        </a>
-      );
-      if (trailing) out.push(trailing);
-    } else {
-      out.push(piece);
-    }
+  let last = 0,
+    m,
+    key = 0;
+  while ((m = LINK_RE.exec(text))) {
+    const raw = m[0];
+    const pre = text.slice(last, m.index);
+    if (pre) out.push(pre);
+    const trimmed = raw.replace(/[)\].,!?;:]+$/g, "");
+    const trailing = raw.slice(trimmed.length);
+    const isUrl = !!m[1];
+    const href = isUrl
+      ? trimmed.startsWith("www.")
+        ? `https://${trimmed}`
+        : trimmed
+      : `mailto:${trimmed}`;
+    out.push(
+      <a
+        key={`lnk-${key++}`}
+        href={href}
+        target="_blank"
+        rel="nofollow noopener noreferrer"
+        style={{ textDecoration: "underline" }}
+      >
+        {trimmed}
+      </a>
+    );
+    if (trailing) out.push(trailing);
+    last = m.index + raw.length;
   }
+  if (last < text.length) out.push(text.slice(last));
   return out;
 }
 
@@ -230,7 +163,16 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
 };
 
 const Pill = (txt, color) => (
-  <span style={{ padding: "2px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: color, color: "#111" }}>
+  <span
+    style={{
+      padding: "2px 8px",
+      borderRadius: 999,
+      fontSize: 12,
+      fontWeight: 700,
+      background: color,
+      color: "#111",
+    }}
+  >
     {txt}
   </span>
 );
@@ -256,18 +198,34 @@ function PdfThumb({ url, name = "document.pdf" }) {
       <div
         aria-hidden
         style={{
-          width: 56, height: 72, border: "1px solid var(--border)", borderRadius: 6,
-          display: "grid", placeItems: "center", background: "#fff",
+          width: 56,
+          height: 72,
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          display: "grid",
+          placeItems: "center",
+          background: "#fff",
         }}
       >
         <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>
-          <path d="M6 2h7l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#ef4444"/>
-          <path d="M13 2v5h5" fill="#fff" opacity="0.35"/>
-          <text x="12" y="18" textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">PDF</text>
+          <path d="M6 2h7l5 5v15a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#ef4444" />
+          <path d="M13 2v5h5" fill="#fff" opacity="0.35" />
+          <text x="12" y="18" textAnchor="middle" fontSize="7" fontWeight="700" fill="#fff">
+            PDF
+          </text>
         </svg>
       </div>
       <div style={{ display: "grid" }}>
-        <span style={{ fontWeight: 600, color: "#111", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span
+          style={{
+            fontWeight: 600,
+            color: "#111",
+            maxWidth: 360,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           {name}
         </span>
         <span style={{ fontSize: 12, color: "#374151" }}>Open</span>
@@ -284,7 +242,10 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   useEffect(() => {
     let alive = true;
     async function refresh() {
-      if (meta?.url && !meta?.path) { setUrl(meta.url); return; }
+      if (meta?.url && !meta?.path) {
+        setUrl(meta.url);
+        return;
+      }
       if (meta?.path) {
         try {
           const u = await signedUrlForPath(meta.path, 3600); // 1h
@@ -294,7 +255,10 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     }
     refresh();
     const id = setInterval(() => setRefreshTick((n) => n + 1), 55 * 60 * 1000);
-    return () => { alive = false; clearInterval(id); };
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, [meta?.path, meta?.url, refreshTick]);
 
   const handleImgError = () => setRefreshTick((n) => n + 1);
@@ -302,14 +266,21 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 
   const isPDF =
     (meta?.type && meta.type.toLowerCase() === "application/pdf") ||
-    isPdfName(meta?.name || "") ||
-    (meta?.url && isPdfName(meta.url));
+    /\.pdf$/i.test(meta?.name || "") ||
+    (meta?.url && /\.pdf(?:$|\?)/i.test(meta.url));
 
   return (
     <div
       style={{
-        maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)",
-        background: mine ? "#eef6ff" : "#f8fafc", whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 14, lineHeight: 1.4,
+        maxWidth: 520,
+        padding: "8px 10px",
+        borderRadius: 12,
+        border: "1px solid var(--border)",
+        background: mine ? "#eef6ff" : "#f8fafc",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        fontSize: 14,
+        lineHeight: 1.4,
       }}
     >
       {/* header */}
@@ -321,16 +292,39 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         <div style={{ display: "flex", gap: 6 }}>
           {meta?.path && (
             <button
-              type="button" title="Refresh link" onClick={() => setRefreshTick((n) => n + 1)}
-              style={{ border: "1px solid var(--border)", background: "#f3f4f6", color: "#111", borderRadius: 8, padding: "4px 8px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+              type="button"
+              title="Refresh link"
+              onClick={() => setRefreshTick((n) => n + 1)}
+              style={{
+                border: "1px solid var(--border)",
+                background: "#f3f4f6",
+                color: "#111",
+                borderRadius: 8,
+                padding: "4px 8px",
+                fontWeight: 700,
+                fontSize: 12,
+                cursor: "pointer",
+              }}
             >
               ⟳
             </button>
           )}
           {mine && canDelete && (
             <button
-              type="button" onClick={() => onDelete(meta)} disabled={deleting} title="Delete attachment"
-              style={{ border: "1px solid var(--border)", background: deleting ? "#cbd5e1" : "#fee2e2", color: "#111", borderRadius: 8, padding: "4px 8px", cursor: deleting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 12 }}
+              type="button"
+              onClick={() => onDelete(meta)}
+              disabled={deleting}
+              title="Delete attachment"
+              style={{
+                border: "1px solid var(--border)",
+                background: deleting ? "#cbd5e1" : "#fee2e2",
+                color: "#111",
+                borderRadius: 8,
+                padding: "4px 8px",
+                cursor: deleting ? "not-allowed" : "pointer",
+                fontWeight: 700,
+                fontSize: 12,
+              }}
             >
               🗑️
             </button>
@@ -343,10 +337,22 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         {url ? (
           isPDF ? (
             <PdfThumb url={url} name={meta?.name || "document.pdf"} />
-          ) : (meta?.type?.startsWith?.("image/") || isImageName(meta?.name || "")) ? (
-            <img src={url} alt={meta?.name || "image"} onError={handleImgError} style={{ maxWidth: 360, borderRadius: 8 }} />
+          ) : meta?.type?.startsWith?.("image/") ||
+            /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "") ? (
+            <img
+              src={url}
+              alt={meta?.name || "image"}
+              onError={handleImgError}
+              style={{ maxWidth: 360, borderRadius: 8 }}
+            />
           ) : (
-            <a href={url} target="_blank" rel="noreferrer" onClick={() => setRefreshTick((n) => n + 1)} style={{ fontWeight: 600 }}>
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setRefreshTick((n) => n + 1)}
+              style={{ fontWeight: 600 }}
+            >
               Open file
             </a>
           )
@@ -380,32 +386,41 @@ export default function ChatDock() {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
-  // sessions banner + typing
+  // sessions count (for banner)
   const [sessionCount, setSessionCount] = useState(1);
+
+  // NEW: banner visibility persisted per pair
   const [hidePrevBanner, setHidePrevBanner] = useState(false);
-  const [partnerTyping, setPartnerTyping] = useState(false);
 
   const scrollerRef = useRef(null);
   const [autoTried, setAutoTried] = useState(false);
 
-  // typing channel refs
-  const typingChRef = useRef(null);
-  const typingTimerRef = useRef(null);
+  // TYPING: state/refs
+  const [peerTyping, setPeerTyping] = useState(false);
+  const typingTimeoutRef = useRef(null);
+  const typingChannelRef = useRef(null);
   const lastTypingSentRef = useRef(0);
 
   /* auth */
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (mounted) setMe(user ?? null);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   /* when peer/myId change, load banner hidden flag */
   useEffect(() => {
-    if (!myId || !peer) { setHidePrevBanner(false); return; }
+    if (!myId || !peer) {
+      setHidePrevBanner(false);
+      return;
+    }
     try {
       const stored = localStorage.getItem(bannerKey(myId, peer));
       setHidePrevBanner(stored === "1");
@@ -416,7 +431,9 @@ export default function ChatDock() {
 
   const dismissBanner = () => {
     setHidePrevBanner(true);
-    try { localStorage.setItem(bannerKey(myId, peer), "1"); } catch {}
+    try {
+      localStorage.setItem(bannerKey(myId, peer), "1");
+    } catch {}
   };
 
   /* auto-resume latest connection */
@@ -440,28 +457,36 @@ export default function ChatDock() {
   }, [autoTried, myId, peer]);
 
   /* fetch + subscribe connection */
-  const fetchLatestConn = useCallback(async (uid) => {
-    uid = toId(uid);
-    if (!uid || !peer) return;
-    const pairOr =
-      `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
-      `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
-    let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
-    q = q.order(C.updatedAt, { ascending: false }).order(C.createdAt, { ascending: false });
-    const { data } = await q.limit(1);
-    setConn(data?.[0] ?? null);
-  }, [peer]);
+  const fetchLatestConn = useCallback(
+    async (uid) => {
+      uid = toId(uid);
+      if (!uid || !peer) return;
+      const pairOr =
+        `and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),` +
+        `and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid})`;
+      let q = supabase.from(CONN_TABLE).select("*").or(pairOr);
+      q = q.order(C.updatedAt, { ascending: false }).order(C.createdAt, { ascending: false });
+      const { data } = await q.limit(1);
+      setConn(data?.[0] ?? null);
+    },
+    [peer]
+  );
 
-  const subscribeConn = useCallback((uid) => {
-    uid = toId(uid);
-    if (!uid || !peer) return () => {};
-    const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
-    const ch = supabase
-      .channel(`conn:${uid}<->${peer}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
-      .subscribe();
-    return () => supabase.removeChannel(ch);
-  }, [peer, fetchLatestConn]);
+  const subscribeConn = useCallback(
+    (uid) => {
+      uid = toId(uid);
+      if (!uid || !peer) return () => {};
+      const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
+      const ch = supabase
+        .channel(`conn:${uid}<->${peer}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () =>
+          fetchLatestConn(uid)
+        )
+        .subscribe();
+      return () => supabase.removeChannel(ch);
+    },
+    [peer, fetchLatestConn]
+  );
 
   useEffect(() => {
     if (!myId || !peer) return;
@@ -494,8 +519,11 @@ export default function ChatDock() {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length);
-    if (!connIds.length) { setItems([]); return; }
+    setSessionCount(connIds.length); // banner count
+    if (!connIds.length) {
+      setItems([]);
+      return;
+    }
 
     const { data } = await supabase
       .from("messages")
@@ -533,43 +561,44 @@ export default function ChatDock() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
 
-  /* ------------------------ typing indicator (realtime) ------------------------ */
+  /* ----------------------- TYPING: realtime broadcast --------------------- */
   useEffect(() => {
-    if (!conn?.id || !myId || !peer) return;
-    const name = `typing:${conn.id}`;
-    const ch = supabase
-      .channel(name)
-      .on("broadcast", { event: "typing" }, (payload) => {
-        const s = payload?.payload?.sender;
-        if (s && s !== myId) {
-          setPartnerTyping(true);
-          if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-          typingTimerRef.current = setTimeout(() => setPartnerTyping(false), 2000);
-        }
-      })
-      .on("broadcast", { event: "stop" }, (payload) => {
-        const s = payload?.payload?.sender;
-        if (s && s !== myId) setPartnerTyping(false);
-      })
-      .subscribe();
-    typingChRef.current = ch;
-    return () => {
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      typingChRef.current && supabase.removeChannel(typingChRef.current);
-      typingChRef.current = null;
-    };
-  }, [conn?.id, myId, peer]);
+    if (!conn?.id) return;
+    const ch = supabase.channel(`typing:${conn.id}`, {
+      config: { broadcast: { self: true } },
+    });
 
-  const pingTyping = () => {
+    ch.on("broadcast", { event: "typing" }, (payload) => {
+      const uid = payload?.payload?.userId;
+      if (uid && uid !== myId) {
+        setPeerTyping(true);
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => setPeerTyping(false), 2500);
+      }
+    });
+
+    ch.subscribe();
+    typingChannelRef.current = ch;
+
+    return () => {
+      try {
+        supabase.removeChannel(ch);
+      } catch {}
+      typingChannelRef.current = null;
+      clearTimeout(typingTimeoutRef.current);
+    };
+  }, [conn?.id, myId]);
+
+  const sendTyping = () => {
     const now = Date.now();
-    if (!typingChRef.current) return;
-    if (now - (lastTypingSentRef.current || 0) < 1200) return; // throttle ~1.2s
+    if (!typingChannelRef.current) return;
+    if (now - lastTypingSentRef.current < 1000) return; // 1s throttle
+    typingChannelRef.current.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { userId: myId },
+    });
     lastTypingSentRef.current = now;
-    typingChRef.current.send({ type: "broadcast", event: "typing", payload: { sender: myId } });
-  };
-  const stopTyping = () => {
-    if (!typingChRef.current) return;
-    typingChRef.current.send({ type: "broadcast", event: "stop", payload: { sender: myId } });
   };
 
   /* -------------------------------- send -------------------------------- */
@@ -588,7 +617,6 @@ export default function ChatDock() {
       const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
-      stopTyping();
     } catch (err) {
       alert(err.message ?? "Failed to send");
       console.error(err);
@@ -597,14 +625,27 @@ export default function ChatDock() {
     }
   };
 
-  const isMine = (m) => (m.sender === myId) || (m.sender_id === myId);
+  const isMine = (m) => m.sender === myId || m.sender_id === myId;
+
+  // COPY: clipboard helper
+  const copyBody = async (txt) => {
+    try {
+      await navigator.clipboard.writeText(txt || "");
+    } catch {}
+  };
 
   /* -------------------- attachments: upload / delete -------------------- */
   const pickAttachment = async (file) => {
     try {
       if (!conn?.id || !file) return;
-      if (file.size > MAX_UPLOAD_BYTES) { alert("File is too large (max 10MB)."); return; }
-      if (!isAllowedMime(file.type)) { alert("Images or PDFs only."); return; }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        alert("File is too large (max 10MB).");
+        return;
+      }
+      if (!ALLOWED.test(file.type)) {
+        alert("Images or PDFs only.");
+        return;
+      }
 
       setUploading(true);
       setUploadPct(5);
@@ -620,10 +661,13 @@ export default function ChatDock() {
 
       const recip = otherPartyId(conn, myId);
       const meta = { name: file.name, type: file.type, size: file.size, path };
-      const body = `${TAG_FILE}${encodeURIComponent(JSON.stringify(meta))}${TAG_END}`;
+      const body = `[[file:${encodeURIComponent(JSON.stringify(meta))}]]`;
 
       const { error } = await supabase.from("messages").insert({
-        connection_id: conn.id, sender: myId, recipient: recip, body,
+        connection_id: conn.id,
+        sender: myId,
+        recipient: recip,
+        body,
       });
       if (error) throw error;
 
@@ -640,31 +684,45 @@ export default function ChatDock() {
 
   const deleteAttachment = async (meta) => {
     if (!meta?.path || !conn?.id) return;
-    setDeletingPaths((s) => { const n = new Set(s); n.add(meta.path); return n; });
+    setDeletingPaths((s) => {
+      const n = new Set(s);
+      n.add(meta.path);
+      return n;
+    });
     try {
       const { error: delErr } = await supabase.storage.from("chat-media").remove([meta.path]);
       if (delErr) throw delErr;
 
       const recip = otherPartyId(conn, myId);
-      const tomb = `${TAG_DELETED}${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}${TAG_END}`;
+      const tomb = `[[deleted:${encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name }))}]]`;
       const { error: msgErr } = await supabase.from("messages").insert({
-        connection_id: conn.id, sender: myId, recipient: recip, body: tomb,
+        connection_id: conn.id,
+        sender: myId,
+        recipient: recip,
+        body: tomb,
       });
       if (msgErr) throw msgErr;
     } catch (err) {
       alert(err.message ?? "Delete failed");
       console.error(err);
     } finally {
-      setDeletingPaths((s) => { const n = new Set(s); n.delete(meta.path); return n; });
+      setDeletingPaths((s) => {
+        const n = new Set(s);
+        n.delete(meta.path);
+        return n;
+      });
     }
   };
 
   /* ------------------------------ drag & drop ------------------------------ */
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    const f = e.dataTransfer?.files?.[0];
-    if (f) pickAttachment(f);
-  }, [conn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      const f = e.dataTransfer?.files?.[0];
+      if (f) pickAttachment(f);
+    },
+    [conn?.id] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   /* ---------- actions (defined BEFORE connControls) ---------- */
   const requestConnect = async () => {
@@ -698,7 +756,12 @@ export default function ChatDock() {
       }
 
       // If the other side already requested me, accept that one
-      if (row && row[C.status] === "pending" && toId(row[C.requester]) === peer && toId(row[C.addressee]) === myId) {
+      if (
+        row &&
+        row[C.status] === "pending" &&
+        toId(row[C.requester]) === peer &&
+        toId(row[C.addressee]) === myId
+      ) {
         await acceptRequest(row.id);
         return;
       }
@@ -819,24 +882,48 @@ export default function ChatDock() {
           <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
         </>
       )}
-      {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
-      {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
+      {ACCEPTED.has(status) && (
+        <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />
+      )}
+      {(status === "rejected" || status === "disconnected") && (
+        <Btn onClick={reconnect} label="Reconnect" disabled={busy} />
+      )}
     </div>
   );
 
   /* UI guards */
   if (!me) {
     return (
-      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
-        <div className="muted" style={{ fontSize: 13 }}>Please sign in to use chat.</div>
+      <div
+        style={{
+          maxWidth: 720,
+          margin: "12px auto",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div className="muted" style={{ fontSize: 13 }}>
+          Please sign in to use chat.
+        </div>
       </div>
     );
   }
   if (!peer) {
     return (
-      <div style={{ maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)", borderRadius: 12, padding: 12 }}>
+      <div
+        style={{
+          maxWidth: 720,
+          margin: "12px auto",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
         <div style={{ fontWeight: 700, marginBottom: 6 }}>Messages</div>
-        <div className="muted" style={{ fontSize: 13 }}>Loading your latest conversation…</div>
+        <div className="muted" style={{ fontSize: 13 }}>
+          Loading your latest conversation…
+        </div>
       </div>
     );
   }
@@ -847,8 +934,12 @@ export default function ChatDock() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
       style={{
-        maxWidth: 720, margin: "12px auto", border: "1px solid var(--border)",
-        borderRadius: 12, padding: 12, background: "#fff",
+        maxWidth: 720,
+        margin: "12px auto",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        padding: 12,
+        background: "#fff",
       }}
     >
       {/* header */}
@@ -909,14 +1000,19 @@ export default function ChatDock() {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 380 }}>
+          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
             <div
               ref={scrollerRef}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
               style={{
-                border: "1px solid var(--border)", borderRadius: 12, padding: 12,
-                overflowY: "auto", background: "#fff", minHeight: 140, maxHeight: 280,
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                padding: 12,
+                overflowY: "auto",
+                background: "#fff",
+                minHeight: 140,
+                maxHeight: 260,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
@@ -927,8 +1023,20 @@ export default function ChatDock() {
                 if (isDeletedAttachment(m.body)) {
                   const meta = parseDeleted(m.body);
                   return (
-                    <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
-                      <div style={{ maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)", background: "#f3f4f6", fontSize: 13 }}>
+                    <div
+                      key={m.id}
+                      style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
+                    >
+                      <div
+                        style={{
+                          maxWidth: 520,
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "#f3f4f6",
+                          fontSize: 13,
+                        }}
+                      >
                         Attachment deleted{meta?.name ? `: ${meta.name}` : ""}.
                       </div>
                     </div>
@@ -937,7 +1045,10 @@ export default function ChatDock() {
 
                 const meta = getAttachmentMeta(m.body);
                 return (
-                  <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}>
+                  <div
+                    key={m.id}
+                    style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
+                  >
                     {meta ? (
                       <AttachmentPreview
                         meta={meta}
@@ -948,53 +1059,70 @@ export default function ChatDock() {
                     ) : (
                       <div
                         style={{
-                          maxWidth: 520, padding: "8px 10px", borderRadius: 12, border: "1px solid var(--border)",
-                          background: mine ? "#eef6ff" : "#f8fafc", whiteSpace: "pre-wrap", wordBreak: "break-word",
-                          fontSize: 14, lineHeight: 1.4,
+                          maxWidth: 520,
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: mine ? "#eef6ff" : "#f8fafc",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          fontSize: 14,
+                          lineHeight: 1.4,
                         }}
                       >
                         {linkifyJSX(m.body)}
+
                         <div
                           style={{
+                            marginTop: 6,
                             display: "flex",
-                            gap: 10,
+                            justifyContent: mine ? "flex-end" : "space-between",
                             alignItems: "center",
-                            fontSize: 11,
-                            opacity: 0.6,
-                            marginTop: 4,
-                            justifyContent: mine ? "flex-end" : "flex-start",
+                            gap: 8,
                           }}
                         >
-                          <span>{new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}</span>
+                          {/* COPY button */}
                           <button
                             type="button"
-                            onClick={() => navigator.clipboard?.writeText?.(m.body || "")}
+                            onClick={() => copyBody(m.body)}
                             title="Copy message"
                             style={{
                               border: "1px solid var(--border)",
                               background: "#fff",
                               color: "#111",
-                              borderRadius: 6,
-                              padding: "2px 6px",
+                              borderRadius: 8,
+                              padding: "2px 8px",
+                              fontSize: 12,
                               cursor: "pointer",
                               fontWeight: 700,
-                              fontSize: 10,
-                              lineHeight: 1,
                             }}
                           >
                             Copy
                           </button>
+
+                          <div
+                            style={{
+                              fontSize: 11,
+                              opacity: 0.6,
+                              textAlign: mine ? "right" : "left",
+                            }}
+                          >
+                            {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
                 );
               })}
-
-              {partnerTyping && (
-                <div style={{ marginTop: 6, fontSize: 12, color: "#374151" }}>Typing…</div>
-              )}
             </div>
+
+            {/* TYPING hint */}
+            {peerTyping && (
+              <div style={{ fontSize: 12, color: "#6b7280", margin: "0 0 0 6px" }}>
+                The other person is typing…
+              </div>
+            )}
 
             {/* composer (Enter=send, Shift+Enter=newline) */}
             <form
@@ -1008,24 +1136,40 @@ export default function ChatDock() {
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
-                onChange={(e) => { setText(e.target.value); pingTyping(); }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); return; }
-                  pingTyping();
+                onChange={(e) => {
+                  setText(e.target.value);
+                  sendTyping(); // TYPING: fire a broadcast ping
                 }}
-                onBlur={stopTyping}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
                 disabled={uploading}
                 style={{
-                  flex: 1, border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px",
-                  fontSize: 14, resize: "none", lineHeight: 1.35, maxHeight: 120, overflowY: "auto",
+                  flex: 1,
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  fontSize: 14,
+                  resize: "none",
+                  lineHeight: 1.35,
+                  maxHeight: 120,
+                  overflowY: "auto",
                 }}
               />
               <button
                 type="submit"
                 disabled={!canSend || uploading}
                 style={{
-                  padding: "10px 14px", borderRadius: 12, background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
-                  color: "#fff", border: "none", cursor: !canSend || uploading ? "not-allowed" : "pointer", fontWeight: 600,
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
+                  color: "#fff",
+                  border: "none",
+                  cursor: !canSend || uploading ? "not-allowed" : "pointer",
+                  fontWeight: 600,
                 }}
               >
                 Send
