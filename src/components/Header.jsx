@@ -1,64 +1,26 @@
 // src/components/Header.jsx
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
-/**
- * Header
- * Props:
- *  - me: auth user object (or null)
- *  - unread: number of unread messages (default 0)
- *  - onSignOut: () => Promise<void> | void
- */
-export default function Header({ me, unread = 0, onSignOut }) {
-  const authed = !!me?.id;
+export default function Header({ me, unread = 0, onSignOut = () => {} }) {
+  const loc = useLocation();
 
-  function openMessages() {
-    // Try multiple event names / hooks so we don't couple tightly
-    try {
-      window.dispatchEvent(new CustomEvent("open-chat"));
-      window.dispatchEvent(new CustomEvent("chat:open"));
-      window.dispatchEvent(new CustomEvent("tmd:open-chat"));
-    } catch (_) {
-      /* no-op */
-    }
-    // Optional global hook, if provided by ChatLauncher
-    if (typeof window.__openChat === "function") {
-      try { window.__openChat(); } catch (_) {}
-    }
-  }
-
-  const badge =
-    unread > 0 ? (
-      <span
-        title={`${unread} unread`}
-        style={{
-          position: "absolute",
-          top: -6,
-          right: -6,
-          minWidth: 18,
-          height: 18,
-          padding: "0 6px",
-          display: "grid",
-          placeItems: "center",
-          borderRadius: 9999,
-          background: "#ef4444",
-          color: "#fff",
-          fontSize: 11,
-          fontWeight: 800,
-          lineHeight: 1,
-          boxShadow: "0 0 0 2px #fff",
-        }}
-      >
-        {unread > 99 ? "99+" : unread}
-      </span>
-    ) : null;
+  const navLinkStyle = ({ isActive }) => ({
+    padding: "6px 10px",
+    borderRadius: 10,
+    textDecoration: "none",
+    fontWeight: 600,
+    color: isActive ? "#0f172a" : "#111827",
+    background: isActive ? "#eef2ff" : "transparent",
+    border: "1px solid var(--border)",
+  });
 
   return (
     <header
       style={{
         position: "sticky",
         top: 0,
-        zIndex: 10,
+        zIndex: 40,
         background: "#fff",
         borderBottom: "1px solid var(--border)",
       }}
@@ -73,79 +35,79 @@ export default function Header({ me, unread = 0, onSignOut }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand */}
-        <Link to="/" style={{ textDecoration: "none", color: "inherit" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              aria-hidden
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                display: "grid",
-                placeItems: "center",
-                background: "#f1f5f9",
-                border: "1px solid var(--border)",
-                fontWeight: 900,
-                fontSize: 14,
-              }}
-            >
-              💟
-            </div>
-            <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1 }}>
-              <span style={{ color: "#0f766e" }}>Try</span>
-              <span style={{ color: "#0f766e" }}>Me</span>
-              <span style={{ color: "#f43f5e" }}>Dating</span>
-            </div>
+        {/* Brand — forced back to the original text logo */}
+        <Link
+          to="/"
+          aria-label="TryMeDating home"
+          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <div style={{ fontWeight: 900, fontSize: 20, lineHeight: 1 }}>
+            <span style={{ color: "#0f766e" }}>Try</span>
+            <span style={{ color: "#0f766e" }}>Me</span>
+            <span style={{ color: "#f43f5e" }}>Dating</span>
           </div>
         </Link>
 
-        {/* Nav */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {authed ? (
+        {/* Right side */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <NavLink to="/" style={navLinkStyle} end>
+            Home
+          </NavLink>
+
+          <NavLink to="/contact" style={navLinkStyle}>
+            Contact
+          </NavLink>
+
+          {me?.id ? (
             <>
-              {/* Messages (opens ChatLauncher) with unread badge */}
-              <button
-                type="button"
-                onClick={openMessages}
-                className="btn btn-secondary"
-                aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
-                style={{ position: "relative" }}
-              >
-                <span>Messages</span>
-                {badge}
-              </button>
-
-              <Link className="btn btn-neutral" to="/profile">
+              <NavLink to="/profile" style={navLinkStyle}>
                 Profile
-              </Link>
-              <Link className="btn btn-neutral" to="/settings">
+              </NavLink>
+              <NavLink to="/settings" style={navLinkStyle}>
                 Settings
-              </Link>
-
+              </NavLink>
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-neutral"
                 onClick={onSignOut}
-                title="Sign out"
+                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
               >
                 Sign out
               </button>
             </>
           ) : (
-            <>
-              <Link className="btn btn-primary" to="/auth">
-                Sign in / Sign up
-              </Link>
-              <a className="btn btn-neutral" href="#how-it-works">
-                How it works
-              </a>
-            </>
+            <NavLink to="/auth" className="btn btn-primary" style={{ padding: "6px 12px", borderRadius: 10 }}>
+              Sign in
+            </NavLink>
           )}
-        </nav>
+
+          {/* Optional: unread bubble next to a future Messages link
+              (kept here in case you decide to surface inbox in the header later) */}
+          {typeof unread === "number" && unread > 0 && (
+            <span
+              title={`${unread} unread`}
+              style={{
+                display: "inline-grid",
+                placeItems: "center",
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                borderRadius: 999,
+                background: "#ef4444",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+                border: "1px solid var(--border)",
+              }}
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </div>
       </div>
     </header>
   );
 }
+
 
 
