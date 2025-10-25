@@ -4,34 +4,19 @@ import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * Email + password auth flows:
+ * Email+password auth with:
  * - Sign in
- * - Sign up (email confirmation supported)
- * - Forgot password (sends email)
- * - Reset password (after recovery link)
- *
- * Extras:
- * - `redirectTo` derives from VITE_SITE_URL (fallback to window.origin)
- * - Optional `?next=/path` to control post-auth landing
- * - Force session refresh after auth so the app reacts immediately
+ * - Sign up (with email confirmation if enabled)
+ * - Forgot password (sends reset email)
+ * - Password recovery flow (Supabase opens a temp session; we show "reset" form)
+ * Hardens redirects + handles SIGNED_IN/USER_UPDATED events to auto-navigate.
  */
 
 export default function AuthPage() {
   const nav = useNavigate()
   const loc = useLocation()
 
-  // For Netlify previews/production you can set VITE_SITE_URL in env; else fallback to current origin
-  const siteUrl =
-    (import.meta.env.VITE_SITE_URL && String(import.meta.env.VITE_SITE_URL)) ||
-    window.location.origin
-  const redirectTo = new URL('/auth', siteUrl).toString()
-
-  // Allow /auth?next=/chat to control the landing page after auth
-  const next =
-    new URLSearchParams(loc.search).get('next') ||
-    '/profile'
-
-  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot' | 'reset'>('signin')
+  const [mode, setMode] = useState('signin') // 'signin' | 'signup' | 'forgot' | 'reset'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -39,8 +24,10 @@ export default function AuthPage() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
 
-  // When Supabase redirects back with a recovery link, it opens a temp session.
-  // The auth listener will fire PASSWORD_RECOVERY and we show the reset form.
+  // Where Supabase should redirect back after email-confirm / password-reset links
+  const redirectTo = `${window.location.origin}/auth`
+
+  // Detect Supabase auth events (recovery + signed in after redirects)
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
@@ -50,20 +37,33 @@ export default function AuthPage() {
         setPassword('')
         setConfirm('')
       }
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        // If a magic link/confirmation just created a session, go to profile
+        nav('/profile', { replace: true })
+      }
     })
     return () => sub?.subscription?.unsubscribe?.()
-  }, [])
+  }, [nav])
 
-  // If already signed in, go to next
+  // If already signed in when visiting /auth, go to profile
   useEffect(() => {
     let mounted = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!mounted) return
-      if (user) nav(next, { replace: true })
+      if (user) nav('/profile', { replace: true })
     })()
     return () => { mounted = false }
-  }, [nav, next])
+  }, [nav])
+
+  // Optional: support URL hints like /auth?mode=signup
+  useEffect(() => {
+    const q = new URLSearchParams(loc.search)
+    const m = q.get('mode')
+    if (m && ['signin','signup','forgot','reset'].includes(m)) {
+      setMode(m)
+    }
+  }, [loc.search])
 
   const title = useMemo(() => {
     switch (mode) {
@@ -75,21 +75,16 @@ export default function AuthPage() {
     }
   }, [mode])
 
-  function switchMode(m: 'signin' | 'signup' | 'forgot' | 'reset') {
-    setMode(m)
-    setErr('')
-    setMsg('')
-  }
-
   async function doSignIn(e) {
     e.preventDefault()
     setErr(''); setMsg(''); setLoading(true)
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) throw error
-      // Force the session/user to be available immediately
+      // Ensure session is fresh, then navigate
       await supabase.auth.getUser()
-      nav(next, { replace: true })
+      setMsg('Signed in — redirecting…')
+      nav('/profile', { replace: true })
     } catch (e) {
       setErr(e.message || 'Failed to sign in')
     } finally {
@@ -107,18 +102,21 @@ export default function AuthPage() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: redirectTo }
+        options: {
+          emailRedirectTo: redirectTo, // ensures return to /auth after confirm
+          // shouldCreateUser: true (default)
+        }
       })
       if (error) throw error
 
       if (data.user && !data.session) {
         // Email confirmations ON
         setMsg('Check your email to confirm your account.')
-        switchMode('signin')
+        setMode('signin')
       } else {
-        // Auto-confirm enabled or got session
-        await supabase.auth.getUser()
-        nav(next, { replace: true })
+        // Confirmations OFF -> signed in immediately
+        setMsg('Account created — redirecting…')
+        nav('/profile', { replace: true })
       }
     } catch (e) {
       setErr(e.message || 'Failed to create account')
@@ -133,11 +131,11 @@ export default function AuthPage() {
     try {
       if (!email) throw new Error('Enter your account email first')
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo
+        redirectTo, // return to /auth; listener will switch to reset mode
       })
       if (error) throw error
       setMsg('Password reset email sent. Check your inbox.')
-      switchMode('signin')
+      setMode('signin')
     } catch (e) {
       setErr(e.message || 'Failed to send reset email')
     } finally {
@@ -153,9 +151,8 @@ export default function AuthPage() {
       if (password !== confirm) throw new Error('Passwords do not match')
       const { error } = await supabase.auth.updateUser({ password })
       if (error) throw error
-      await supabase.auth.getUser()
       setMsg('Password updated — you are signed in.')
-      nav(next, { replace: true })
+      nav('/profile', { replace: true })
     } catch (e) {
       setErr(e.message || 'Failed to update password')
     } finally {
@@ -173,8 +170,16 @@ export default function AuthPage() {
         {mode === 'reset'  && 'Choose a new password.'}
       </p>
 
-      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
-      {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
+      {err && (
+        <div className="helper-error" style={{ marginBottom: 12 }}>
+          {err}
+        </div>
+      )}
+      {msg && (
+        <div className="helper-success" style={{ marginBottom: 12 }}>
+          {msg}
+        </div>
+      )}
 
       {/* SIGN IN */}
       {mode === 'signin' && (
@@ -206,10 +211,159 @@ export default function AuthPage() {
             <button className="btn btn-primary" disabled={loading} type="submit">
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
-            <button type="button" className="btn btn-neutral" onClick={() => switchMode('forgot')}>
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={() => { setMode('forgot'); setErr(''); setMsg('') }}
+            >
               Forgot password
             </button>
             <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => { setMode('signup'); setErr(''); setMsg('') }}
+            >
+              Create account
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* SIGN UP */}
+      {mode === 'signup' && (
+        <form onSubmit={doSignUp} style={{ display: 'grid', gap: 12 }}>
+          <label className="form-label">
+            Email
+            <input
+              type="email"
+              className="input"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+          <label className="form-label">
+            Password
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </label>
+          <label className="form-label">
+            Confirm password
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              minLength={6}
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" disabled={loading} type="submit">
+              {loading ? 'Creating…' : 'Create account'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={() => { setMode('signin'); setErr(''); setMsg('') }}
+            >
+              Back to sign in
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* FORGOT */}
+      {mode === 'forgot' && (
+        <form onSubmit={doForgot} style={{ display: 'grid', gap: 12 }}>
+          <label className="form-label">
+            Account email
+            <input
+              type="email"
+              className="input"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              placeholder="you@example.com"
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" disabled={loading} type="submit">
+              {loading ? 'Sending…' : 'Send reset link'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={() => { setMode('signin'); setErr(''); setMsg('') }}
+            >
+              Back to sign in
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* RESET (after recovery link) */}
+      {mode === 'reset' && (
+        <form onSubmit={doReset} style={{ display: 'grid', gap: 12 }}>
+          <label className="form-label">
+            New password
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </label>
+          <label className="form-label">
+            Confirm new password
+            <input
+              type="password"
+              className="input"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+              minLength={6}
+            />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" disabled={loading} type="submit">
+              {loading ? 'Updating…' : 'Update password'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={() => { setMode('signin'); setErr(''); setMsg('') }}
+            >
+              Back to sign in
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div style={{ marginTop: 24 }}>
+        <Link className="btn btn-neutral" to="/">← Back to Home</Link>
+      </div>
+    </div>
+  )
+}
+
 
 
 
