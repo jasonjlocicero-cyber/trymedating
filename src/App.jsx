@@ -238,22 +238,31 @@ export default function App() {
   // unread count for messaging badge (used by Header via ChatLauncher)
   const [unread, setUnread] = useState(0)
 
+  // Safe auth bootstrap with fallback timer
   useEffect(() => {
-    let mounted = true
+    let alive = true
+    const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
 
-    async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!mounted) return
-      setMe(user || null)
-      setLoadingAuth(false)
-    }
-    loadUser()
+    ;(async () => {
+      try {
+        const res = await supabase.auth.getUser()
+        if (!alive) return
+        setMe(res?.data?.user || null)
+      } catch (err) {
+        console.error('[auth.getUser] failed:', err)
+      } finally {
+        if (alive) setLoadingAuth(false)
+      }
+    })()
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (!alive) return
       setMe(session?.user || null)
     })
+
     return () => {
-      mounted = false
+      alive = false
+      clearTimeout(safety)
       sub?.subscription?.unsubscribe?.()
     }
   }, [])
@@ -270,7 +279,11 @@ export default function App() {
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
-        {!loadingAuth && (
+        {loadingAuth ? (
+          <div style={{ padding: 24, display: 'grid', placeItems: 'center' }}>
+            <div className="muted">Loading…</div>
+          </div>
+        ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
 
