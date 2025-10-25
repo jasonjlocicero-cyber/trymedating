@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://trymedating.com/sitemap.xml
