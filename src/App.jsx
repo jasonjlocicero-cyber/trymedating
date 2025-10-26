@@ -18,6 +18,7 @@ import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage' // NEW
+import InviteQR from './pages/InviteQR'         // ← NEW
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -320,6 +321,12 @@ export default function App() {
             <Route
               path="/chat/handle/:handle"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+
+            {/* Invite QR (NEW) */}
+            <Route
+              path="/invite"
+              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
 
             {/* QR scan route to create a pending connection request */}
