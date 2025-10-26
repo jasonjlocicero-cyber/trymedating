@@ -1,59 +1,41 @@
 // src/components/QRShareCard.jsx
-import React, { useEffect, useState } from "react";
+import React, { useMemo } from "react";
 
 export default function QRShareCard({
   inviteUrl,
   title = "Scan to connect",
   caption = "Show this to someone you’ve met so they can request a connection.",
   size = 220,
-  colorDark = "#0f766e",
-  colorLight = "#ffffff",
 }) {
-  const [dataUrl, setDataUrl] = useState("");
-  const [fallbackUrl, setFallbackUrl] = useState("");
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    async function makeQR() {
-      setErr(""); setDataUrl(""); setFallbackUrl("");
-      if (!inviteUrl) return;
-
-      // Try local generator first (dynamic import so the app still builds if package missing)
-      try {
-        const mod = await import("qrcode"); // npm i qrcode (optional; we handle fallback)
-        const url = await mod.toDataURL(inviteUrl, {
-          width: size,
-          margin: 1,
-          color: { dark: colorDark, light: colorLight },
-        });
-        if (!cancelled) setDataUrl(url);
-        return;
-      } catch (e) {
-        // Fall back to a hosted QR PNG (no dependency, CSP must allow external images)
-        try {
-          const u = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(inviteUrl)}`;
-          if (!cancelled) setFallbackUrl(u);
-        } catch (e2) {
-          if (!cancelled) setErr("QR generation failed.");
-        }
-      }
-    }
-    makeQR();
-    return () => { cancelled = true; };
-  }, [inviteUrl, size, colorDark, colorLight]);
+  const fallbackUrl = useMemo(
+    () =>
+      inviteUrl
+        ? `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(
+            inviteUrl
+          )}`
+        : "",
+    [inviteUrl, size]
+  );
 
   if (!inviteUrl) return null;
 
   const copyLink = async () => {
-    try { await navigator.clipboard.writeText(inviteUrl); alert("Invite link copied!"); }
-    catch { alert(inviteUrl); }
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      alert("Invite link copied!");
+    } catch {
+      alert(inviteUrl);
+    }
   };
 
   const shareLink = async () => {
     if (navigator.share) {
-      try { await navigator.share({ title: "TryMeDating invite", url: inviteUrl }); } catch {}
-    } else { copyLink(); }
+      try {
+        await navigator.share({ title: "TryMeDating invite", url: inviteUrl });
+      } catch {}
+    } else {
+      copyLink();
+    }
   };
 
   return (
@@ -84,13 +66,11 @@ export default function QRShareCard({
             placeItems: "center",
           }}
         >
-          {dataUrl ? (
-            <img src={dataUrl} width={size} height={size} alt="Invite QR" />
-          ) : fallbackUrl ? (
+          {fallbackUrl ? (
             <img src={fallbackUrl} width={size} height={size} alt="Invite QR" />
           ) : (
             <div className="muted" style={{ width: size, height: size, display: "grid", placeItems: "center" }}>
-              {err || "Preparing…"}
+              Preparing…
             </div>
           )}
         </div>
@@ -120,3 +100,4 @@ export default function QRShareCard({
     </div>
   );
 }
+
