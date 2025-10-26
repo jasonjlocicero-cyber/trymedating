@@ -1,7 +1,8 @@
 // src/pages/InviteQR.jsx
-import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabaseClient'
+import QRShareCard from '../components/QRShareCard'
 
 export default function InviteQR() {
   const [me, setMe] = useState(null)
@@ -10,83 +11,86 @@ export default function InviteQR() {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
+  // ensure user is signed in
   useEffect(() => {
     let alive = true
     ;(async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { navigate('/auth?next=' + encodeURIComponent('/invite')); return }
+      if (!user) {
+        navigate('/auth?next=' + encodeURIComponent('/invite'))
+        return
+      }
       if (!alive) return
       setMe(user)
     })()
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      if (!s?.user) navigate('/auth?next=' + encodeURIComponent('/invite'))
-      setMe(s?.user || null)
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (!session?.user) navigate('/auth?next=' + encodeURIComponent('/invite'))
+      setMe(session?.user || null)
     })
-    return () => sub.subscription.unsubscribe()
+    return () => sub?.subscription?.unsubscribe?.()
   }, [navigate])
 
+  // load or create an active invite code
   useEffect(() => {
     if (!me?.id) return
     ;(async () => {
-      setLoading(true); setError('')
-      // Try to reuse an active code
-      const { data: existing, error: selErr } = await supabase
-        .from('invite_codes')
-        .select('code')
-        .eq('owner', me.id)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle()
-      if (selErr) setError(selErr.message)
-
-      if (existing?.code) {
-        setCode(existing.code)
-      } else {
-        // Create a fresh one
-        const { data: created, error: insErr } = await supabase
+      setLoading(true)
+      setError('')
+      try {
+        const { data: existing, error: selErr } = await supabase
           .from('invite_codes')
-          .insert({ owner: me.id })
           .select('code')
-          .single()
-        if (insErr) setError(insErr.message)
-        setCode(created?.code || '')
+          .eq('owner', me.id)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle()
+
+        if (selErr) throw selErr
+
+        if (existing?.code) {
+          setCode(existing.code)
+        } else {
+          const { data: created, error: insErr } = await supabase
+            .from('invite_codes')
+            .insert({ owner: me.id })
+            .select('code')
+            .single()
+          if (insErr) throw insErr
+          setCode(created?.code || '')
+        }
+      } catch (e) {
+        setError(e.message || 'Failed to prepare your invite.')
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     })()
   }, [me?.id])
 
-  const link = code ? `${window.location.origin}/connect?code=${code}` : ''
-  const qrSrc = link
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(link)}`
-    : ''
+  const inviteUrl = useMemo(
+    () => (code ? `${window.location.origin}/connect?code=${code}` : ''),
+    [code]
+  )
 
   return (
-    <div className="container" style={{ padding: '32px 0' }}>
+    <div className="container" style={{ padding: '32px 0', maxWidth: 720 }}>
       <h1 style={{ marginBottom: 12 }}>
         <span style={{ color: 'var(--secondary)' }}>Share</span>{' '}
         <span style={{ color: 'var(--primary)' }}>Your QR</span>
       </h1>
 
       {loading && <div className="card">Preparing your invite…</div>}
-      {error && <div className="card" style={{ borderColor: '#e11d48', color:'#e11d48' }}>{error}</div>}
+      {error && (
+        <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>
+          {error}
+        </div>
+      )}
 
       {!loading && !error && code && (
-        <div className="card" style={{ display:'grid', justifyItems:'center', gap: 16 }}>
-          <img src={qrSrc} alt="QR for invite" width={220} height={220} style={{ borderRadius: 12, border: '1px solid var(--border)' }} />
-          <div style={{ textAlign:'center' }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Let them scan this to connect</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{link}</div>
-          </div>
-          <div style={{ display:'flex', gap: 12 }}>
-            <a className="btn" href={link} target="_blank" rel="noreferrer">Open link</a>
-            <button
-              className="btn btn-primary"
-              onClick={() => navigator.clipboard.writeText(link)}
-            >
-              Copy link
-            </button>
-          </div>
-        </div>
+        <QRShareCard
+          inviteUrl={inviteUrl}
+          title="Let them scan this to request a connection"
+          caption="You can copy or share the link below as well."
+        />
       )}
     </div>
   )
