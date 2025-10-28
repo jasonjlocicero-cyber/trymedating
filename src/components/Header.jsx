@@ -15,6 +15,18 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     border: "1px solid var(--border)",
   });
 
+  // Brand-pink CTA style (matches "Dating" color)
+  const brandPink = "#f43f5e";
+  const pinkCtaStyle = {
+    padding: "6px 12px",
+    borderRadius: 10,
+    fontWeight: 800,
+    textDecoration: "none",
+    background: brandPink,
+    border: `1px solid ${brandPink}`,
+    color: "#fff",
+  };
+
   return (
     <header
       style={{
@@ -47,7 +59,6 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
             lineHeight: 1,
           }}
         >
-          {/* If you saved as SVG, change src to /logo-mark.svg */}
           <img
             src="/logo-mark.png"
             alt="TryMeDating logo"
@@ -68,7 +79,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           >
             <span style={{ color: "#0f766e" }}>Try</span>
             <span style={{ color: "#0f766e" }}>Me</span>
-            <span style={{ color: "#f43f5e" }}>Dating</span>
+            <span style={{ color: brandPink }}>Dating</span>
           </div>
         </Link>
 
@@ -90,6 +101,12 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               <NavLink to="/settings" style={navLinkStyle}>
                 Settings
               </NavLink>
+
+              {/* Brand-pink primary CTA when logged in */}
+              <Link to="/invite" className="btn" style={pinkCtaStyle}>
+                My Invite QR
+              </Link>
+
               <button
                 type="button"
                 className="btn btn-neutral"
@@ -100,9 +117,10 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               </button>
             </>
           ) : (
-            <NavLink to="/auth" className="btn btn-primary" style={{ padding: "6px 12px", borderRadius: 10 }}>
+            // Brand-pink primary CTA when logged out
+            <Link to="/auth" className="btn" style={pinkCtaStyle}>
               Sign in
-            </NavLink>
+            </Link>
           )}
 
           {/* Optional tiny unread badge */}
@@ -131,6 +149,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
