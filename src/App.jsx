@@ -17,7 +17,7 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
-import ChatDockPage from './pages/ChatDockPage' // NEW
+import ChatDockPage from './pages/ChatDockPage' // existing
 import InviteQR from './pages/InviteQR'         // ← NEW
 
 // Components/Routes
