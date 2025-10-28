@@ -1,4 +1,3 @@
-// src/components/QRShareCard.jsx
 import QRCode from 'react-qr-code'
 
 export default function QRShareCard({
