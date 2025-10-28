@@ -18,12 +18,16 @@ import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
-import InviteQR from './pages/InviteQR'           // ← NEW
+import InviteQR from './pages/InviteQR'        // NEW
+import DebugQR from './pages/DebugQR'          // NEW
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
 import Connect from './routes/Connect' // QR route to create a connection request
 
+/** --------------------------
+ * Home (hero + features + CTA)
+ * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
 
@@ -79,7 +83,7 @@ function Home({ me }) {
               <>
                 <Link className="btn btn-primary" to="/profile">Go to Profile</Link>
                 <Link className="btn btn-secondary" to="/settings">Settings</Link>
-                <Link className="btn btn-neutral" to="/invite">My QR</Link> {/* quick access */}
+                <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>{/* NEW quick access */}
               </>
             )}
           </div>
@@ -191,6 +195,7 @@ function Home({ me }) {
   )
 }
 
+/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -226,11 +231,17 @@ function FeatureCard({ title, text, icon }) {
   )
 }
 
+/** --------------------------
+ * App Root
+ * ------------------------- */
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
+
+  // unread count for messaging badge (used by Header via ChatLauncher)
   const [unread, setUnread] = useState(0)
 
+  // Safe auth bootstrap with fallback timer
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -267,6 +278,7 @@ export default function App() {
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
+      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
@@ -281,7 +293,7 @@ export default function App() {
             {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
-            {/* Private routes */}
+            {/* Private routes (basic guard) */}
             <Route
               path="/profile"
               element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
@@ -299,7 +311,7 @@ export default function App() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
 
-            {/* Chat */}
+            {/* Direct chat routes */}
             <Route
               path="/chat/:peerId"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
@@ -313,11 +325,16 @@ export default function App() {
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
 
-            {/* QR routes */}
+            {/* Invite QR (NEW) */}
             <Route
               path="/invite"
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
+
+            {/* QR Smoke Test (NEW) */}
+            <Route path="/debug-qr" element={<DebugQR />} />
+
+            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
             {/* Fallback */}
@@ -327,10 +344,13 @@ export default function App() {
       </main>
 
       <Footer />
+
+      {/* Bottom-right chat bubble (render once) */}
       <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </ChatProvider>
   )
 }
+
 
 
 
