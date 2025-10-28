@@ -83,7 +83,14 @@ function Home({ me }) {
               <>
                 <Link className="btn btn-primary" to="/profile">Go to Profile</Link>
                 <Link className="btn btn-secondary" to="/settings">Settings</Link>
-                <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>{/* quick access */}
+                {/* Styled to match the 'Dating' pink */}
+                <Link
+                  className="btn"
+                  to="/invite"
+                  style={{ background: '#f43f5e', borderColor: '#f43f5e', color: '#fff' }}
+                >
+                  My Invite QR
+                </Link>
               </>
             )}
           </div>
@@ -325,13 +332,13 @@ export default function App() {
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
 
-            {/* Invite QR */}
+            {/* Invite QR (NEW) */}
             <Route
               path="/invite"
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
 
-            {/* QR Smoke Test (always renders a QR) */}
+            {/* QR Smoke Test (NEW) */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
             {/* QR scan route to create a pending connection request */}
