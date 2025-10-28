@@ -1,34 +1,93 @@
 // src/components/QRShareCard.jsx
-import React from 'react'
+import React, { useMemo, useRef } from 'react'
 import QRCode from 'react-qr-code'
 
-export default function QRShareCard({ value, size = 220, label = 'Scan to connect', className = '' }) {
-  if (!value) return null
-  const png = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}`
+/**
+ * Renders a QR code with helper actions.
+ * Props:
+ *  - value: string (URL to encode)
+ *  - title?: string
+ *  - subtitle?: string
+ */
+export default function QRShareCard({ value = '', title = 'Your Invite QR', subtitle }) {
+  const wrapRef = useRef(null)
+
+  // Fallback demo so you can see the component even if value is empty
+  const display = useMemo(
+    () => value || 'https://example.com/connect?code=DEMO-123456',
+    [value]
+  )
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(display)
+      alert('Invite link copied!')
+    } catch {
+      // no-op
+    }
+  }
+
+  function downloadSvg() {
+    // find the <svg> rendered by react-qr-code and serialize it
+    const svg = wrapRef.current?.querySelector('svg')
+    if (!svg) return
+    const serializer = new XMLSerializer()
+    const svgBlob = new Blob([serializer.serializeToString(svg)], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(svgBlob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'invite-qr.svg'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Use the "Dating" pink for primary QR actions
+  const roseBtnStyle = {
+    background: '#f43f5e',
+    borderColor: '#f43f5e',
+    color: '#fff'
+  }
 
   return (
-    <div className={`card ${className}`} style={{ display: 'grid', justifyItems: 'center', gap: 12 }}>
-      <div style={{ background: '#fff', padding: 8, border: '1px solid var(--border)', borderRadius: 12 }}>
-        <QRCode value={value} size={size} bgColor="#ffffff" fgColor="#111111" />
+    <div
+      className="card"
+      style={{
+        display: 'grid',
+        gap: 14,
+        justifyItems: 'center',
+        padding: 16,
+        borderRadius: 12
+      }}
+      ref={wrapRef}
+    >
+      <div style={{ fontWeight: 800 }}>{title}</div>
+      {subtitle && <div className="muted" style={{ textAlign: 'center' }}>{subtitle}</div>}
+
+      <div
+        style={{
+          background: '#fff',
+          padding: 10,
+          border: '1px solid var(--border)',
+          borderRadius: 12
+        }}
+      >
+        <QRCode value={display} size={220} style={{ display: 'block' }} />
       </div>
 
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
-        <div className="muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{value}</div>
-      </div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>{display}</div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(value)}>Copy link</button>
-        <a className="btn btn-neutral" href={png} download="invite-qr.png">Download PNG</a>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button className="btn" style={roseBtnStyle} onClick={copyLink}>
+          Copy link
+        </button>
+        <button className="btn" onClick={downloadSvg}>
+          Download SVG
+        </button>
       </div>
-
-      {/* If JS or SVG rendering failed, PNG still shows */}
-      <noscript>
-        <img src={png} alt="QR" width={size} height={size} />
-      </noscript>
     </div>
   )
 }
+
 
 
 
