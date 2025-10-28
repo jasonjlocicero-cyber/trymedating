@@ -1,18 +1,17 @@
 // src/pages/DebugQR.jsx
 import React from 'react'
-import QRCode from 'react-qr-code'
+import QRShareCard from '../components/QRShareCard'
 
 export default function DebugQR() {
-  const value = 'trymedating:debug-qr'
+  const value = `${window.location.origin}/connect?demo=1`
   return (
-    <div className="container" style={{ padding: '32px 0' }}>
-      <h1 style={{ marginBottom: 12 }}>QR Smoke Test</h1>
-      <div className="card" style={{ display: 'grid', justifyItems: 'center', gap: 12 }}>
-        <div style={{ background: '#fff', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
-          <QRCode value={value} size={180} />
-        </div>
-        <div className="muted" style={{ fontSize: 12 }}>{value}</div>
-      </div>
+    <div className="container" style={{ padding: '24px 0', maxWidth: 720 }}>
+      <h1 style={{ marginBottom: 8 }}>QR Debug</h1>
+      <p className="muted" style={{ marginBottom: 16 }}>
+        This page renders a QR without touching Supabase. If you see a QR here, the component & CSS are fine.
+      </p>
+      <QRShareCard value={value} label="Scan this test QR" />
     </div>
   )
 }
+
