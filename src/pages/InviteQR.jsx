@@ -1,5 +1,4 @@
-// src/pages/InviteQR.jsx
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import QRShareCard from '../components/QRShareCard'
@@ -9,16 +8,15 @@ export default function InviteQR() {
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [debug, setDebug] = useState({ step: 'init' })
   const navigate = useNavigate()
 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        navigate('/auth?next=' + encodeURIComponent('/invite'))
-        return
-      }
+      const { data: { user }, error: uerr } = await supabase.auth.getUser()
+      if (uerr) setDebug((d) => ({ ...d, authError: uerr.message }))
+      if (!user) { navigate('/auth?next=' + encodeURIComponent('/invite')); return }
       if (!alive) return
       setMe(user)
     })()
@@ -32,8 +30,7 @@ export default function InviteQR() {
   useEffect(() => {
     if (!me?.id) return
     ;(async () => {
-      setLoading(true); setError('')
-      // Reuse an active code if present
+      setLoading(true); setError(''); setDebug((d) => ({ ...d, step: 'select-existing' }))
       const { data: existing, error: selErr } = await supabase
         .from('invite_codes')
         .select('code')
@@ -44,20 +41,26 @@ export default function InviteQR() {
 
       if (selErr) {
         setError(selErr.message)
+        setDebug((d) => ({ ...d, selectError: selErr.message }))
         setLoading(false)
         return
       }
 
       if (existing?.code) {
         setCode(existing.code)
+        setDebug((d) => ({ ...d, step: 'existing-found', existing }))
       } else {
+        setDebug((d) => ({ ...d, step: 'insert-new' }))
         const { data: created, error: insErr } = await supabase
           .from('invite_codes')
           .insert({ owner: me.id })
           .select('code')
           .single()
 
-        if (insErr) setError(insErr.message)
+        if (insErr) {
+          setError(insErr.message)
+          setDebug((d) => ({ ...d, insertError: insErr.message }))
+        }
         setCode(created?.code || '')
       }
       setLoading(false)
@@ -75,14 +78,20 @@ export default function InviteQR() {
 
       {loading && <div className="card">Preparing your invite…</div>}
       {error && (
-        <div className="card" style={{ borderColor: '#e11d48', color: '#e11d48' }}>
+        <div className="card" style={{ borderColor: '#e11d48', color:'#e11d48' }}>
           {error}
         </div>
       )}
 
-      {!loading && !error && link && (
-        <QRShareCard link={link} />
-      )}
+      {!loading && !error && link && <QRShareCard link={link} />}
+
+      {/* Tiny debug panel (remove once working) */}
+      <div className="card" style={{ marginTop: 16, fontSize: 12 }}>
+        <div><strong>Debug</strong></div>
+        <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+{JSON.stringify({ user: me?.id, code, link, error, debug }, null, 2)}
+        </pre>
+      </div>
     </div>
   )
 }
