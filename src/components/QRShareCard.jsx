@@ -2,49 +2,11 @@
 import React, { useRef } from "react";
 import QRCode from "react-qr-code";
 
-export default function QRShareCard({ link, title = "Scan to connect" }) {
+export default function QRShareCard({ link, title = "Scan to view my profile" }) {
   const svgWrapRef = useRef(null);
 
-  const handleDownloadSVG = () => {
-    try {
-      const svg = svgWrapRef.current?.querySelector("svg");
-      if (!svg) return;
-
-      const serialized = new XMLSerializer().serializeToString(svg);
-      const blob = new Blob([serialized], {
-        type: "image/svg+xml;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "trymedating-qr.svg";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("[QR download] failed:", e);
-    }
-  };
-
-  const handleOpenLink = () => {
-    if (!link) return;
-    window.open(link, "_blank", "noopener,noreferrer");
-  };
-
-  const handleCopyLink = async () => {
-    if (!link) return;
-    try {
-      await navigator.clipboard.writeText(link);
-    } catch (e) {
-      console.error("[QR copy] failed:", e);
-    }
-  };
-
   return (
-    <div className="qr-card" style={{ width: "100%", maxWidth: 720 }}>
-      {/* Centered QR */}
+    <div className="qr-card">
       <div
         ref={svgWrapRef}
         style={{
@@ -54,70 +16,29 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
           placeItems: "center",
         }}
       >
-        <QRCode value={link || ""} size={192} />
+        <QRCode value={link || ""} size={224} />
       </div>
 
       <div className="qr-caption">{title}</div>
 
-      {/* Actions */}
+      {/* Single, clear CTA */}
       <div
         style={{
           display: "flex",
-          gap: 10,
+          gap: 8,
           justifyContent: "center",
           marginTop: 10,
-          flexWrap: "wrap",
         }}
       >
-        <button
-          type="button"
-          className="btn"
-          onClick={handleDownloadSVG}
-          style={{
-            border: "none",
-            borderRadius: 999,
-            padding: "8px 16px",
-            fontSize: 15,
-            fontWeight: 600,
-            background: "var(--brand-teal)", // force brand green
-            color: "#fff",
-          }}
+        <a
+          href={link || "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-primary btn-pill"
+          title="Open your public profile"
         >
-          Download SVG
-        </button>
-
-        <button
-          type="button"
-          className="btn"
-          onClick={handleOpenLink}
-          style={{
-            border: "none",
-            borderRadius: 999,
-            padding: "8px 16px",
-            fontSize: 15,
-            fontWeight: 600,
-            background: "var(--brand-teal)", // force brand green
-            color: "#fff",
-          }}
-        >
-          Open link
-        </button>
-
-        <button
-          type="button"
-          onClick={handleCopyLink}
-          style={{
-            border: "none",
-            borderRadius: 999,
-            padding: "8px 16px",
-            fontSize: 15,
-            fontWeight: 600,
-            color: "#fff",
-            background: "var(--brand-coral)",
-          }}
-        >
-          Copy link
-        </button>
+          Public profile
+        </a>
       </div>
     </div>
   );
