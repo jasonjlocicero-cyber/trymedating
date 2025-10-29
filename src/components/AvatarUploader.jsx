@@ -1,10 +1,14 @@
-// src/components/AvatarUploader.jsx
 import React, { useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const MAX_BYTES = 4 * 1024 * 1024; // 4MB cap
+const MAX_BYTES = 4 * 1024 * 1024; // 4MB
 
-export default function AvatarUploader({ user, initialUrl = "", onChange = () => {}, size = 128 }) {
+export default function AvatarUploader({
+  user,
+  initialUrl = "",
+  onChange = () => {},
+  size = 132,
+}) {
   const [url, setUrl] = useState(initialUrl);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef(null);
@@ -24,8 +28,7 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
   }, [user]);
 
   function openPicker() {
-    if (busy) return;
-    inputRef.current?.click();
+    if (!busy) inputRef.current?.click();
   }
 
   async function handleSelect(e) {
@@ -52,7 +55,7 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
       onChange(publicUrl);
     } catch (err) {
       console.error("[avatar upload] ", err);
-      alert("Upload failed. Please try a different image.");
+      alert("Upload failed. Please try again.");
     } finally {
       setBusy(false);
       e.target.value = "";
@@ -60,7 +63,7 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
   }
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 12, justifyItems: "center" }}>
       <div
         className="avatar-frame"
         style={{
@@ -75,17 +78,26 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
         }}
       >
         {url ? (
-          <img src={url} alt="Avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img
+            src={url}
+            alt="Avatar"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         ) : (
-          <div className="avatar-initials" aria-hidden>{initials || "TM"}</div>
+          <div className="avatar-initials" aria-hidden>
+            {initials || "TM"}
+          </div>
         )}
       </div>
 
-      <div className="actions-row">
+      <div
+        className="actions-row"
+        style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+      >
         {/* Upload = brand green */}
         <button
           type="button"
-          className="btn btn-pill"
+          className="btn btn-primary btn-pill"
           onClick={openPicker}
           disabled={busy}
           aria-busy={busy ? "true" : "false"}
@@ -97,27 +109,30 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
         {/* Remove = brand coral */}
         <button
           type="button"
-          className="btn btn-pill btn-coral"
-          style={{ background: "var(--brand-coral)" }} // works even if .btn-coral is missing
-          onClick={() => { setUrl(""); onChange(""); }}
+          className="btn btn-pill"
+          style={{ background: "var(--brand-coral)", color: "#fff" }}
+          onClick={() => {
+            setUrl("");
+            onChange("");
+          }}
           disabled={busy}
           title="Remove photo"
         >
           Remove
         </button>
-
-        {/* Hidden file input */}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={handleSelect}
-          style={{ display: "none" }}
-          disabled={busy}
-        />
       </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={handleSelect}
+        style={{ display: "none" }}
+        disabled={busy}
+      />
     </div>
   );
 }
+
 
 
