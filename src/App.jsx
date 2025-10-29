@@ -18,8 +18,8 @@ import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
-import InviteQR from './pages/InviteQR'        // NEW
-import DebugQR from './pages/DebugQR'          // NEW
+import InviteQR from './pages/InviteQR'        // keeps quick access to invite QR
+import DebugQR from './pages/DebugQR'          // optional smoke test
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -54,9 +54,9 @@ function Home({ me }) {
             }}
           >
             Welcome to{' '}
-            <span style={{ color: '#0f766e' }}>Try</span>
-            <span style={{ color: '#0f766e' }}>Me</span>
-            <span style={{ color: '#f43f5e' }}>Dating</span>
+            <span style={{ color: 'var(--brand-teal)' }}>Try</span>
+            <span style={{ color: 'var(--brand-teal)' }}>Me</span>
+            <span style={{ color: 'var(--brand-coral)' }}>Dating</span>
           </h1>
 
           <p className="muted" style={{ margin: '0 auto', maxWidth: 760, fontSize: 16 }}>
@@ -76,21 +76,14 @@ function Home({ me }) {
           >
             {!authed ? (
               <>
-                <Link className="btn btn-primary" to="/auth">Sign in / Sign up</Link>
-                <a className="btn btn-neutral" href="#how-it-works">How it works</a>
+                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
+                <a className="btn btn-neutral btn-pill" href="#how-it-works">How it works</a>
               </>
             ) : (
               <>
-                <Link className="btn btn-primary" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-secondary" to="/settings">Settings</Link>
-                {/* Styled to match the 'Dating' pink */}
-                <Link
-                  className="btn"
-                  to="/invite"
-                  style={{ background: '#f43f5e', borderColor: '#f43f5e', color: '#fff' }}
-                >
-                  My Invite QR
-                </Link>
+                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
+                <Link className="btn btn-accent btn-pill" to="/settings">Settings</Link>
+                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
           </div>
@@ -187,13 +180,13 @@ function Home({ me }) {
           {!authed ? (
             <>
               <div className="muted">Ready to begin?</div>
-              <Link className="btn btn-primary" to="/auth">Get started</Link>
+              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
             </>
           ) : (
             <>
               <div className="muted">Continue where you left off:</div>
-              <Link className="btn btn-primary" to="/profile">Edit Profile</Link>
-              <Link className="btn btn-neutral" to="/settings">Review Settings</Link>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
             </>
           )}
         </div>
@@ -332,13 +325,13 @@ export default function App() {
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
 
-            {/* Invite QR (NEW) */}
+            {/* Invite QR */}
             <Route
               path="/invite"
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
 
-            {/* QR Smoke Test (NEW) */}
+            {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
             {/* QR scan route to create a pending connection request */}
