@@ -1,9 +1,15 @@
 // src/pages/ProfilePage.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import AvatarUploader from '../components/AvatarUploader'
+import QRShareCard from '../components/QRShareCard' // optional; remove if not used
 
 function sanitizeHandle(s) {
-  const base = (s || '').toLowerCase().replace(/[^a-z0-9_]+/g, '').slice(0, 24).replace(/^_+|_+$/g, '')
+  const base = (s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '')
+    .slice(0, 24)
+    .replace(/^_+|_+$/g, '')
   return base || 'user'
 }
 
@@ -19,6 +25,7 @@ export default function ProfilePage() {
     display_name: '',
     bio: '',
     is_public: true,
+    avatar_url: '', // NEW
   })
 
   // Load auth user
@@ -42,7 +49,7 @@ export default function ProfilePage() {
         // 1) Try to fetch existing by user_id
         const { data: existing, error: selErr } = await supabase
           .from('profiles')
-          .select('handle, display_name, bio, is_public')
+          .select('handle, display_name, bio, is_public, avatar_url') // includes avatar
           .eq('user_id', me.id)
           .maybeSingle()
         if (selErr) throw selErr
@@ -61,12 +68,13 @@ export default function ProfilePage() {
             handle: candidate,
             display_name: me.user_metadata?.full_name || candidate,
             is_public: true,
-            bio: ''
+            bio: '',
+            avatar_url: null
           }
           const { data: created, error: insErr } = await supabase
             .from('profiles')
             .insert(toInsert)
-            .select('handle, display_name, bio, is_public')
+            .select('handle, display_name, bio, is_public, avatar_url')
             .single()
 
           if (!insErr) {
@@ -104,12 +112,13 @@ export default function ProfilePage() {
         display_name: (profile.display_name || '').trim(),
         bio: profile.bio || '',
         is_public: !!profile.is_public,
+        avatar_url: profile.avatar_url || null, // NEW
       }
       const { data, error } = await supabase
         .from('profiles')
         .update(payload)
         .eq('user_id', me.id)
-        .select('handle, display_name, bio, is_public')
+        .select('handle, display_name, bio, is_public, avatar_url')
         .single()
       if (error) throw error
       setProfile(data)
@@ -140,7 +149,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container" style={{ padding: '28px 0', maxWidth: 720 }}>
+    <div className="container" style={{ padding: '28px 0', maxWidth: 860 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Your public handle and basic details. Others can see your profile if you set it to public.
@@ -149,60 +158,77 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
-        <label className="form-label">
-          Handle
-          <input
-            className="input"
-            value={profile.handle}
-            onChange={(e) => setProfile(p => ({ ...p, handle: e.target.value.toLowerCase() }))}
-            placeholder="yourname"
-            required
-          />
-          <div className="muted" style={{ fontSize: 12 }}>
-            Your public URL will be <code>/u/{profile.handle || '…'}</code>
+      {/* Split layout: avatar on the left, form on the right (stacks on mobile) */}
+      <div className="row-split" style={{ alignItems: 'start' }}>
+        <AvatarUploader
+          user={me}
+          initialUrl={profile.avatar_url || ''}
+          onChange={(u) => setProfile((p) => ({ ...p, avatar_url: u }))}
+          size={128}
+        />
+
+        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
+          <label className="form-label">
+            Handle
+            <input
+              className="input"
+              value={profile.handle}
+              onChange={(e) => setProfile(p => ({ ...p, handle: e.target.value.toLowerCase() }))}
+              placeholder="yourname"
+              required
+            />
+            <div className="muted" style={{ fontSize: 12 }}>
+              Your public URL will be <code>/u/{profile.handle || '…'}</code>
+            </div>
+          </label>
+
+          <label className="form-label">
+            Display name
+            <input
+              className="input"
+              value={profile.display_name}
+              onChange={(e) => setProfile(p => ({ ...p, display_name: e.target.value }))}
+              placeholder="Your name"
+            />
+          </label>
+
+          <label className="form-label">
+            Bio
+            <textarea
+              className="input"
+              rows={3}
+              value={profile.bio || ''}
+              onChange={(e) => setProfile(p => ({ ...p, bio: e.target.value }))}
+              placeholder="A short intro…"
+            />
+          </label>
+
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={!!profile.is_public}
+              onChange={(e) => setProfile(p => ({ ...p, is_public: e.target.checked }))}
+            />
+            Public profile
+          </label>
+
+          <div className="actions-row">
+            <button className="btn" type="submit" disabled={!canSave}>
+              {saving ? 'Saving…' : 'Save profile'}
+            </button>
           </div>
-        </label>
+        </form>
+      </div>
 
-        <label className="form-label">
-          Display name
-          <input
-            className="input"
-            value={profile.display_name}
-            onChange={(e) => setProfile(p => ({ ...p, display_name: e.target.value }))}
-            placeholder="Your name"
-          />
-        </label>
-
-        <label className="form-label">
-          Bio
-          <textarea
-            className="input"
-            rows={3}
-            value={profile.bio || ''}
-            onChange={(e) => setProfile(p => ({ ...p, bio: e.target.value }))}
-            placeholder="A short intro…"
-          />
-        </label>
-
-        <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={!!profile.is_public}
-            onChange={(e) => setProfile(p => ({ ...p, is_public: e.target.checked }))}
-          />
-          Public profile
-        </label>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" type="submit" disabled={!canSave}>
-            {saving ? 'Saving…' : 'Save profile'}
-          </button>
-        </div>
-      </form>
+      {/* Optional: invite QR block under the form (delete if not desired) */}
+      {/* <div style={{ marginTop: 24 }}>
+        <h2 className="section-title">Invite</h2>
+        <QRShareCard link={`${window.location.origin}/connect?code=${me.id}`} title="Scan to connect" />
+      </div> */}
     </div>
   )
 }
+
 
 
 
