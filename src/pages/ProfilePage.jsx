@@ -52,7 +52,6 @@ export default function ProfilePage() {
       setErr("");
       setMsg("");
       try {
-        // 1) Try to fetch existing by user_id
         const { data: existing, error: selErr } = await supabase
           .from("profiles")
           .select("handle, display_name, bio, is_public, avatar_url")
@@ -64,7 +63,7 @@ export default function ProfilePage() {
           return;
         }
 
-        // 2) Auto-provision a profile if missing
+        // Auto-provision
         const emailBase = sanitizeHandle(
           me.email?.split("@")[0] || me.id.slice(0, 6)
         );
@@ -84,7 +83,6 @@ export default function ProfilePage() {
             .insert(toInsert)
             .select("handle, display_name, bio, is_public, avatar_url")
             .single();
-
           if (!insErr) {
             if (mounted) setProfile(created);
             break;
@@ -124,7 +122,9 @@ export default function ProfilePage() {
     // Enforce: public profiles must have an avatar
     if (profile.is_public && !profile.avatar_url) {
       setSaving(false);
-      setErr("Please upload a clear face photo before making your profile public.");
+      setErr(
+        "Please upload a clear face photo before making your profile public."
+      );
       return;
     }
 
@@ -152,7 +152,7 @@ export default function ProfilePage() {
     }
   }
 
-  async function onPickFile() {
+  function onPickFile() {
     fileRef.current?.click();
   }
 
@@ -174,7 +174,7 @@ export default function ProfilePage() {
       const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
       const path = `${me.id}/avatar_${Date.now()}.${ext}`;
 
-      // Upload to a PUBLIC bucket named "avatars"
+      // Upload to PUBLIC bucket "avatars"
       const { error: upErr } = await supabase.storage
         .from("avatars")
         .upload(path, file, {
@@ -251,18 +251,13 @@ export default function ProfilePage() {
     <div className="container" style={{ padding: "28px 0", maxWidth: 980 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 18 }}>
-        Your public handle and basic details. Others can see your profile if you set it to public.
+        Your public handle and basic details. Others can see your profile if you set it
+        to public.
       </p>
 
-      {err && (
-        <div className="helper-error" style={{ marginBottom: 12 }}>
-          {err}
-        </div>
-      )}
+      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && (
-        <div className="helper-success" style={{ marginBottom: 12 }}>
-          {msg}
-        </div>
+        <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>
       )}
 
       <div
@@ -321,8 +316,16 @@ export default function ProfilePage() {
           />
         </div>
 
-        {/* Form */}
-        <form onSubmit={saveProfile} style={{ display: "grid", gap: 14 }}>
+        {/* Right-side form */}
+        <form
+          onSubmit={saveProfile}
+          style={{
+            display: "grid",
+            gap: 14,
+            width: "100%",
+            maxWidth: 560, /* keeps it pleasantly narrow */
+          }}
+        >
           <label className="form-label">
             Handle
             <input
@@ -333,7 +336,6 @@ export default function ProfilePage() {
               }
               placeholder="yourname"
               required
-              style={{ border: "1px solid var(--border)" }}
             />
             <div className="muted" style={{ fontSize: 12 }}>
               Your public URL will be <code>/u/{profile.handle || "…"}</code>
@@ -345,9 +347,10 @@ export default function ProfilePage() {
             <input
               className="input"
               value={profile.display_name}
-              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
+              onChange={(e) =>
+                setProfile((p) => ({ ...p, display_name: e.target.value }))
+              }
               placeholder="Your name"
-              style={{ border: "1px solid var(--border)" }}
             />
           </label>
 
@@ -359,7 +362,6 @@ export default function ProfilePage() {
               value={profile.bio || ""}
               onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
               placeholder="A short intro…"
-              style={{ border: "1px solid var(--border)", minHeight: 96 }}
             />
           </label>
 
@@ -370,7 +372,9 @@ export default function ProfilePage() {
             <input
               type="checkbox"
               checked={!!profile.is_public}
-              onChange={(e) => setProfile((p) => ({ ...p, is_public: e.target.checked }))}
+              onChange={(e) =>
+                setProfile((p) => ({ ...p, is_public: e.target.checked }))
+              }
             />
             Public profile
           </label>
