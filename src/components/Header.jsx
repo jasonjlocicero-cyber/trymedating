@@ -3,17 +3,21 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  // brand tokens from :root in index.css
+  // resilient tokens: prefer --brand-green/rose, fall back to older teal/coral, then hex
+  const GREEN = "var(--brand-green, var(--brand-teal, #10a37f))";
+  const ROSE  = "var(--brand-rose, var(--brand-coral, #f43f5e))";
+  const BORDER = "var(--border)";
+
   const navLinkStyle = ({ isActive }) => ({
     padding: "8px 12px",
     borderRadius: 12,
     textDecoration: "none",
-    fontWeight: 700,
+    fontWeight: 800,
     lineHeight: 1,
-    border: `1px solid ${isActive ? "var(--brand-green)" : "var(--border)"}`,
-    background: isActive ? "rgba(16,163,127,0.10)" : "transparent", // green-50
+    border: `1px solid ${isActive ? GREEN : BORDER}`,
+    background: isActive ? "rgba(16,163,127,0.10)" : "transparent", // soft green tint
     color: isActive ? "#0f172a" : "#111827",
-    boxShadow: isActive ? "inset 0 -2px 0 var(--brand-rose)" : "none",
+    boxShadow: isActive ? `inset 0 -2px 0 ${ROSE}` : "none",
     transition: "all .15s ease",
   });
 
@@ -25,7 +29,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
         top: 0,
         zIndex: 40,
         background: "#fff",
-        borderBottom: "1px solid var(--border)",
+        borderBottom: `1px solid ${BORDER}`,
       }}
     >
       <div
@@ -38,7 +42,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand: logo image + wordmark */}
+        {/* Brand: logo + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -68,13 +72,13 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               gap: 2,
             }}
           >
-            <span style={{ color: "var(--brand-green)" }}>Try</span>
-            <span style={{ color: "var(--brand-green)" }}>Me</span>
-            <span style={{ color: "var(--brand-rose)" }}>Dating</span>
+            <span style={{ color: GREEN }}>Try</span>
+            <span style={{ color: GREEN }}>Me</span>
+            <span style={{ color: ROSE }}>Dating</span>
           </div>
         </Link>
 
-        {/* Right side */}
+        {/* Right-side nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <NavLink to="/" style={navLinkStyle} end>
             Home
@@ -107,7 +111,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
             </NavLink>
           )}
 
-          {/* Optional tiny unread badge */}
+          {/* Unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
@@ -122,7 +126,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
                 color: "#fff",
                 fontSize: 11,
                 fontWeight: 800,
-                border: "1px solid var(--border)",
+                border: `1px solid ${BORDER}`,
               }}
             >
               {unread > 99 ? "99+" : unread}
