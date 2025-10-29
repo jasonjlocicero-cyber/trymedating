@@ -1,10 +1,9 @@
 // src/components/QRShareCard.jsx
-import React, { useRef, useState } from "react";
+import React, { useRef } from "react";
 import QRCode from "react-qr-code";
 
 export default function QRShareCard({ link, title = "Scan to connect" }) {
   const svgWrapRef = useRef(null);
-  const [copied, setCopied] = useState(false);
 
   const handleDownloadSVG = () => {
     try {
@@ -12,7 +11,9 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
       if (!svg) return;
 
       const serialized = new XMLSerializer().serializeToString(svg);
-      const blob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
+      const blob = new Blob([serialized], {
+        type: "image/svg+xml;charset=utf-8",
+      });
       const url = URL.createObjectURL(blob);
 
       const a = document.createElement("a");
@@ -36,42 +37,77 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
     if (!link) return;
     try {
       await navigator.clipboard.writeText(link);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
     } catch (e) {
       console.error("[QR copy] failed:", e);
     }
   };
 
   return (
-    <div className="qr-card">
-      <div ref={svgWrapRef} style={{ background: "#fff", padding: 12 }}>
+    <div className="qr-card" style={{ width: "100%", maxWidth: 720 }}>
+      {/* Center the QR itself */}
+      <div
+        ref={svgWrapRef}
+        style={{
+          background: "#fff",
+          padding: 12,
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
         <QRCode value={link || ""} size={192} />
       </div>
 
       <div className="qr-caption">{title}</div>
 
-      {/* Buttons: brand green for the two primary actions */}
-      <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-        <button type="button" className="btn" onClick={handleDownloadSVG}>
-          Download SVG
-        </button>
-        <button type="button" className="btn" onClick={handleOpenLink}>
-          Open link
-        </button>
+      {/* Actions row */}
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          justifyContent: "center",
+          marginTop: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <button
           type="button"
-          className="btn btn-neutral"
-          onClick={handleCopyLink}
-          aria-live="polite"
-          title={copied ? "Copied!" : "Copy link"}
+          className="btn"
+          onClick={handleDownloadSVG}
+          style={{ borderRadius: 999 }}
         >
-          {copied ? "Copied!" : "Copy link"}
+          Download SVG
+        </button>
+
+        <button
+          type="button"
+          className="btn"
+          onClick={handleOpenLink}
+          style={{ borderRadius: 999 }}
+        >
+          Open link
+        </button>
+
+        <button
+          type="button"
+          onClick={handleCopyLink}
+          style={{
+            border: "none",
+            borderRadius: 999,
+            padding: "8px 16px",
+            fontSize: 15,
+            fontWeight: 500,
+            color: "#fff",
+            background: "var(--brand-coral)",
+            transition: "all 0.2s ease",
+          }}
+        >
+          Copy link
         </button>
       </div>
     </div>
   );
 }
+
 
 
 
