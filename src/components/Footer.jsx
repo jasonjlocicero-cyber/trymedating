@@ -5,25 +5,25 @@ export default function Footer() {
   const brandTeal = '#0f766e'
   const brandPink = '#f43f5e'
 
-  const linkStyle = {
-    padding: '6px 10px',
-    borderRadius: 10,
-    fontWeight: 600,
+  const pill = (bg) => ({
+    padding: '8px 12px',
+    borderRadius: 12,
+    fontWeight: 700,
     textDecoration: 'none',
-    color: '#111827',
-    background: 'transparent',
-    border: '1px solid var(--border)',
-  }
-
-  const pinkCtaStyle = {
-    padding: '6px 12px',
-    borderRadius: 10,
-    fontWeight: 800,
-    textDecoration: 'none',
-    background: brandPink,
-    border: `1px solid ${brandPink}`,
+    background: bg,
     color: '#fff',
-  }
+    border: `1px solid ${bg}`,
+    lineHeight: 1,
+    display: 'inline-block',
+  })
+
+  // Alternate colors to “fill out evenly”
+  const items = [
+    { to: '/terms', label: 'Terms', color: brandTeal },
+    { to: '/privacy', label: 'Privacy', color: brandPink },
+    { to: '/contact', label: 'Contact', color: brandTeal },
+    { to: '/feedback', label: 'Feedback', color: brandPink }, // pink CTA
+  ]
 
   return (
     <footer
@@ -61,13 +61,13 @@ export default function Footer() {
           <span style={{ color: brandPink }}>Dating</span>
         </div>
 
-        {/* Links */}
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <Link to="/terms" style={linkStyle}>Terms</Link>
-          <Link to="/privacy" style={linkStyle}>Privacy</Link>
-          <Link to="/contact" style={linkStyle}>Contact</Link>
-          {/* Brand-pink primary CTA */}
-          <Link to="/feedback" style={pinkCtaStyle}>Feedback</Link>
+        {/* Buttons: evenly filled with brand colors */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {items.map((it) => (
+            <Link key={it.to} to={it.to} style={pill(it.color)}>
+              {it.label}
+            </Link>
+          ))}
         </div>
 
         {/* Copyright */}
