@@ -6,6 +6,7 @@ import QRShareCard from "../components/QRShareCard";
 export default function InviteQR() {
   const [me, setMe] = useState(null);
   const [handle, setHandle] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -13,21 +14,24 @@ export default function InviteQR() {
 
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (!alive) return;
         setMe(user || null);
 
         if (!user?.id) return;
 
-        // pull handle for current user
+        // pull handle + avatar for current user
         const { data, error } = await supabase
           .from("profiles")
-          .select("handle")
+          .select("handle, avatar_url")
           .eq("user_id", user.id)
           .maybeSingle();
 
         if (error) throw error;
         setHandle(data?.handle || "");
+        setAvatarUrl(data?.avatar_url || "");
       } catch (e) {
         console.error("[InviteQR] load failed:", e);
       } finally {
@@ -77,6 +81,26 @@ export default function InviteQR() {
           <div className="helper-error" style={{ padding: 12 }}>
             Couldn’t find your handle. Open your Profile and save it once to generate your link.
           </div>
+        ) : !avatarUrl ? (
+          <div
+            style={{
+              padding: 16,
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              background: "#fff8f8",
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Add a face photo to share your QR
+            </div>
+            <div className="helper-muted" style={{ marginBottom: 10 }}>
+              For safety, public profiles must include a clear face photo so others can
+              visually verify you before connecting.
+            </div>
+            <a className="btn btn-primary" href="/profile">
+              Go to Profile to upload photo
+            </a>
+          </div>
         ) : (
           <div
             style={{
@@ -113,6 +137,7 @@ export default function InviteQR() {
     </div>
   );
 }
+
 
 
 
