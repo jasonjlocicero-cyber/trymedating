@@ -44,7 +44,7 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
 
   return (
     <div className="qr-card" style={{ width: "100%", maxWidth: 720 }}>
-      {/* Center the QR itself */}
+      {/* Centered QR */}
       <div
         ref={svgWrapRef}
         style={{
@@ -59,7 +59,7 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
 
       <div className="qr-caption">{title}</div>
 
-      {/* Actions row */}
+      {/* Actions */}
       <div
         style={{
           display: "flex",
@@ -73,7 +73,15 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
           type="button"
           className="btn"
           onClick={handleDownloadSVG}
-          style={{ borderRadius: 999 }}
+          style={{
+            border: "none",
+            borderRadius: 999,
+            padding: "8px 16px",
+            fontSize: 15,
+            fontWeight: 600,
+            background: "var(--brand-teal)", // force brand green
+            color: "#fff",
+          }}
         >
           Download SVG
         </button>
@@ -82,7 +90,15 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
           type="button"
           className="btn"
           onClick={handleOpenLink}
-          style={{ borderRadius: 999 }}
+          style={{
+            border: "none",
+            borderRadius: 999,
+            padding: "8px 16px",
+            fontSize: 15,
+            fontWeight: 600,
+            background: "var(--brand-teal)", // force brand green
+            color: "#fff",
+          }}
         >
           Open link
         </button>
@@ -95,10 +111,9 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
             borderRadius: 999,
             padding: "8px 16px",
             fontSize: 15,
-            fontWeight: 500,
+            fontWeight: 600,
             color: "#fff",
             background: "var(--brand-coral)",
-            transition: "all 0.2s ease",
           }}
         >
           Copy link
