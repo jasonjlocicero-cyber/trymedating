@@ -23,12 +23,17 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
       .join("");
   }, [user]);
 
+  function openPicker() {
+    if (busy) return;
+    inputRef.current?.click();
+  }
+
   async function handleSelect(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_BYTES) {
       alert("Please choose an image under 4MB.");
-      inputRef.current.value = "";
+      e.target.value = "";
       return;
     }
     setBusy(true);
@@ -50,7 +55,7 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
       alert("Upload failed. Please try a different image.");
     } finally {
       setBusy(false);
-      inputRef.current.value = "";
+      e.target.value = "";
     }
   }
 
@@ -77,29 +82,42 @@ export default function AvatarUploader({ user, initialUrl = "", onChange = () =>
       </div>
 
       <div className="actions-row">
-        <label className="btn" style={{ cursor: busy ? "not-allowed" : "pointer" }}>
+        {/* Upload = brand green */}
+        <button
+          type="button"
+          className="btn btn-pill"
+          onClick={openPicker}
+          disabled={busy}
+          aria-busy={busy ? "true" : "false"}
+          title="Upload photo"
+        >
           {busy ? "Uploading…" : "Upload photo"}
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={handleSelect}
-            style={{ display: "none" }}
-            disabled={busy}
-          />
-        </label>
-        {url && (
-          <button
-            type="button"
-            className="btn-neutral"
-            onClick={() => { setUrl(""); onChange(""); }}
-            disabled={busy}
-          >
-            Remove
-          </button>
-        )}
+        </button>
+
+        {/* Remove = brand coral */}
+        <button
+          type="button"
+          className="btn btn-pill btn-coral"
+          style={{ background: "var(--brand-coral)" }} // works even if .btn-coral is missing
+          onClick={() => { setUrl(""); onChange(""); }}
+          disabled={busy}
+          title="Remove photo"
+        >
+          Remove
+        </button>
+
+        {/* Hidden file input */}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={handleSelect}
+          style={{ display: "none" }}
+          disabled={busy}
+        />
       </div>
     </div>
   );
 }
+
 
