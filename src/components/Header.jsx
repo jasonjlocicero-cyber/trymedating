@@ -1,31 +1,26 @@
 // src/components/Header.jsx
 import React from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  const loc = useLocation();
+  const brandTeal = "#0f766e";
+  const brandPink = "#f43f5e";
 
-  const navLinkStyle = ({ isActive }) => ({
-    padding: "6px 10px",
-    borderRadius: 10,
+  const pill = (bg, isActive = false) => ({
+    padding: "8px 12px",
+    borderRadius: 12,
+    fontWeight: 700,
     textDecoration: "none",
-    fontWeight: 600,
-    color: isActive ? "#0f172a" : "#111827",
-    background: isActive ? "#eef2ff" : "transparent",
-    border: "1px solid var(--border)",
+    background: bg,
+    color: "#fff",
+    border: `1px solid ${bg}`,
+    boxShadow: isActive ? "0 0 0 2px rgba(0,0,0,0.06) inset" : "none",
+    display: "inline-block",
+    lineHeight: 1,
   });
 
-  // Brand-pink CTA style (matches "Dating" color)
-  const brandPink = "#f43f5e";
-  const pinkCtaStyle = {
-    padding: "6px 12px",
-    borderRadius: 10,
-    fontWeight: 800,
-    textDecoration: "none",
-    background: brandPink,
-    border: `1px solid ${brandPink}`,
-    color: "#fff",
-  };
+  const navTeal = ({ isActive }) => pill(brandTeal, isActive);
+  const navPink = ({ isActive }) => pill(brandPink, isActive);
 
   return (
     <header
@@ -45,9 +40,10 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           justifyContent: "space-between",
           gap: 12,
           padding: "10px 0",
+          flexWrap: "wrap",
         }}
       >
-        {/* Brand: logo image + wordmark */}
+        {/* Brand: logo + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -77,68 +73,66 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               gap: 2,
             }}
           >
-            <span style={{ color: "#0f766e" }}>Try</span>
-            <span style={{ color: "#0f766e" }}>Me</span>
+            <span style={{ color: brandTeal }}>Try</span>
+            <span style={{ color: brandTeal }}>Me</span>
             <span style={{ color: brandPink }}>Dating</span>
           </div>
         </Link>
 
-        {/* Right side */}
+        {/* Right side nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" style={navLinkStyle} end>
+          <NavLink to="/" style={navTeal} end>
             Home
           </NavLink>
 
-          <NavLink to="/contact" style={navLinkStyle}>
+          <NavLink to="/contact" style={navTeal}>
             Contact
           </NavLink>
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={navLinkStyle}>
+              <NavLink to="/profile" style={navTeal}>
                 Profile
               </NavLink>
-              <NavLink to="/settings" style={navLinkStyle}>
+              <NavLink to="/settings" style={navTeal}>
                 Settings
               </NavLink>
-
-              {/* Brand-pink primary CTA when logged in */}
-              <Link to="/invite" className="btn" style={pinkCtaStyle}>
+              {/* Primary CTA: Invite QR in brand pink */}
+              <NavLink to="/invite" style={navPink}>
                 My Invite QR
-              </Link>
-
+              </NavLink>
+              {/* Primary CTA: Sign out in brand pink */}
               <button
                 type="button"
-                className="btn btn-neutral"
                 onClick={onSignOut}
-                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
+                style={pill(brandPink)}
               >
                 Sign out
               </button>
             </>
           ) : (
-            // Brand-pink primary CTA when logged out
-            <Link to="/auth" className="btn" style={pinkCtaStyle}>
+            <NavLink to="/auth" style={navPink}>
               Sign in
-            </Link>
+            </NavLink>
           )}
 
-          {/* Optional tiny unread badge */}
+          {/* Unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
               style={{
                 display: "inline-grid",
                 placeItems: "center",
-                minWidth: 18,
-                height: 18,
-                padding: "0 5px",
+                minWidth: 20,
+                height: 20,
+                padding: "0 6px",
                 borderRadius: 999,
                 background: "#ef4444",
                 color: "#fff",
                 fontSize: 11,
                 fontWeight: 800,
                 border: "1px solid var(--border)",
+                marginLeft: 4,
               }}
             >
               {unread > 99 ? "99+" : unread}
@@ -149,6 +143,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
