@@ -1,10 +1,12 @@
-// src/components/Header.jsx
 import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  // Helper to apply our pill style + active state
-  const pill = ({ isActive }) => `btn ${isActive ? "active" : ""}`;
+  const navBtn = (to, label, cls = "btn btn-primary btn-pill") => (
+    <NavLink to={to} className={cls} end>
+      {label}
+    </NavLink>
+  );
 
   return (
     <header className="site-header" style={{ position: "sticky", top: 0, zIndex: 40 }}>
@@ -18,73 +20,38 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand: logo + wordmark */}
+        {/* Brand: logo image + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
-          style={{
-            textDecoration: "none",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            lineHeight: 1,
-          }}
+          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10, lineHeight: 1 }}
         >
-          {/* Swap to /logo-mark.svg if you have an SVG */}
-          <img
-            src="/logo-mark.png"
-            alt="TryMeDating logo"
-            style={{ height: "clamp(22px, 2.2vw, 28px)", width: "auto", display: "block" }}
-          />
-          <div
-            style={{
-              fontWeight: 900,
-              fontSize: "clamp(18px, 2.3vw, 22px)",
-              letterSpacing: 0.2,
-              display: "flex",
-              gap: 2,
-            }}
-          >
+          <img src="/logo-mark.png" alt="TryMeDating logo" style={{ height: 28, width: "auto", display: "block" }} />
+          <div style={{ fontWeight: 900, fontSize: "clamp(18px, 2.3vw, 22px)", letterSpacing: 0.2, display: "flex", gap: 2 }}>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
             <span style={{ color: "var(--brand-teal)" }}>Me</span>
             <span style={{ color: "var(--brand-coral)" }}>Dating</span>
           </div>
         </Link>
 
-        {/* Right-side nav */}
+        {/* Right side */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" className={pill} end>
-            Home
-          </NavLink>
-
-          <NavLink to="/contact" className={pill}>
-            Contact
-          </NavLink>
-
+          {navBtn("/", "Home")}
+          {navBtn("/contact", "Contact")}
           {me?.id ? (
             <>
-              <NavLink to="/profile" className={pill}>
-                Profile
-              </NavLink>
-              <NavLink to="/settings" className={pill}>
-                Settings
-              </NavLink>
-              <button
-                type="button"
-                className="btn btn-neutral"
-                onClick={onSignOut}
-                style={{ padding: "6px 12px", borderRadius: 10 }}
-              >
+              {navBtn("/profile", "Profile")}
+              {/* Make Settings coral for an even color split */}
+              {navBtn("/settings", "Settings", "btn btn-accent btn-pill")}
+              <button type="button" className="btn btn-accent btn-pill" onClick={onSignOut}>
                 Sign out
               </button>
             </>
           ) : (
-            <NavLink to="/auth" className="btn btn-accent" style={{ padding: "6px 12px", borderRadius: 10 }}>
-              Sign in
-            </NavLink>
+            navBtn("/auth", "Sign in", "btn btn-accent btn-pill")
           )}
 
-          {/* Unread badge (optional) */}
+          {/* Optional tiny unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
