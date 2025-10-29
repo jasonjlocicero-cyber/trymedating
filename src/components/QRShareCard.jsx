@@ -41,7 +41,7 @@ export default function QRShareCard({ link, title = "Scan to connect" }) {
 
       {/* TEAL buttons (brand green) */}
       <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }}>
-        <button type="button" className="btn btn-primary btn-pill" onClick={handleDownloadSVG}>
+        <button className="btn" onClick={handleDownloadSvg}>
           Download SVG
         </button>
         <button type="button" className="btn btn-primary btn-pill" onClick={handleOpenLink}>
