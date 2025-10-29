@@ -83,7 +83,7 @@ export default function InviteQR() {
           />
 
           <div style={{ display: 'flex', gap: 12, marginTop: 16, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <a className="btn" href={link} target="_blank" rel="noreferrer">Open link</a>
+            <a className="btn" href={connectUrl} target="_blank" rel="noreferrer">Open link</a>
             <button className="btn" style={roseBtnStyle} onClick={() => navigator.clipboard.writeText(link)}>
               Copy link
             </button>
