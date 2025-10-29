@@ -1,21 +1,25 @@
+// src/components/Header.jsx
 import React from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  const loc = useLocation();
-
+  // brand tokens from :root in index.css
   const navLinkStyle = ({ isActive }) => ({
-    padding: "6px 10px",
-    borderRadius: 10,
+    padding: "8px 12px",
+    borderRadius: 12,
     textDecoration: "none",
-    fontWeight: 600,
+    fontWeight: 700,
+    lineHeight: 1,
+    border: `1px solid ${isActive ? "var(--brand-green)" : "var(--border)"}`,
+    background: isActive ? "rgba(16,163,127,0.10)" : "transparent", // green-50
     color: isActive ? "#0f172a" : "#111827",
-    background: isActive ? "#eef2ff" : "transparent",
-    border: "1px solid var(--border)",
+    boxShadow: isActive ? "inset 0 -2px 0 var(--brand-rose)" : "none",
+    transition: "all .15s ease",
   });
 
   return (
     <header
+      className="site-header"
       style={{
         position: "sticky",
         top: 0,
@@ -64,9 +68,9 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               gap: 2,
             }}
           >
-            <span style={{ color: "var(--brand-teal)" }}>Try</span>
-            <span style={{ color: "var(--brand-teal)" }}>Me</span>
-            <span style={{ color: "var(--brand-coral)" }}>Dating</span>
+            <span style={{ color: "var(--brand-green)" }}>Try</span>
+            <span style={{ color: "var(--brand-green)" }}>Me</span>
+            <span style={{ color: "var(--brand-rose)" }}>Dating</span>
           </div>
         </Link>
 
@@ -75,8 +79,6 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           <NavLink to="/" style={navLinkStyle} end>
             Home
           </NavLink>
-
-          {/* Contact removed from header by request */}
 
           {me?.id ? (
             <>
@@ -90,13 +92,17 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
                 type="button"
                 className="btn btn-neutral"
                 onClick={onSignOut}
-                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
+                style={{ padding: "8px 12px", borderRadius: 12, fontWeight: 800 }}
               >
                 Sign out
               </button>
             </>
           ) : (
-            <NavLink to="/auth" className="btn btn-primary" style={{ padding: "6px 12px", borderRadius: 10 }}>
+            <NavLink
+              to="/auth"
+              className="btn btn-primary"
+              style={{ padding: "8px 12px", borderRadius: 12, fontWeight: 800 }}
+            >
               Sign in
             </NavLink>
           )}
