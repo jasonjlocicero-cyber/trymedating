@@ -1,7 +1,9 @@
 import React from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
+  const loc = useLocation();
+
   const navLinkStyle = ({ isActive }) => ({
     padding: "6px 10px",
     borderRadius: 10,
@@ -48,7 +50,83 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
             src="/logo-mark.png"
             alt="TryMeDating logo"
             style={{
-              height: "clamp
+              height: "clamp(22px, 2.2vw, 28px)",
+              width: "auto",
+              display: "block",
+            }}
+          />
+          <div
+            style={{
+              fontWeight: 900,
+              fontSize: "clamp(18px, 2.3vw, 22px)",
+              letterSpacing: 0.2,
+              display: "flex",
+              gap: 2,
+            }}
+          >
+            <span style={{ color: "var(--brand-teal)" }}>Try</span>
+            <span style={{ color: "var(--brand-teal)" }}>Me</span>
+            <span style={{ color: "var(--brand-coral)" }}>Dating</span>
+          </div>
+        </Link>
+
+        {/* Right side */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <NavLink to="/" style={navLinkStyle} end>
+            Home
+          </NavLink>
+
+          {/* Contact removed from header by request */}
+
+          {me?.id ? (
+            <>
+              <NavLink to="/profile" style={navLinkStyle}>
+                Profile
+              </NavLink>
+              <NavLink to="/settings" style={navLinkStyle}>
+                Settings
+              </NavLink>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={onSignOut}
+                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <NavLink to="/auth" className="btn btn-primary" style={{ padding: "6px 12px", borderRadius: 10 }}>
+              Sign in
+            </NavLink>
+          )}
+
+          {/* Optional tiny unread badge */}
+          {typeof unread === "number" && unread > 0 && (
+            <span
+              title={`${unread} unread`}
+              style={{
+                display: "inline-grid",
+                placeItems: "center",
+                minWidth: 18,
+                height: 18,
+                padding: "0 5px",
+                borderRadius: 999,
+                background: "#ef4444",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 800,
+                border: "1px solid var(--border)",
+              }}
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
 
 
 
