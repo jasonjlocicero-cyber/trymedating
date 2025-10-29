@@ -3,23 +3,37 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  // resilient tokens: prefer --brand-green/rose, fall back to older teal/coral, then hex
-  const GREEN = "var(--brand-green, var(--brand-teal, #10a37f))";
-  const ROSE  = "var(--brand-rose, var(--brand-coral, #f43f5e))";
-  const BORDER = "var(--border)";
+  // Palette with resilient fallbacks
+  const GREEN  = "var(--brand-green, var(--brand-teal, #079c84))";
+  const ROSE   = "var(--brand-rose, var(--brand-coral, #f43f5e))";
+  const BORDER = "var(--border, #e5e7eb)";
 
-  const navLinkStyle = ({ isActive }) => ({
-    padding: "8px 12px",
-    borderRadius: 12,
-    textDecoration: "none",
+  const pillBase = {
+    padding: "8px 14px",
+    borderRadius: 999,
     fontWeight: 800,
     lineHeight: 1,
-    border: `1px solid ${isActive ? GREEN : BORDER}`,
-    background: isActive ? "rgba(16,163,127,0.10)" : "transparent", // soft green tint
-    color: isActive ? "#0f172a" : "#111827",
-    boxShadow: isActive ? `inset 0 -2px 0 ${ROSE}` : "none",
+    textDecoration: "none",
     transition: "all .15s ease",
-  });
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  };
+
+  const pillActive = {
+    ...pillBase,
+    background: GREEN,
+    color: "#fff",
+    border: `1px solid ${GREEN}`,
+    boxShadow: "0 1px 0 rgba(0,0,0,.04)",
+  };
+
+  const pillIdle = {
+    ...pillBase,
+    background: "#fff",
+    color: "#111827",
+    border: `1px solid ${BORDER}`,
+  };
 
   return (
     <header
@@ -42,7 +56,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand: logo + wordmark */}
+        {/* Brand */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -57,11 +71,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           <img
             src="/logo-mark.png"
             alt="TryMeDating logo"
-            style={{
-              height: "clamp(22px, 2.2vw, 28px)",
-              width: "auto",
-              display: "block",
-            }}
+            style={{ height: "clamp(22px, 2.2vw, 28px)", width: "auto", display: "block" }}
           />
           <div
             style={{
@@ -78,25 +88,30 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           </div>
         </Link>
 
-        {/* Right-side nav */}
+        {/* Nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" style={navLinkStyle} end>
+          <NavLink to="/" end style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
             Home
           </NavLink>
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={navLinkStyle}>
+              <NavLink to="/profile" style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
                 Profile
               </NavLink>
-              <NavLink to="/settings" style={navLinkStyle}>
+              <NavLink to="/settings" style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
                 Settings
               </NavLink>
+
               <button
                 type="button"
-                className="btn btn-neutral"
                 onClick={onSignOut}
-                style={{ padding: "8px 12px", borderRadius: 12, fontWeight: 800 }}
+                style={{
+                  ...pillBase,
+                  background: ROSE,
+                  color: "#fff",
+                  border: `1px solid ${ROSE}`,
+                }}
               >
                 Sign out
               </button>
@@ -104,14 +119,17 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           ) : (
             <NavLink
               to="/auth"
-              className="btn btn-primary"
-              style={{ padding: "8px 12px", borderRadius: 12, fontWeight: 800 }}
+              style={{
+                ...pillBase,
+                background: GREEN,
+                color: "#fff",
+                border: `1px solid ${GREEN}`,
+              }}
             >
               Sign in
             </NavLink>
           )}
 
-          {/* Unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
@@ -137,6 +155,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
