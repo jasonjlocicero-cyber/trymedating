@@ -182,13 +182,7 @@ function Home({ me }) {
               <div className="muted">Ready to begin?</div>
               <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
             </>
-          ) : (
-            <>
-              <div className="muted">Continue where you left off:</div>
-              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
-              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
-            </>
-          )}
+          ) : null}
         </div>
       </section>
     </div>
@@ -350,6 +344,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
