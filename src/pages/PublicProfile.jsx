@@ -1,6 +1,6 @@
 // src/pages/PublicProfile.jsx
 import React, { useEffect, useState } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 /**
@@ -8,15 +8,11 @@ import { supabase } from "../lib/supabaseClient";
  * - Loads a profile by handle from /u/:handle
  * - If profile.is_public === false, injects <meta name="robots" content="noindex">
  * - Shows basic profile info with Connect / Message actions
- * - NEW: honors ?connect=1 (QR preview-first hint)
+ * - NEW: shows a "Verified photo" badge when avatar_url exists
  */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
-
-  // NEW: read ?connect=1 to show a subtle hint when arriving from QR
-  const [search] = useSearchParams();
-  const connectIntent = search.get("connect") === "1";
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,9 +23,7 @@ export default function PublicProfile() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!mounted) return;
       setMe(user || null);
     })();
@@ -48,9 +42,8 @@ export default function PublicProfile() {
 
     (async () => {
       try {
-        if (!cleanHandle) {
-          throw new Error("No handle provided.");
-        }
+        if (!cleanHandle) throw new Error("No handle provided.");
+
         const { data, error } = await supabase
           .from("profiles")
           .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
@@ -69,9 +62,7 @@ export default function PublicProfile() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [cleanHandle]);
 
   // Inject <meta name="robots" content="noindex"> when the profile is private
@@ -83,20 +74,18 @@ export default function PublicProfile() {
       tag.setAttribute("content", "noindex");
       document.head.appendChild(tag);
     }
-    return () => {
-      if (tag) document.head.removeChild(tag);
-    };
+    return () => { if (tag) document.head.removeChild(tag); };
   }, [profile?.is_public]);
 
-  const avatar = profile?.avatar_url || "/logo-mark.png"; // fallback to your logo if no avatar
+  const avatar = profile?.avatar_url || "/logo-mark.png";
   const title = profile?.display_name || `@${cleanHandle}`;
+  const isVerified = !!profile?.avatar_url; // NEW
 
   // Actions
   const canAct = !!(me?.id && profile?.user_id && me.id !== profile.user_id);
 
   const openChat = () => {
     if (!canAct) return;
-    // ChatLauncher listens to this custom event and opens ChatDock
     const detail = {
       partnerId: profile.user_id,
       partnerName: profile.display_name || `@${profile.handle || cleanHandle}`,
@@ -126,138 +115,159 @@ export default function PublicProfile() {
       )}
 
       {!loading && !error && profile && (
-        <>
-          {/* NEW: gentle hint when arriving from QR ?connect=1 */}
-          {connectIntent && profile.is_public !== false && (
-            <div
-              className="helper-muted"
-              style={{
-                marginBottom: 10,
-                padding: "8px 10px",
-                border: "1px dashed var(--border)",
-                borderRadius: 10,
-                background: "#fff",
-              }}
-            >
-              Preview this profile, then tap <strong>Connect</strong> to send a request.
-            </div>
-          )}
-
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "96px 1fr",
+            gap: 16,
+            alignItems: "center",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: 16,
+            background: "#fff",
+          }}
+        >
+          {/* Avatar */}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "96px 1fr",
-              gap: 16,
-              alignItems: "center",
+              width: 96,
+              height: 96,
+              borderRadius: "50%",
+              overflow: "hidden",
               border: "1px solid var(--border)",
-              borderRadius: 12,
-              padding: 16,
-              background: "#fff",
+              background: "#f8fafc",
+              display: "grid",
+              placeItems: "center",
             }}
           >
-            {/* Avatar */}
-            <div
-              style={{
-                width: 96,
-                height: 96,
-                borderRadius: "50%",
-                overflow: "hidden",
-                border: "1px solid var(--border)",
-                background: "#f8fafc",
-                display: "grid",
-                placeItems: "center",
-              }}
-            >
-              <img
-                src={avatar}
-                alt={`${title} avatar`}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+            <img
+              src={avatar}
+              alt={`${title} avatar`}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </div>
+
+          {/* Main */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
+
+              {profile?.handle && (
+                <span className="muted" style={{ fontSize: 14 }}>
+                  @{profile.handle}
+                </span>
+              )}
+
+              {/* VERIFIED BADGE (NEW) */}
+              {isVerified && (
+                <span
+                  title="Verified photo provided"
+                  aria-label="Verified photo provided"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "3px 8px",
+                    fontSize: 12,
+                    fontWeight: 800,
+                    borderRadius: 999,
+                    background: "var(--brand-teal-100)",
+                    color: "var(--brand-teal-700)",
+                    border: "1px solid var(--brand-teal-300)",
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M20 7L9 18l-5-5"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Verified photo
+                </span>
+              )}
             </div>
 
-            {/* Main */}
-            <div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
-                {profile?.handle && (
-                  <span className="muted" style={{ fontSize: 14 }}>
-                    @{profile.handle}
-                  </span>
-                )}
-              </div>
+            <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
+              {profile?.bio || <span className="muted">No bio yet.</span>}
+            </div>
 
-              <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
-                {profile?.bio || <span className="muted">No bio yet.</span>}
-              </div>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                {profile?.is_public ? (
-                  <>
-                    {canAct ? (
-                      <>
-                        <button
-                          className="btn btn-primary"
-                          type="button"
-                          onClick={openChat}
-                          title="Open chat"
-                        >
-                          Message
-                        </button>
-                        <Link
-                          className="btn btn-neutral"
-                          to={`/connect?to=@${profile.handle || cleanHandle}`}
-                          title="Send connection request"
-                        >
-                          Connect
-                        </Link>
-                      </>
-                    ) : (
-                      <span className="helper-muted">
-                        This is your profile or you’re not signed in.
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <span
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: 999,
-                        background: "#fde68a",
-                        fontWeight: 700,
-                        fontSize: 13,
-                        border: "1px solid var(--border)",
-                      }}
-                    >
-                      Private profile
-                    </span>
-                    <span className="helper-muted" style={{ fontSize: 13 }}>
-                      This page is hidden from search engines.
-                    </span>
-                    {canAct && (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              {profile?.is_public ? (
+                <>
+                  {canAct ? (
+                    <>
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={openChat}
+                        title="Open chat"
+                      >
+                        Message
+                      </button>
                       <Link
                         className="btn btn-neutral"
                         to={`/connect?to=@${profile.handle || cleanHandle}`}
                         title="Send connection request"
                       >
-                        Request connect
+                        Connect
                       </Link>
-                    )}
-                  </>
-                )}
-              </div>
+                    </>
+                  ) : (
+                    <span className="helper-muted">
+                      {me?.id ? "This is your profile." : "Sign in to message or connect."}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "#fde68a",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    Private profile
+                  </span>
+                  <span className="helper-muted" style={{ fontSize: 13 }}>
+                    This page is hidden from search engines.
+                  </span>
+                  {canAct && (
+                    <Link
+                      className="btn btn-neutral"
+                      to={`/connect?to=@${profile.handle || cleanHandle}`}
+                      title="Send connection request"
+                    >
+                      Request connect
+                    </Link>
+                  )}
+                </>
+              )}
             </div>
           </div>
-
-          {/* Back link */}
-          <div style={{ marginTop: 16 }}>
-            <Link className="btn btn-neutral" to=" /">← Back home</Link>
-          </div>
-        </>
+        </div>
       )}
+
+      {/* Back link */}
+      <div style={{ marginTop: 16 }}>
+        <Link className="btn btn-neutral" to=" /">← Back home</Link>
+      </div>
     </div>
   );
 }
+
 
 
 
