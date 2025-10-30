@@ -18,12 +18,13 @@ import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
-import InviteQR from './pages/InviteQR'        // keeps quick access to invite QR
-import DebugQR from './pages/DebugQR'          // optional smoke test
+import InviteQR from './pages/InviteQR'
+import DebugQR from './pages/DebugQR'
+import AdminVerify from './pages/AdminVerify'   // NEW
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect' // QR route to create a connection request
+import Connect from './routes/Connect'
 
 /** --------------------------
  * Home (hero + features + CTA)
@@ -182,14 +183,19 @@ function Home({ me }) {
               <div className="muted">Ready to begin?</div>
               <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
             </>
-          ) : null}
+          ) : (
+            <>
+              <div className="muted">Continue where you left off:</div>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
+            </>
+          )}
         </div>
       </section>
     </div>
   )
 }
 
-/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -235,7 +241,6 @@ export default function App() {
   // unread count for messaging badge (used by Header via ChatLauncher)
   const [unread, setUnread] = useState(0)
 
-  // Safe auth bootstrap with fallback timer
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -287,7 +292,7 @@ export default function App() {
             {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
-            {/* Private routes (basic guard) */}
+            {/* Private routes */}
             <Route
               path="/profile"
               element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
@@ -331,6 +336,9 @@ export default function App() {
             {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
+            {/* Admin verify (page will self-guard by admin table) */}
+            <Route path="/admin/verify" element={<AdminVerify />} />
+
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -344,6 +352,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
