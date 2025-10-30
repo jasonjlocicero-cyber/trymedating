@@ -1,44 +1,40 @@
 // src/components/QRShareCard.jsx
-import React, { useRef } from "react";
+import React from "react";
 import QRCode from "react-qr-code";
 
-export default function QRShareCard({ link, title = "Scan to view my profile" }) {
-  const svgWrapRef = useRef(null);
-
+export default function QRShareCard({
+  link,
+  title = "Scan to connect",
+  size = 256,
+}) {
   return (
-    <div className="qr-card">
+    <div
+      className="qr-card"
+      style={{
+        display: "inline-block",
+        background: "#fff",
+        padding: 16,
+        borderRadius: 12,
+        border: "1px solid var(--border)",
+        boxShadow: "0 1px 3px rgba(0,0,0,.06)",
+      }}
+    >
+      {/* QR */}
       <div
-        ref={svgWrapRef}
         style={{
-          background: "#fff",
-          padding: 12,
           display: "grid",
           placeItems: "center",
         }}
       >
-        <QRCode value={link || ""} size={224} />
+        <QRCode value={link || ""} size={size} />
       </div>
 
-      <div className="qr-caption">{title}</div>
-
-      {/* Single, clear CTA */}
+      {/* Caption */}
       <div
-        style={{
-          display: "flex",
-          gap: 8,
-          justifyContent: "center",
-          marginTop: 10,
-        }}
+        className="qr-caption"
+        style={{ textAlign: "center", marginTop: 8, color: "var(--muted)" }}
       >
-        <a
-          href={link || "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-primary btn-pill"
-          title="Open your public profile"
-        >
-          Public profile
-        </a>
+        {title}
       </div>
     </div>
   );
