@@ -11,6 +11,9 @@ function sanitizeHandle(s) {
   return base || 'user'
 }
 
+const AVATAR_SIZE = 180        // bigger photo like before
+const WIDE_BREAKPOINT = 720    // switch to 2 cols at this width
+
 export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -27,10 +30,22 @@ export default function ProfilePage() {
     is_verified: false,
   })
 
-  // ==== Verification state ====
-  const [vreq, setVreq] = useState(null)        // latest verification request (if any)
+  // Verification state
+  const [vreq, setVreq] = useState(null)
   const [vBusy, setVBusy] = useState(false)
   const [vMsg, setVMsg] = useState('')
+
+  // Track viewport to keep layout responsive without changing global CSS
+  const [wide, setWide] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= WIDE_BREAKPOINT : true
+  )
+  useEffect(() => {
+    function onResize() {
+      setWide(window.innerWidth >= WIDE_BREAKPOINT)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   // Load auth user
   useEffect(() => {
@@ -42,7 +57,7 @@ export default function ProfilePage() {
     return () => { mounted = false }
   }, [])
 
-  // Ensure we have a profile for the signed-in user
+  // Ensure profile exists
   useEffect(() => {
     if (!me?.id) return
     let mounted = true
@@ -50,17 +65,16 @@ export default function ProfilePage() {
     async function ensureProfile() {
       setLoading(true); setErr(''); setMsg('')
       try {
-        // 1) Try to fetch existing by user_id
         const { data: existing, error: selErr } = await supabase
           .from('profiles')
           .select('handle, display_name, bio, is_public, avatar_url, is_verified')
           .eq('user_id', me.id)
           .maybeSingle()
         if (selErr) throw selErr
+
         if (existing) {
           if (mounted) setProfile(existing)
         } else {
-          // 2) Auto-provision a profile if missing
           const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
           let attempt = 0
           while (true) {
@@ -83,16 +97,16 @@ export default function ProfilePage() {
               if (mounted) setProfile(created)
               break
             }
-            if (insErr?.code === '23505') { // unique handle
+            if (insErr?.code === '23505') {
               attempt += 1
               if (attempt > 30) throw new Error('Could not generate a unique handle.')
-              continue
+            } else {
+              throw insErr
             }
-            throw insErr
           }
         }
 
-        // Pull most recent verification request
+        // Latest verification request
         const { data: req } = await supabase
           .from('verification_requests')
           .select('*')
@@ -145,7 +159,7 @@ export default function ProfilePage() {
     }
   }
 
-  // ==== Avatar Upload/Remove helpers ====
+  // Avatar upload/remove
   async function handleAvatarChange(evt) {
     const file = evt.target.files?.[0]
     if (!file || !me?.id) return
@@ -154,18 +168,15 @@ export default function ProfilePage() {
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
       const path = `avatars/${me.id}-${Date.now()}.${ext}`
 
-      // Upload
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         cacheControl: '3600',
         upsert: false
       })
       if (upErr) throw upErr
 
-      // Public URL
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(path)
       const nextUrl = pub?.publicUrl || ''
 
-      // Save to profile
       const { data, error } = await supabase
         .from('profiles')
         .update({ avatar_url: nextUrl })
@@ -198,7 +209,7 @@ export default function ProfilePage() {
     }
   }
 
-  // ==== Verification actions ====
+  // Verification actions
   async function requestVerification() {
     if (!me?.id) return
     setVBusy(true); setVMsg('')
@@ -252,7 +263,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container profile-narrow" style={{ padding: '28px 0' }}>
+    <div className="container" style={{ padding: '28px 0', maxWidth: 1100 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Your public handle and basic details. Others can see your profile if you set it to public.
@@ -261,11 +272,22 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <div className="row-split">
-        {/* Left: Avatar card */}
-        <div style={{ display: 'grid', gap: 10 }}>
+      {/* Two-column layout on wide screens, single-column on mobile */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: wide ? '300px 1fr' : '1fr',
+          gap: 24,
+          alignItems: 'start'
+        }}
+      >
+        {/* Left: Avatar */}
+        <div style={{ display: 'grid', gap: 12 }}>
           <div className="section-title">Profile photo</div>
-          <div className="avatar-frame">
+          <div
+            className="avatar-frame"
+            style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+          >
             {profile.avatar_url ? (
               <img
                 src={profile.avatar_url}
@@ -273,11 +295,12 @@ export default function ProfilePage() {
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             ) : (
-              <div className="avatar-initials">
+              <div className="avatar-initials" style={{ fontSize: 44 }}>
                 {(profile.display_name || profile.handle || 'U').slice(0, 1).toUpperCase()}
               </div>
             )}
           </div>
+
           <div className="actions-row">
             <label className="btn btn-primary" style={{ cursor: 'pointer' }}>
               Upload photo
@@ -347,7 +370,6 @@ export default function ProfilePage() {
               {saving ? 'Saving…' : 'Save profile'}
             </button>
 
-            {/* Read-only verified chip if verified */}
             {profile.is_verified && (
               <span
                 style={{
@@ -363,7 +385,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          {/* === Verification block === */}
+          {/* Verification box */}
           <div
             style={{
               marginTop: 6,
