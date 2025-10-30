@@ -1,15 +1,15 @@
 // src/pages/InviteQR.jsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import QRShareCard from "../components/QRShareCard";
+import { Link } from "react-router-dom";
 
 export default function InviteQR() {
   const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
 
-  // Load current user
+  // auth
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -17,97 +17,95 @@ export default function InviteQR() {
       if (!alive) return;
       setMe(user || null);
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
-  // Load profile (handle drives the link)
+  // load profile
   useEffect(() => {
     if (!me?.id) return;
     let alive = true;
     setLoading(true);
-    setErr("");
-    setProfile(null);
-
     (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("handle, is_public")
-          .eq("user_id", me.id)
-          .maybeSingle();
-        if (error) throw error;
-        if (!data) throw new Error("Profile not found.");
-        if (!alive) return;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("handle, is_public, avatar_url")
+        .eq("user_id", me.id)
+        .maybeSingle();
+      if (!alive) return;
+      if (error) {
+        console.error(error);
+        setProfile(null);
+      } else {
         setProfile(data);
-      } catch (e) {
-        if (!alive) return;
-        setErr(e.message || "Failed to load profile.");
-      } finally {
-        if (alive) setLoading(false);
       }
+      setLoading(false);
     })();
-
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [me?.id]);
 
-  // Build the link that the QR encodes and the button opens
-  const link = useMemo(() => {
-    const origin =
-      (typeof window !== "undefined" && window.location.origin) || "";
-    const handle = profile?.handle || "";
-    if (!origin || !handle) return "";
-    // Open public profile first, with a connect hint param
-    return `${origin}/u/${handle}?connect=1`;
-  }, [profile?.handle]);
+  if (!me) {
+    return (
+      <div className="container" style={{ padding: "28px 0" }}>
+        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>My Invite</h1>
+        <div className="muted">Please sign in to view this page.</div>
+      </div>
+    );
+  }
+
+  const readyForInvite = !!(profile?.is_public && profile?.avatar_url);
+  const link = profile?.handle
+    ? `${location.origin}/u/${profile.handle}?connect=1`
+    : "";
 
   return (
-    <div className="container" style={{ padding: "28px 0", maxWidth: 980 }}>
+    <div className="container" style={{ padding: "28px 0", maxWidth: 920 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>My Invite</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
-        Show this QR to someone you’ve just met so they can view your public
-        profile and request a connection.
+        Show this QR to someone you’ve just met so they can view your public profile and request a
+        connection.
       </p>
-
-      {err && (
-        <div className="helper-error" style={{ marginBottom: 12 }}>
-          {err}
-        </div>
-      )}
 
       {loading ? (
         <div className="muted">Loading…</div>
+      ) : readyForInvite ? (
+        <div style={{ display: "grid", placeItems: "center" }}>
+          <div style={{ maxWidth: 520, width: "100%" }}>
+            <QRShareCard link={link} title="Scan to view my profile" />
+            <div style={{ display: "grid", placeItems: "center", marginTop: 10 }}>
+              <Link className="btn btn-primary" to={`/u/${profile.handle}`}>
+                Public profile
+              </Link>
+            </div>
+          </div>
+        </div>
       ) : (
-        <>
-          <div style={{ display: "grid", placeItems: "center", marginTop: 8 }}>
-            <QRShareCard link={link} title="Scan to view my profile" size={256} />
+        // Not ready: block with nudge
+        <div
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: 16,
+            background: "#fff",
+            maxWidth: 640,
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Add a face photo to share your invite</div>
+          <div className="muted" style={{ marginBottom: 12 }}>
+            A clear face photo is required before your profile can be public and your invite can be
+            shared. This helps others verify who they met.
           </div>
-
-          {/* Single action button below the card */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              marginTop: 12,
-            }}
-          >
-            <a
-              className="btn btn-primary"
-              href={link}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Public profile
-            </a>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link className="btn btn-primary" to="/profile">Upload photo</Link>
+            {!profile?.is_public && (
+              <div className="helper-muted">After adding a photo, toggle “Public profile” on.</div>
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
 }
+
 
 
 
