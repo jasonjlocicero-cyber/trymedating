@@ -3,13 +3,6 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-/**
- * PublicProfile
- * - Loads a profile by handle from /u/:handle
- * - If profile.is_public === false, injects <meta name="robots" content="noindex">
- * - Shows basic profile info with Message / Connect actions
- * - Displays a verified badge when profile.is_verified is truthy
- */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
@@ -19,7 +12,6 @@ export default function PublicProfile() {
   const [me, setMe] = useState(null);
   const [error, setError] = useState("");
 
-  // Load viewer (me)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -33,7 +25,6 @@ export default function PublicProfile() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // Fetch profile by handle
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -44,9 +35,10 @@ export default function PublicProfile() {
       try {
         if (!cleanHandle) throw new Error("No handle provided.");
 
+        // 🔧 Hot-fix: do NOT select is_verified until the column exists
         const { data, error } = await supabase
           .from("profiles")
-          .select("user_id, display_name, handle, bio, avatar_url, is_public, is_verified, created_at")
+          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
 
@@ -65,7 +57,6 @@ export default function PublicProfile() {
     return () => { alive = false; };
   }, [cleanHandle]);
 
-  // Inject <meta name="robots" content="noindex"> when private
   useEffect(() => {
     let tag;
     if (profile && profile.is_public === false) {
@@ -77,10 +68,9 @@ export default function PublicProfile() {
     return () => { if (tag) document.head.removeChild(tag); };
   }, [profile?.is_public]);
 
-  const avatar = profile?.avatar_url || "/logo-mark.png"; // fallback
+  const avatar = profile?.avatar_url || "/logo-mark.png";
   const title = profile?.display_name || `@${cleanHandle}`;
 
-  // Actions
   const isOwner = !!(me?.id && profile?.user_id && me.id === profile.user_id);
   const canAct = !!(me?.id && profile?.user_id && !isOwner);
 
@@ -93,7 +83,6 @@ export default function PublicProfile() {
     window.dispatchEvent(new CustomEvent("open-chat", { detail }));
   };
 
-  // Small verified badge (inline SVG)
   const VerifiedBadge = () => (
     <span
       title="Verified"
@@ -101,36 +90,28 @@ export default function PublicProfile() {
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 18,
-        height: 18,
+        width: 18, height: 18,
         borderRadius: "50%",
-        background: "var(--brand-teal)",
-        color: "#fff",
-        marginLeft: 6,
-        border: "1px solid var(--brand-teal-700)",
+        background: "var(--brand-teal)", color: "#fff",
+        marginLeft: 6, border: "1px solid var(--brand-teal-700)",
       }}
       aria-label="Verified profile"
     >
-      {/* check mark */}
       <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden>
         <path d="M16.707 5.293a1 1 0 0 1 0 1.414l-7.5 7.5a1 1 0 0 1-1.414 0l-3-3A1 1 0 0 1 5.207 9.793L8 12.586l6.793-6.793a1 1 0 0 1 1.414 0Z" fill="currentColor"/>
       </svg>
     </span>
   );
 
+  // Only show badge once the column exists (later) and is true
+  const showVerified = Boolean(profile && Object.prototype.hasOwnProperty.call(profile, "is_verified") && profile.is_verified);
+
   return (
     <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
       {loading && <div className="muted">Loading profile…</div>}
 
       {!loading && error && (
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: 16,
-            background: "#fff5f5",
-          }}
-        >
+        <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "#fff5f5" }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div className="helper-error">{error}</div>
           <div style={{ marginTop: 10 }}>
@@ -141,7 +122,6 @@ export default function PublicProfile() {
 
       {!loading && !error && profile && (
         <>
-          {/* Header card */}
           <div
             style={{
               display: "grid",
@@ -154,38 +134,25 @@ export default function PublicProfile() {
               background: "#fff",
             }}
           >
-            {/* Avatar */}
             <div
               style={{
-                width: 96,
-                height: 96,
-                borderRadius: "50%",
-                overflow: "hidden",
-                border: "1px solid var(--border)",
-                background: "#f8fafc",
-                display: "grid",
-                placeItems: "center",
+                width: 96, height: 96, borderRadius: "50%", overflow: "hidden",
+                border: "1px solid var(--border)", background: "#f8fafc",
+                display: "grid", placeItems: "center",
               }}
             >
-              <img
-                src={avatar}
-                alt={`${title} avatar`}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+              <img src={avatar} alt={`${title} avatar`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </div>
 
-            {/* Main */}
             <div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                 <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, display: "flex", alignItems: "center" }}>
                   {title}
-                  {profile?.is_verified ? <VerifiedBadge /> : null}
+                  {showVerified ? <VerifiedBadge /> : null}
                 </h1>
-                {profile?.handle && (
-                  <span className="muted" style={{ fontSize: 14 }}>
-                    @{profile.handle}
-                  </span>
-                )}
+                {profile?.handle && <span className="muted" style={{ fontSize: 14 }}>
+                  @{profile.handle}
+                </span>}
               </div>
 
               <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
@@ -194,77 +161,41 @@ export default function PublicProfile() {
             </div>
           </div>
 
-          {/* Action row */}
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              marginTop: 14,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
             {profile?.is_public ? (
               <>
                 {canAct && (
                   <>
-                    <button className="btn btn-primary btn-pill" type="button" onClick={openChat} title="Open chat">
-                      Message
-                    </button>
-                    <Link
-                      className="btn btn-accent btn-pill"
-                      to={`/connect?to=@${profile.handle || cleanHandle}`}
-                      title="Send connection request"
-                    >
+                    <button className="btn btn-primary btn-pill" type="button" onClick={openChat}>Message</button>
+                    <Link className="btn btn-accent btn-pill" to={`/connect?to=@${profile.handle || cleanHandle}`}>
                       Connect
                     </Link>
                   </>
                 )}
-                {!me?.id && (
-                  <Link className="btn btn-primary btn-pill" to="/auth">
-                    Sign in to connect
-                  </Link>
-                )}
-                {isOwner && (
-                  <span className="helper-muted">This is your profile.</span>
-                )}
+                {!me?.id && <Link className="btn btn-primary btn-pill" to="/auth">Sign in to connect</Link>}
+                {isOwner && <span className="helper-muted">This is your profile.</span>}
               </>
             ) : (
               <>
                 <span
                   style={{
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: "#fde68a",
-                    fontWeight: 700,
-                    fontSize: 13,
-                    border: "1px solid var(--border)",
+                    padding: "4px 10px", borderRadius: 999, background: "#fde68a",
+                    fontWeight: 700, fontSize: 13, border: "1px solid var(--border)",
                   }}
                 >
                   Private profile
                 </span>
-                <span className="helper-muted" style={{ fontSize: 13 }}>
-                  This page is hidden from search engines.
-                </span>
+                <span className="helper-muted" style={{ fontSize: 13 }}>This page is hidden from search engines.</span>
                 {canAct && (
-                  <Link
-                    className="btn btn-neutral btn-pill"
-                    to={`/connect?to=@${profile.handle || cleanHandle}`}
-                    title="Request connect"
-                  >
+                  <Link className="btn btn-neutral btn-pill" to={`/connect?to=@${profile.handle || cleanHandle}`}>
                     Request connect
                   </Link>
                 )}
-                {!me?.id && (
-                  <Link className="btn btn-primary btn-pill" to="/auth">
-                    Sign in to request
-                  </Link>
-                )}
+                {!me?.id && <Link className="btn btn-primary btn-pill" to="/auth">Sign in to request</Link>}
               </>
             )}
           </div>
 
-          {/* Back link */}
           <div style={{ marginTop: 12 }}>
             <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
           </div>
@@ -273,6 +204,7 @@ export default function PublicProfile() {
     </div>
   );
 }
+
 
 
 
