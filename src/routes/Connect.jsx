@@ -11,9 +11,10 @@ import { supabase } from '../lib/supabaseClient'
  *    • /connect/:token   (token may be a UUID, or b64 JSON like {"t":"tmdv1","pid":"<uuid>"})
  *
  * - Behavior:
- *    • If signed in and link is valid: auto-create/ensure a pending request (requester = me.id, recipient = target)
+ *    • If signed in and link is valid: ensure a pending request (requester = me.id, recipient = target)
  *    • Immediately opens the Chat bubble focused on the recipient so Accept/Reject is visible
  *    • Shows current status (pending/accepted/rejected) with CTAs
+ *    • NEW: Hard gate — requester must have an avatar photo before sending a request
  */
 
 // Global opener used by ChatLauncher / ChatDock
@@ -52,10 +53,13 @@ export default function Connect({ me }) {
   const authed = !!me?.id
 
   const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected'
+  const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected' | 'blocked_no_avatar'
   const [errorText, setErrorText] = useState('')
   const [recipientHandle, setRecipientHandle] = useState(null) // optional: show who you're connecting to
   const [message, setMessage] = useState('') // small inline status text
+
+  // NEW: my profile (to check avatar gate)
+  const [myProfile, setMyProfile] = useState(null)
 
   // Load current relationship status (if signed in and link valid)
   useEffect(() => {
@@ -72,12 +76,34 @@ export default function Connect({ me }) {
 
       if (recipientId === me.id) { setStatus('self'); return }
 
-      // Optional: fetch a public handle/display name to show
+      // Fetch my profile (need avatar_url)
+      try {
+        const { data: mine, error: mineErr } = await supabase
+          .from('profiles')
+          .select('user_id, handle, display_name, avatar_url')
+          .eq('user_id', me.id)
+          .maybeSingle()
+        if (mineErr) throw mineErr
+        if (!cancelled) setMyProfile(mine)
+        // Hard gate: requester must have a photo
+        if (!mine?.avatar_url) {
+          if (!cancelled) setStatus('blocked_no_avatar')
+          return
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setStatus('none')
+          setErrorText(e.message || 'Failed to load your profile.')
+        }
+        return
+      }
+
+      // Optional: fetch a public handle/display name to show for the recipient
       try {
         const { data: prof } = await supabase
           .from('profiles')
           .select('handle, display_name')
-          .eq('user_id', recipientId) // common schema; if your profiles uses id=auth.id, switch to .eq('id', recipientId)
+          .eq('user_id', recipientId)
           .maybeSingle()
         if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null)
       } catch {
@@ -105,7 +131,6 @@ export default function Connect({ me }) {
       if (!data) {
         // No prior row — we will auto-create pending and open chat
         setStatus('none')
-        // Auto-create (idempotent via unique pending pair index if present)
         setBusy(true)
         const { error: insErr } = await supabase
           .from('connection_requests')
@@ -146,6 +171,12 @@ export default function Connect({ me }) {
       setStatus(recipientId === me.id ? 'self' : 'invalid')
       return
     }
+    // NEW: double-check the avatar gate at click time too
+    if (!myProfile?.avatar_url) {
+      setStatus('blocked_no_avatar')
+      return
+    }
+
     setBusy(true)
     const { error } = await supabase
       .from('connection_requests')
@@ -198,6 +229,32 @@ export default function Connect({ me }) {
         </div>
       )}
 
+      {/* NEW: hard-gate UI when requester has no photo */}
+      {status === 'blocked_no_avatar' && (
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            background: '#fff',
+            padding: 16,
+            marginTop: 12
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Add a photo to connect</div>
+          <div className="muted" style={{ marginBottom: 10 }}>
+            To request a connection, please upload a clear photo of yourself. This helps people verify who they just met.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link className="btn btn-primary btn-pill" to="/profile">Upload photo</Link>
+            {recipientHandle && (
+              <Link className="btn btn-neutral btn-pill" to="/" >
+                Back home
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main actions */}
       <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {status === 'accepted' ? (
@@ -220,7 +277,7 @@ export default function Connect({ me }) {
             </button>
             <Link className="btn btn-neutral" to="/">Back</Link>
           </>
-        ) : status === 'none' || status === 'unknown' ? (
+        ) : (status === 'none' || status === 'unknown') && status !== 'blocked_no_avatar' ? (
           <>
             {!authed && (
               <>
@@ -248,4 +305,5 @@ export default function Connect({ me }) {
     </div>
   )
 }
+
 
