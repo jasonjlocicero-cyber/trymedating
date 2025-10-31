@@ -1,39 +1,88 @@
 // src/components/Header.jsx
-import React from "react";
-import { Link, NavLink } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  // Palette with resilient fallbacks
-  const GREEN  = "var(--brand-green, var(--brand-teal, #079c84))";
-  const ROSE   = "var(--brand-rose, var(--brand-coral, #f43f5e))";
-  const BORDER = "var(--border, #e5e7eb)";
+  const loc = useLocation();
+  const [isVerified, setIsVerified] = useState(false);
 
-  const pillBase = {
-    padding: "8px 14px",
-    borderRadius: 999,
-    fontWeight: 800,
-    lineHeight: 1,
-    textDecoration: "none",
-    transition: "all .15s ease",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-  };
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        if (!me?.id) {
+          if (alive) setIsVerified(false);
+          return;
+        }
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("is_verified, verified_at")
+          .eq("user_id", me.id)   // adjust if your profiles uses id = auth.uid
+          .maybeSingle();
+        if (!alive) return;
+        if (error) {
+          console.warn("[Header] load profile verify status:", error);
+          setIsVerified(false);
+          return;
+        }
+        const v =
+          !!data?.is_verified || (data?.verified_at != null && data?.verified_at !== "");
+        setIsVerified(v);
+      } catch (e) {
+        if (alive) setIsVerified(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [me?.id]);
 
-  const pillActive = {
-    ...pillBase,
-    background: GREEN,
+  // Shared nav button style using site-wide .btn classes
+  const navBtnClass = "btn btn-neutral btn-pill";
+  const activeStyle = {
+    background: "var(--brand-teal)",
     color: "#fff",
-    border: `1px solid ${GREEN}`,
-    boxShadow: "0 1px 0 rgba(0,0,0,.04)",
+    borderColor: "var(--brand-teal-700)"
   };
 
-  const pillIdle = {
-    ...pillBase,
-    background: "#fff",
-    color: "#111827",
-    border: `1px solid ${BORDER}`,
-  };
+  const VerifiedChip = () => (
+    <span
+      title="Verified profile"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        marginLeft: 6,
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 800,
+        lineHeight: "16px",
+        background: "var(--brand-teal)",
+        color: "#fff",
+        border: "1px solid var(--brand-teal-700)",
+        whiteSpace: "nowrap"
+      }}
+    >
+      {/* checkmark */}
+      <svg
+        aria-hidden
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ display: "block" }}
+      >
+        <path
+          d="M9 12.75l2 2 4-4M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      Verified
+    </span>
+  );
 
   return (
     <header
@@ -43,7 +92,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
         top: 0,
         zIndex: 40,
         background: "#fff",
-        borderBottom: `1px solid ${BORDER}`,
+        borderBottom: "1px solid var(--border)"
       }}
     >
       <div
@@ -53,10 +102,10 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          padding: "10px 0",
+          padding: "10px 0"
         }}
       >
-        {/* Brand */}
+        {/* Brand: logo image + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -65,13 +114,17 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
             display: "flex",
             alignItems: "center",
             gap: 10,
-            lineHeight: 1,
+            lineHeight: 1
           }}
         >
           <img
             src="/logo-mark.png"
             alt="TryMeDating logo"
-            style={{ height: "clamp(22px, 2.2vw, 28px)", width: "auto", display: "block" }}
+            style={{
+              height: "clamp(22px, 2.2vw, 28px)",
+              width: "auto",
+              display: "block"
+            }}
           />
           <div
             style={{
@@ -79,39 +132,51 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
               fontSize: "clamp(18px, 2.3vw, 22px)",
               letterSpacing: 0.2,
               display: "flex",
-              gap: 2,
+              gap: 2
             }}
           >
-            <span style={{ color: GREEN }}>Try</span>
-            <span style={{ color: GREEN }}>Me</span>
-            <span style={{ color: ROSE }}>Dating</span>
+            <span style={{ color: "var(--brand-teal)" }}>Try</span>
+            <span style={{ color: "var(--brand-teal)" }}>Me</span>
+            <span style={{ color: "var(--brand-coral)" }}>Dating</span>
           </div>
         </Link>
 
-        {/* Nav */}
+        {/* Right side */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" end style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
+          <NavLink
+            to="/"
+            className={navBtnClass}
+            end
+            style={({ isActive }) => (isActive ? activeStyle : undefined)}
+          >
             Home
           </NavLink>
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
-                Profile
-              </NavLink>
-              <NavLink to="/settings" style={({ isActive }) => (isActive ? pillActive : pillIdle)}>
+              <span style={{ display: "inline-flex", alignItems: "center" }}>
+                <NavLink
+                  to="/profile"
+                  className={navBtnClass}
+                  style={({ isActive }) => (isActive ? activeStyle : undefined)}
+                >
+                  Profile
+                </NavLink>
+                {isVerified && <VerifiedChip />}
+              </span>
+
+              <NavLink
+                to="/settings"
+                className={navBtnClass}
+                style={({ isActive }) => (isActive ? activeStyle : undefined)}
+              >
                 Settings
               </NavLink>
 
               <button
                 type="button"
+                className="btn btn-neutral btn-pill"
                 onClick={onSignOut}
-                style={{
-                  ...pillBase,
-                  background: ROSE,
-                  color: "#fff",
-                  border: `1px solid ${ROSE}`,
-                }}
               >
                 Sign out
               </button>
@@ -119,17 +184,14 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           ) : (
             <NavLink
               to="/auth"
-              style={{
-                ...pillBase,
-                background: GREEN,
-                color: "#fff",
-                border: `1px solid ${GREEN}`,
-              }}
+              className="btn btn-primary btn-pill"
+              style={({ isActive }) => (isActive ? undefined : undefined)}
             >
               Sign in
             </NavLink>
           )}
 
+          {/* Optional tiny unread badge */}
           {typeof unread === "number" && unread > 0 && (
             <span
               title={`${unread} unread`}
@@ -144,7 +206,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
                 color: "#fff",
                 fontSize: 11,
                 fontWeight: 800,
-                border: `1px solid ${BORDER}`,
+                border: "1px solid var(--border)"
               }}
             >
               {unread > 99 ? "99+" : unread}
@@ -155,6 +217,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
