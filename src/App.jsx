@@ -23,10 +23,10 @@ import DebugQR from './pages/DebugQR'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect' // QR route to create a connection request
+import Connect from './routes/Connect'
 
 /** --------------------------
- * Home (hero + features)
+ * Home (hero + features + CTA)
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
@@ -64,6 +64,7 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
+          {/* Primary CTAs */}
           <div
             style={{
               display: 'flex',
@@ -83,11 +84,11 @@ function Home({ me }) {
               <>
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
-                {/* Removed Settings CTA here — Settings remains in the header */}
               </>
             )}
           </div>
 
+          {/* Small trust chips */}
           <div
             style={{
               display: 'flex',
@@ -140,32 +141,32 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* SAFETY / PRIVACY STRIP */}
-      <section
-        style={{
-          padding: '18px 0',
-          borderTop: '1px solid var(--border)',
-          borderBottom: '1px solid var(--border)',
-          background: '#fbfbfb'
-        }}
-      >
+      {/* GET STARTED */}
+      <section style={{ padding: '28px 0' }}>
         <div
           className="container"
           style={{
             display: 'flex',
+            gap: 12,
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 14,
-            flexWrap: 'wrap',
-            textAlign: 'center'
+            flexWrap: 'wrap'
           }}
         >
-          <span style={{ fontWeight: 700 }}>Your pace. Your privacy.</span>
-          <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
+          {!authed ? (
+            <>
+              <div className="muted">Ready to begin?</div>
+              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
+            </>
+          ) : (
+            <>
+              <div className="muted">Continue where you left off:</div>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
+            </>
+          )}
         </div>
       </section>
-
-      {/* NOTE: Removed the “Continue where you left off” section */}
     </div>
   )
 }
@@ -266,8 +267,14 @@ export default function App() {
             <Route path="/auth" element={<AuthPage />} />
 
             {/* Private routes */}
-            <Route path="/profile" element={me ? <ProfilePage /> : <Navigate to="/auth" replace />} />
-            <Route path="/settings" element={me ? <SettingsPage /> : <Navigate to="/auth" replace />} />
+            <Route
+              path="/profile"
+              element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/settings"
+              element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
+            />
 
             {/* Public profile */}
             <Route path="/u/:handle" element={<PublicProfile />} />
@@ -278,17 +285,29 @@ export default function App() {
             <Route path="/privacy" element={<Privacy />} />
 
             {/* Direct chat routes */}
-            <Route path="/chat/:peerId" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat/handle/:handle" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route
+              path="/chat/:peerId"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat/handle/:handle"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
 
             {/* Invite QR */}
-            <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
+            <Route
+              path="/invite"
+              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
+            />
 
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
-            {/* QR scan route */}
+            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
             {/* Fallback */}
@@ -304,6 +323,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
