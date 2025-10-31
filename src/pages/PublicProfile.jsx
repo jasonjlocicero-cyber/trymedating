@@ -3,12 +3,6 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-/**
- * PublicProfile
- * - Loads a profile by handle from /u/:handle
- * - If profile.is_public === false, injects <meta name="robots" content="noindex">
- * - Shows basic profile info with Connect / Message actions
- */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
@@ -41,15 +35,12 @@ export default function PublicProfile() {
 
     (async () => {
       try {
-        if (!cleanHandle) {
-          throw new Error("No handle provided.");
-        }
+        if (!cleanHandle) throw new Error("No handle provided.");
         const { data, error } = await supabase
           .from("profiles")
-          .select("user_id, display_name, handle, bio, avatar_url, is_public, is_verified, created_at")
+          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
-
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
         if (!alive) return;
@@ -62,12 +53,10 @@ export default function PublicProfile() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [cleanHandle]);
 
-  // Inject noindex for private profiles
+  // Inject noindex when private
   useEffect(() => {
     let tag;
     if (profile && profile.is_public === false) {
@@ -97,18 +86,11 @@ export default function PublicProfile() {
     <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
       {loading && <div className="muted">Loading profile…</div>}
       {!loading && error && (
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: 16,
-            background: "#fff5f5",
-          }}
-        >
+        <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "#fff5f5" }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div className="helper-error">{error}</div>
           <div style={{ marginTop: 10 }}>
-            <Link className="btn btn-neutral" to="/">Back home</Link>
+            <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
           </div>
         </div>
       )}
@@ -129,44 +111,18 @@ export default function PublicProfile() {
           {/* Avatar */}
           <div
             style={{
-              width: 96,
-              height: 96,
-              borderRadius: "50%",
-              overflow: "hidden",
-              border: "1px solid var(--border)",
-              background: "#f8fafc",
-              display: "grid",
-              placeItems: "center",
+              width: 96, height: 96, borderRadius: "50%", overflow: "hidden",
+              border: "1px solid var(--border)", background: "#f8fafc", display: "grid", placeItems: "center",
             }}
           >
-            <img
-              src={avatar}
-              alt={`${title} avatar`}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
+            <img src={avatar} alt={`${title} avatar`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
 
           {/* Main */}
           <div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
-              {profile?.handle && (
-                <span className="muted" style={{ fontSize: 14 }}>
-                  @{profile.handle}
-                </span>
-              )}
-              {profile?.is_public && profile?.is_verified && (
-                <span style={{
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: 'var(--brand-teal)',
-                  color: '#fff',
-                  fontSize: 12,
-                  fontWeight: 800
-                }}>
-                  Verified ✓
-                </span>
-              )}
+              {profile?.handle && <span className="muted" style={{ fontSize: 14 }}>@{profile.handle}</span>}
             </div>
 
             <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
@@ -176,26 +132,16 @@ export default function PublicProfile() {
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
               {profile?.is_public ? (
                 <>
-                  {canAct && (
+                  {canAct ? (
                     <>
-                      <button
-                        className="btn btn-primary"
-                        type="button"
-                        onClick={openChat}
-                        title="Open chat"
-                      >
+                      <button className="btn btn-primary btn-pill" type="button" onClick={openChat}>
                         Message
                       </button>
-                      <Link
-                        className="btn btn-neutral"
-                        to={`/connect?to=${profile.user_id}`}
-                        title="Send connection request"
-                      >
+                      <Link className="btn btn-neutral btn-pill" to={`/connect?to=${profile.user_id}`}>
                         Connect
                       </Link>
                     </>
-                  )}
-                  {!canAct && (
+                  ) : (
                     <span className="helper-muted">This is your profile or you’re not signed in.</span>
                   )}
                 </>
@@ -203,12 +149,8 @@ export default function PublicProfile() {
                 <>
                   <span
                     style={{
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      background: "#fde68a",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      border: "1px solid var(--border)",
+                      padding: "4px 10px", borderRadius: 999, background: "#fde68a",
+                      fontWeight: 700, fontSize: 13, border: "1px solid var(--border)",
                     }}
                   >
                     Private profile
@@ -216,15 +158,6 @@ export default function PublicProfile() {
                   <span className="helper-muted" style={{ fontSize: 13 }}>
                     This page is hidden from search engines.
                   </span>
-                  {canAct && (
-                    <Link
-                      className="btn btn-neutral"
-                      to={`/connect?to=${profile.user_id}`}
-                      title="Send connection request"
-                    >
-                      Request connect
-                    </Link>
-                  )}
                 </>
               )}
             </div>
@@ -232,9 +165,8 @@ export default function PublicProfile() {
         </div>
       )}
 
-      {/* Back link */}
       <div style={{ marginTop: 16 }}>
-        <Link className="btn btn-neutral" to="/">← Back home</Link>
+        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
       </div>
     </div>
   );
