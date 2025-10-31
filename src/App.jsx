@@ -20,6 +20,7 @@ import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'        // keeps quick access to invite QR
 import DebugQR from './pages/DebugQR'          // optional smoke test
+import AdminVerify from './pages/AdminVerify'  // <-- NEW: admin review page
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -165,7 +166,7 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* GET STARTED (only for signed-out users) */}
+      {/* GET STARTED */}
       <section style={{ padding: '28px 0' }}>
         <div
           className="container"
@@ -182,7 +183,13 @@ function Home({ me }) {
               <div className="muted">Ready to begin?</div>
               <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
             </>
-          ) : null}
+          ) : (
+            <>
+              <div className="muted">Continue where you left off:</div>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
+            </>
+          )}
         </div>
       </section>
     </div>
@@ -331,6 +338,9 @@ export default function App() {
             {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
+            {/* --- Admin routes --- */}
+            <Route path="/admin/verify" element={<AdminVerify />} /> {/* NEW */}
+
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -340,10 +350,13 @@ export default function App() {
       <Footer />
 
       {/* Bottom-right chat bubble (render once) */}
-      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
+      <ChatLauncher onUnreadChange={(n) =>
+        setUnread(prev => (typeof n === 'number' ? n : prev))
+      } />
     </ChatProvider>
   )
 }
+
 
 
 
