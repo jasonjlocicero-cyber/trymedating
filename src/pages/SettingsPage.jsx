@@ -1,97 +1,173 @@
 // src/pages/SettingsPage.jsx
-import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 
-export default function SettingsPage({ me }) {
-  const authed = !!me?.id
-  const [blocked, setBlocked] = useState([])
-  const [loading, setLoading] = useState(true)
+export default function SettingsPage() {
+  const nav = useNavigate();
+
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Danger zone – delete
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState("");
 
   useEffect(() => {
-    let cancel = false
-    if (!authed) {
-      setBlocked([])
-      setLoading(false)
-      return
-    }
-    ;(async () => {
+    let alive = true;
+    (async () => {
       try {
-        const { data, error } = await supabase
-          .from('blocks')
-          .select('blocked_user_id, created_at, profiles!blocks_blocked_user_id_fkey(display_name, handle, avatar_url)')
-          .eq('user_id', me.id)
-        if (error) throw error
-        if (!cancel) setBlocked(data || [])
-      } catch (e) {
-        console.error(e)
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!alive) return;
+        setMe(user || null);
       } finally {
-        if (!cancel) setLoading(false)
+        if (alive) setLoading(false);
       }
-    })()
-    return () => { cancel = true }
-  }, [authed, me?.id])
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      setMe(session?.user || null);
+    });
+    return () => sub?.subscription?.unsubscribe?.();
+  }, []);
 
-  async function handleUnblock(userId) {
+  async function handleDelete() {
+    setDeleteMsg("");
+    setDeleting(true);
     try {
-      const { error } = await supabase
-        .from('blocks')
-        .delete()
-        .eq('user_id', me.id)
-        .eq('blocked_user_id', userId)
-      if (error) throw error
-      setBlocked(prev => prev.filter(b => b.blocked_user_id !== userId))
+      // Call your existing Netlify function:
+      //  - Ensure it deletes user data and the auth user.
+      //  - It should verify the current session (server-side).
+      const res = await fetch("/.netlify/functions/delete-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({}), // nothing else needed; function uses session
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Delete failed (${res.status})`);
+      }
+
+      // Sign out locally and return home
+      await supabase.auth.signOut();
+      nav("/", { replace: true });
     } catch (e) {
-      alert(e.message || 'Could not unblock user')
+      setDeleteMsg(e.message || "Delete failed");
+    } finally {
+      setDeleting(false);
     }
   }
 
+  if (loading) {
+    return (
+      <div className="container" style={{ padding: "28px 0" }}>
+        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Settings</h1>
+        <div className="muted">Loading…</div>
+      </div>
+    );
+    }
+
   return (
-    <div className="container" style={{ padding:24 }}>
-      <h1>Settings</h1>
+    <div className="container" style={{ padding: "28px 0", maxWidth: 860 }}>
+      <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Settings</h1>
 
-      {!authed && (
-        <p className="muted">You must be signed in to manage settings.</p>
-      )}
-
-      {authed && (
-        <div style={{ marginTop:24 }}>
-          <h2 style={{ marginBottom:12 }}>Blocked users</h2>
-          {loading && <p className="muted">Loading…</p>}
-          {!loading && blocked.length === 0 && (
-            <p className="muted">You haven’t blocked anyone.</p>
-          )}
-          {!loading && blocked.length > 0 && (
-            <ul style={{ listStyle:'none', padding:0, margin:0, display:'grid', gap:12 }}>
-              {blocked.map(b => (
-                <li key={b.blocked_user_id} className="card" style={{ padding:12, display:'flex', alignItems:'center', gap:12 }}>
-                  <div
-                    style={{
-                      width:40, height:40, borderRadius:'50%',
-                      background: b.profiles?.avatar_url
-                        ? `url(${b.profiles.avatar_url}) center/cover no-repeat`
-                        : '#f1f5f9',
-                      border:'1px solid var(--border)'
-                    }}
-                  />
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:600 }}>
-                      {b.profiles?.display_name || `@${b.profiles?.handle || 'user'}`}
-                    </div>
-                    <div className="muted" style={{ fontSize:12 }}>
-                      @{b.profiles?.handle}
-                    </div>
-                  </div>
-                  <button className="btn btn-secondary" onClick={() => handleUnblock(b.blocked_user_id)}>
-                    Unblock
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      {/* Account overview */}
+      <section
+        style={{
+          border: "1px solid var(--border)",
+          background: "#fff",
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontWeight: 800, marginBottom: 10 }}>Account</div>
+        <div className="muted">Signed in as</div>
+        <div style={{ marginTop: 4 }}>
+          <code>{me?.email || me?.id}</code>
         </div>
-      )}
+      </section>
+
+      {/* Danger zone */}
+      <section
+        style={{
+          border: "1px solid var(--border)",
+          background: "#fff",
+          borderRadius: 12,
+          padding: 16,
+        }}
+      >
+        <div style={{ fontWeight: 800, marginBottom: 6, color: "#b91c1c" }}>
+          Danger zone
+        </div>
+        <div className="muted" style={{ marginBottom: 10 }}>
+          Permanently delete your account and all associated data. This cannot be
+          undone.
+        </div>
+
+        {!showDeleteConfirm ? (
+          <button
+            className="btn btn-accent"
+            type="button"
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            Delete my account
+          </button>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gap: 8,
+              border: "1px dashed var(--border)",
+              borderRadius: 12,
+              padding: 12,
+              maxWidth: 560,
+            }}
+          >
+            <label className="form-label" style={{ fontWeight: 700 }}>
+              Type <code>DELETE</code> to confirm
+            </label>
+            <input
+              className="input"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="DELETE"
+            />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-accent"
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || confirmText.trim() !== "DELETE"}
+              >
+                {deleting ? "Deleting…" : "Yes, delete my account"}
+              </button>
+              <button
+                className="btn btn-neutral"
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setConfirmText("");
+                  setDeleteMsg("");
+                }}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+            </div>
+            {deleteMsg && (
+              <div className="helper-error" style={{ marginTop: 4 }}>
+                {deleteMsg}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
     </div>
-  )
+  );
 }
 
 
