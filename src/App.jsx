@@ -26,7 +26,7 @@ import ConnectionToast from './components/ConnectionToast'
 import Connect from './routes/Connect'
 
 /** --------------------------
- * Home (hero + features + CTA)
+ * Home (hero + features)
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
@@ -88,7 +88,7 @@ function Home({ me }) {
             )}
           </div>
 
-          {/* Small trust chips */}
+          {/* Micro trust chips */}
           <div
             style={{
               display: 'flex',
@@ -141,32 +141,32 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* GET STARTED */}
-      <section style={{ padding: '28px 0' }}>
+      {/* SAFETY / PRIVACY STRIP */}
+      <section
+        style={{
+          padding: '18px 0',
+          borderTop: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border)',
+          background: '#fbfbfb'
+        }}
+      >
         <div
           className="container"
           style={{
             display: 'flex',
-            gap: 12,
             alignItems: 'center',
             justifyContent: 'center',
-            flexWrap: 'wrap'
+            gap: 14,
+            flexWrap: 'wrap',
+            textAlign: 'center'
           }}
         >
-          {!authed ? (
-            <>
-              <div className="muted">Ready to begin?</div>
-              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
-            </>
-          ) : (
-            <>
-              <div className="muted">Continue where you left off:</div>
-              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
-              <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
-            </>
-          )}
+          <span style={{ fontWeight: 700 }}>Your pace. Your privacy.</span>
+          <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
         </div>
       </section>
+
+      {/* (Removed) GET STARTED section to eliminate the "Continue where you left off" block */}
     </div>
   )
 }
@@ -262,8 +262,6 @@ export default function App() {
         ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
-
-            {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
             {/* Private routes */}
@@ -307,7 +305,7 @@ export default function App() {
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
-            {/* QR scan route to create a pending connection request */}
+            {/* QR scan route */}
             <Route path="/connect" element={<Connect me={me} />} />
 
             {/* Fallback */}
