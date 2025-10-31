@@ -3,23 +3,12 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  const baseBtn = {
-    padding: "6px 12px",
-    borderRadius: 999,
-    fontWeight: 700,
-    border: "1px solid #e5e7eb",
-    textDecoration: "none",
-  };
-
-  const navItem = ({ isActive }) => ({
-    ...baseBtn,
-    background: isActive ? "var(--brand-teal)" : "#f3f4f6",
-    color: isActive ? "#fff" : "#111827",
-    borderColor: isActive ? "var(--brand-teal-700)" : "#e5e7eb",
-  });
+  const navLinkClass = ({ isActive }) =>
+    isActive ? "btn btn-primary btn-pill" : "btn btn-neutral btn-pill";
 
   return (
     <header
+      className="site-header"
       style={{
         position: "sticky",
         top: 0,
@@ -53,15 +42,19 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           <img
             src="/logo-mark.png"
             alt="TryMeDating logo"
-            style={{ height: "clamp(22px, 2.2vw, 28px)", width: "auto", display: "block" }}
+            style={{
+              height: "clamp(22px, 2.2vw, 28px)",
+              width: "auto",
+              display: "block",
+            }}
           />
           <div
             style={{
               fontWeight: 900,
               fontSize: "clamp(18px, 2.3vw, 22px)",
+              letterSpacing: 0.2,
               display: "flex",
               gap: 2,
-              letterSpacing: 0.2,
             }}
           >
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
@@ -70,26 +63,31 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           </div>
         </Link>
 
-        {/* Nav */}
+        {/* Right side nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" style={navItem} end>Home</NavLink>
+          <NavLink to="/" className={navLinkClass} end>
+            Home
+          </NavLink>
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={navItem}>Profile</NavLink>
-              <NavLink to="/settings" style={navItem}>Settings</NavLink>
-              <NavLink to="/invite" style={navItem}>My Invite QR</NavLink>
+              <NavLink to="/profile" className={navLinkClass}>
+                Profile
+              </NavLink>
+              <NavLink to="/settings" className={navLinkClass}>
+                Settings
+              </NavLink>
               <button
                 type="button"
-                onClick={onSignOut}
                 className="btn btn-neutral btn-pill"
-                style={{ padding: "6px 12px" }}
+                onClick={onSignOut}
+                style={{ fontWeight: 800 }}
               >
                 Sign out
               </button>
             </>
           ) : (
-            <NavLink to="/auth" style={navItem}>
+            <NavLink to="/auth" className="btn btn-primary btn-pill">
               Sign in
             </NavLink>
           )}
@@ -120,6 +118,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
