@@ -3,12 +3,44 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut = () => {} }) {
-  const navLinkClass = ({ isActive }) =>
-    isActive ? "btn btn-primary btn-pill" : "btn btn-neutral btn-pill";
+  const navLinkStyle = ({ isActive }) => ({
+    padding: "6px 10px",
+    borderRadius: 10,
+    textDecoration: "none",
+    fontWeight: 600,
+    color: isActive ? "#0f172a" : "#111827",
+    background: isActive ? "#eef2ff" : "transparent",
+    border: "1px solid var(--border)",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  });
+
+  const Badge = ({ n }) =>
+    n > 0 ? (
+      <span
+        title={`${n} unread`}
+        style={{
+          display: "inline-grid",
+          placeItems: "center",
+          minWidth: 18,
+          height: 18,
+          padding: "0 5px",
+          borderRadius: 999,
+          background: "#ef4444",
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 800,
+          border: "1px solid var(--border)",
+          lineHeight: 1,
+        }}
+      >
+        {n > 99 ? "99+" : n}
+      </span>
+    ) : null;
 
   return (
     <header
-      className="site-header"
       style={{
         position: "sticky",
         top: 0,
@@ -27,7 +59,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand */}
+        {/* Brand: logo + wordmark */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -65,53 +97,37 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
 
         {/* Right side nav */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <NavLink to="/" className={navLinkClass} end>
+          <NavLink to="/" style={navLinkStyle} end>
             Home
+          </NavLink>
+
+          {/* Messages tab with live unread badge */}
+          <NavLink to="/chat" style={navLinkStyle}>
+            <span>Messages</span>
+            <Badge n={unread} />
           </NavLink>
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" className={navLinkClass}>
+              <NavLink to="/profile" style={navLinkStyle}>
                 Profile
               </NavLink>
-              <NavLink to="/settings" className={navLinkClass}>
+              <NavLink to="/settings" style={navLinkStyle}>
                 Settings
               </NavLink>
               <button
                 type="button"
-                className="btn btn-neutral btn-pill"
+                className="btn btn-neutral"
                 onClick={onSignOut}
-                style={{ fontWeight: 800 }}
+                style={{ padding: "6px 10px", borderRadius: 10, fontWeight: 700 }}
               >
                 Sign out
               </button>
             </>
           ) : (
-            <NavLink to="/auth" className="btn btn-primary btn-pill">
+            <NavLink to="/auth" className="btn btn-primary" style={{ padding: "6px 12px", borderRadius: 10 }}>
               Sign in
             </NavLink>
-          )}
-
-          {/* Unread badge */}
-          {typeof unread === "number" && unread > 0 && (
-            <span
-              title={`${unread} unread`}
-              style={{
-                display: "inline-grid",
-                placeItems: "center",
-                minWidth: 18,
-                height: 18,
-                padding: "0 5px",
-                borderRadius: 999,
-                background: "#ef4444",
-                color: "#fff",
-                fontSize: 11,
-                fontWeight: 800,
-                border: "1px solid var(--border)",
-              }}
-            >
-              {unread > 99 ? "99+" : unread}
-            </span>
           )}
         </div>
       </div>
