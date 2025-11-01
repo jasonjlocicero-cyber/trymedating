@@ -82,8 +82,8 @@ function Home({ me }) {
               </>
             ) : (
               <>
+                {/* Settings CTA removed (by request) */}
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-accent btn-pill" to="/settings">Settings</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
@@ -183,13 +183,7 @@ function Home({ me }) {
               <div className="muted">Ready to begin?</div>
               <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
             </>
-          ) : (
-            <>
-              <div className="muted">Continue where you left off:</div>
-              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
-              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
-            </>
-          )}
+          ) : null /* "Continue where you left off" removed */}
         </div>
       </section>
     </div>
@@ -353,7 +347,7 @@ export default function App() {
 
       <Footer />
 
-      {/* Chat bubble (can still report unread via onUnreadChange if you keep that pattern) */}
+      {/* Chat bubble */}
       <ChatLauncher
         onUnreadChange={(n) => {
           if (typeof n === 'number') setUnread(n)
