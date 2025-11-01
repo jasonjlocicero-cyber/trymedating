@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
+import { subscribeUnreadCount } from './lib/unread'
 
 // Layout
 import Header from './components/Header'
@@ -26,7 +27,7 @@ import ConnectionToast from './components/ConnectionToast'
 import Connect from './routes/Connect'
 
 /** --------------------------
- * Home (hero + features)
+ * Home (hero + features + CTA)
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
@@ -64,7 +65,6 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
-          {/* Primary CTAs */}
           <div
             style={{
               display: 'flex',
@@ -83,12 +83,12 @@ function Home({ me }) {
             ) : (
               <>
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
+                <Link className="btn btn-accent btn-pill" to="/settings">Settings</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
           </div>
 
-          {/* Micro trust chips */}
           <div
             style={{
               display: 'flex',
@@ -166,12 +166,36 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* (Removed) GET STARTED section to eliminate the "Continue where you left off" block */}
+      {/* GET STARTED */}
+      <section style={{ padding: '28px 0' }}>
+        <div
+          className="container"
+          style={{
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexWrap: 'wrap'
+          }}
+        >
+          {!authed ? (
+            <>
+              <div className="muted">Ready to begin?</div>
+              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
+            </>
+          ) : (
+            <>
+              <div className="muted">Continue where you left off:</div>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/settings">Review Settings</Link>
+            </>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
 
-/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -215,6 +239,7 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
 
+  // Safe auth bootstrap with fallback timer
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -232,7 +257,6 @@ export default function App() {
     })()
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      if (!alive) return
       setMe(session?.user || null)
     })
 
@@ -242,6 +266,17 @@ export default function App() {
       sub?.subscription?.unsubscribe?.()
     }
   }, [])
+
+  // Live unread subscription (and initial fetch)
+  useEffect(() => {
+    let stop = () => {}
+    if (me?.id) {
+      stop = subscribeUnreadCount(supabase, me.id, (n) => setUnread(n))
+    } else {
+      setUnread(0)
+    }
+    return () => stop()
+  }, [me?.id])
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -262,9 +297,11 @@ export default function App() {
         ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
+
+            {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
-            {/* Private routes */}
+            {/* Private routes (basic guard) */}
             <Route
               path="/profile"
               element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
@@ -305,7 +342,7 @@ export default function App() {
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
-            {/* QR scan route */}
+            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
             {/* Fallback */}
@@ -316,11 +353,16 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble */}
-      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
+      {/* Chat bubble (can still report unread via onUnreadChange if you keep that pattern) */}
+      <ChatLauncher
+        onUnreadChange={(n) => {
+          if (typeof n === 'number') setUnread(n)
+        }}
+      />
     </ChatProvider>
   )
 }
+
 
 
 
