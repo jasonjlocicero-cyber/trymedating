@@ -1,44 +1,45 @@
 // src/components/QRShareCard.jsx
-import React from "react";
+import React, { useRef } from "react";
 import QRCode from "react-qr-code";
 
-export default function QRShareCard({
-  link,
-  title = "Scan to connect",
-  size = 256,
-}) {
+export default function QRShareCard({ link, title = "Scan to connect", center = false }) {
+  const svgWrapRef = useRef(null);
+
   return (
     <div
       className="qr-card"
       style={{
-        display: "inline-block",
+        maxWidth: 260,
+        width: "100%",
         background: "#fff",
-        padding: 16,
+        padding: 12,
         borderRadius: 12,
         border: "1px solid var(--border)",
-        boxShadow: "0 1px 3px rgba(0,0,0,.06)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        display: "grid",
+        justifyItems: center ? "center" : "stretch",
       }}
     >
-      {/* QR */}
       <div
+        ref={svgWrapRef}
         style={{
+          background: "#fff",
+          padding: 10,
           display: "grid",
           placeItems: "center",
+          overflow: "visible",
         }}
       >
-        <QRCode value={link || ""} size={size} />
+        <QRCode value={link || ""} size={192} />
       </div>
 
-      {/* Caption */}
-      <div
-        className="qr-caption"
-        style={{ textAlign: "center", marginTop: 8, color: "var(--muted)" }}
-      >
+      <div className="qr-caption" style={{ marginTop: 8, textAlign: "center" }}>
         {title}
       </div>
     </div>
   );
 }
+
 
 
 
