@@ -3,102 +3,84 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useNavigate, Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
-/**
- * Connect (QR handler)
- * - URL formats supported:
- *    • /connect?to=<recipientUserId>
- *    • /connect?u=<recipientUserId>
- *    • /connect/:token   (token may be a UUID, or b64 JSON like {"t":"tmdv1","pid":"<uuid>"})
- *
- * - Behavior:
- *    • If signed in and link is valid: ensure a pending request (requester = me.id, recipient = target)
- *    • Immediately opens the Chat bubble focused on the recipient so Accept/Reject is visible
- *    • Shows current status (pending/accepted/rejected) with CTAs
- *    • NEW: Hard gate — requester must have an avatar photo before sending a request
- */
-
 // Global opener used by ChatLauncher / ChatDock
 function openChatWith(partnerId, partnerName = '') {
   if (window.openChat) return window.openChat(partnerId, partnerName)
   window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
 }
 
-// Decode UUID from plain token or base64 JSON token
-function tryDecodeToken(token) {
+function tryDecodeTokenCompat(token) {
+  // legacy support: plain uuid or base64 '{"pid":"<uuid>"}'
   if (!token) return null
-  // plain UUID?
-  if (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}$/i.test(token)) {
-    return token
-  }
-  // base64 JSON with { pid: "<uuid>" }
-  try {
-    const json = JSON.parse(atob(token))
-    if (json && typeof json.pid === 'string') return json.pid
-  } catch (_) {}
+  if (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}$/i.test(token)) return token
+  try { const json = JSON.parse(atob(token)); if (json?.pid) return json.pid } catch {}
   return null
 }
 
 export default function Connect({ me }) {
   const [sp] = useSearchParams()
-  const { token } = useParams()
+  const { token: pathToken } = useParams()
   const nav = useNavigate()
 
-  // Accept both ?to= and ?u= and /:token
-  const recipientId = useMemo(() => {
-    const byTo = sp.get('to')
-    const byU = sp.get('u')
-    return byTo || byU || tryDecodeToken(token) || ''
-  }, [sp, token])
+  const qTo = sp.get('to')
+  const qU  = sp.get('u')
+  const qTok = sp.get('token') || pathToken || ''
 
   const authed = !!me?.id
 
   const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected' | 'blocked_no_avatar'
+  const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected'
   const [errorText, setErrorText] = useState('')
-  const [recipientHandle, setRecipientHandle] = useState(null) // optional: show who you're connecting to
-  const [message, setMessage] = useState('') // small inline status text
+  const [recipientId, setRecipientId] = useState('')   // resolved id
+  const [recipientHandle, setRecipientHandle] = useState(null)
+  const [message, setMessage] = useState('')
 
-  // NEW: my profile (to check avatar gate)
-  const [myProfile, setMyProfile] = useState(null)
-
-  // Load current relationship status (if signed in and link valid)
+  // Resolve recipient:
+  // 1) If token present: call redeem_invite (verifies & one-time)
+  // 2) else: fall back to ?to / ?u / legacy token
   useEffect(() => {
     let cancelled = false
-
-    async function init() {
+    ;(async () => {
       setErrorText('')
-      setMessage('')
+      if (qTok) {
+        try {
+          setBusy(true)
+          const r = await fetch('/functions/v1/redeem_invite', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ token: qTok })
+          })
+          const json = await r.json()
+          setBusy(false)
+          if (!r.ok || !json?.pid) {
+            setStatus('invalid')
+            setErrorText(json?.error || 'Invalid or expired code')
+            return
+          }
+          if (!cancelled) setRecipientId(json.pid)
+          return
+        } catch (e) {
+          setBusy(false)
+          setStatus('invalid'); setErrorText(e.message || 'Redeem failed'); return
+        }
+      }
+      // fallback path
+      const legacy = qTo || qU || tryDecodeTokenCompat(pathToken || '')
+      if (!legacy) { setStatus('invalid'); return }
+      setRecipientId(legacy)
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qTok, qTo, qU, pathToken])
 
-      if (!recipientId) { setStatus('invalid'); return }
-
-      // If not authed yet, show CTA; we won't auto-redirect here to avoid surprise
+  // After we know recipientId, continue as before
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!recipientId) return
       if (!authed) { setStatus('none'); return }
-
       if (recipientId === me.id) { setStatus('self'); return }
 
-      // Fetch my profile (need avatar_url)
-      try {
-        const { data: mine, error: mineErr } = await supabase
-          .from('profiles')
-          .select('user_id, handle, display_name, avatar_url')
-          .eq('user_id', me.id)
-          .maybeSingle()
-        if (mineErr) throw mineErr
-        if (!cancelled) setMyProfile(mine)
-        // Hard gate: requester must have a photo
-        if (!mine?.avatar_url) {
-          if (!cancelled) setStatus('blocked_no_avatar')
-          return
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setStatus('none')
-          setErrorText(e.message || 'Failed to load your profile.')
-        }
-        return
-      }
-
-      // Optional: fetch a public handle/display name to show for the recipient
       try {
         const { data: prof } = await supabase
           .from('profiles')
@@ -106,11 +88,9 @@ export default function Connect({ me }) {
           .eq('user_id', recipientId)
           .maybeSingle()
         if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null)
-      } catch {
-        /* noop */
-      }
+      } catch {}
 
-      // Check if a connection row already exists (either direction)
+      // check existing relationship (either direction)
       const { data, error } = await supabase
         .from('connection_requests')
         .select('requester, recipient, status')
@@ -129,54 +109,32 @@ export default function Connect({ me }) {
       }
 
       if (!data) {
-        // No prior row — we will auto-create pending and open chat
-        setStatus('none')
-        setBusy(true)
+        // create pending and open chat
         const { error: insErr } = await supabase
           .from('connection_requests')
           .insert({ requester: me.id, recipient: recipientId, status: 'pending' })
-        setBusy(false)
         if (insErr && insErr.code !== '23505') {
-          setErrorText(insErr.message || 'Could not send request')
-          return
+          setErrorText(insErr.message || 'Could not send request'); setStatus('none'); return
         }
-        setStatus('pending')
-        setMessage('Request sent — opening chat…')
-        // Immediately open chat bubble focused on recipient
+        setStatus('pending'); setMessage('Request sent — opening chat…')
         openChatWith(recipientId, recipientHandle || '')
         return
       }
 
-      // There is an existing row
-      setStatus(data.status) // 'pending' | 'accepted' | 'rejected'
-
-      // Regardless of status, open the chat so Accept/Reject is visible (or messages if accepted)
+      setStatus(data.status)
       openChatWith(recipientId, recipientHandle || '')
       if (data.status === 'pending') setMessage('Request is pending — check the chat to accept/reject.')
       if (data.status === 'accepted') setMessage('You are connected — chat is open.')
       if (data.status === 'rejected') setMessage('This request was declined.')
-    }
-
-    init()
+    })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipientId, authed, me?.id])
 
   async function requestConnection() {
-    if (!authed) {
-      nav('/auth')
-      return
-    }
+    if (!authed) { nav('/auth'); return }
     if (!recipientId || recipientId === me.id) {
-      setStatus(recipientId === me.id ? 'self' : 'invalid')
-      return
+      setStatus(recipientId === me.id ? 'self' : 'invalid'); return
     }
-    // NEW: double-check the avatar gate at click time too
-    if (!myProfile?.avatar_url) {
-      setStatus('blocked_no_avatar')
-      return
-    }
-
     setBusy(true)
     const { error } = await supabase
       .from('connection_requests')
@@ -185,8 +143,7 @@ export default function Connect({ me }) {
     if (error && error.code !== '23505') {
       setErrorText(error.message || 'Could not send request')
     } else {
-      setStatus('pending')
-      setMessage('Request sent — opening chat…')
+      setStatus('pending'); setMessage('Request sent — opening chat…')
       openChatWith(recipientId, recipientHandle || '')
     }
   }
@@ -200,17 +157,15 @@ export default function Connect({ me }) {
     <div className="container" style={{ padding: 24, maxWidth: 680 }}>
       <h2 style={{ fontWeight: 800, marginBottom: 8 }}>Connect</h2>
 
-      {/* Context / who you're connecting to */}
       {recipientHandle && (
         <div className="muted" style={{ marginBottom: 8 }}>
           You’re connecting with <strong>{recipientHandle}</strong>.
         </div>
       )}
 
-      {/* Error or invalid states */}
       {status === 'invalid' && (
         <div className="muted" style={{ marginTop: 8 }}>
-          This link is missing a valid <code>to</code>/<code>u</code> user id or token.
+          This code is invalid or expired.
         </div>
       )}
       {status === 'self' && (
@@ -229,33 +184,6 @@ export default function Connect({ me }) {
         </div>
       )}
 
-      {/* NEW: hard-gate UI when requester has no photo */}
-      {status === 'blocked_no_avatar' && (
-        <div
-          style={{
-            border: '1px solid var(--border)',
-            borderRadius: 12,
-            background: '#fff',
-            padding: 16,
-            marginTop: 12
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Add a photo to connect</div>
-          <div className="muted" style={{ marginBottom: 10 }}>
-            To request a connection, please upload a clear photo of yourself. This helps people verify who they just met.
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link className="btn btn-primary btn-pill" to="/profile">Upload photo</Link>
-            {recipientHandle && (
-              <Link className="btn btn-neutral btn-pill" to="/" >
-                Back home
-              </Link>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Main actions */}
       <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {status === 'accepted' ? (
           <>
@@ -277,7 +205,7 @@ export default function Connect({ me }) {
             </button>
             <Link className="btn btn-neutral" to="/">Back</Link>
           </>
-        ) : (status === 'none' || status === 'unknown') && status !== 'blocked_no_avatar' ? (
+        ) : status === 'none' || status === 'unknown' ? (
           <>
             {!authed && (
               <>
@@ -297,13 +225,12 @@ export default function Connect({ me }) {
         ) : null}
       </div>
 
-      {/* Small note */}
       <div className="muted" style={{ marginTop: 16 }}>
         After you send a request, the other person will see a popup to <strong>Accept</strong> or <strong>Decline</strong>.
-        The chat bubble will open automatically so you can decide right away.
       </div>
     </div>
   )
 }
+
 
 
