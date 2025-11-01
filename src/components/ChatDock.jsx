@@ -3,7 +3,6 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import { supabase } from "../lib/supabaseClient";
 import AttachmentButton from "./AttachmentButton";
 import { uploadChatFile, signedUrlForPath } from "../lib/chatMedia";
-import TypingIndicator from "./TypingIndicator";
 
 /* ------------------------ helpers & constants ------------------------ */
 const ACCEPTED = new Set(["accepted", "connected", "approved"]);
@@ -113,7 +112,9 @@ function linkifyJSX(text) {
   const LINK_RE =
     /((https?:\/\/|www\.)[^\s<]+)|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,})/gi;
   const out = [];
-  let last = 0, m, key = 0;
+  let last = 0,
+    m,
+    key = 0;
   while ((m = LINK_RE.exec(text))) {
     const raw = m[0];
     const pre = text.slice(last, m.index);
@@ -371,47 +372,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   );
 }
 
-/* ---------------- Day separator helpers (NEW) ---------------- */
-function sameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate();
-}
-function dayLabel(iso) {
-  try {
-    const d = new Date(iso);
-    const today = new Date();
-    const yest = new Date();
-    yest.setDate(today.getDate() - 1);
-    if (sameDay(d, today)) return "Today";
-    if (sameDay(d, yest)) return "Yesterday";
-    return d.toLocaleDateString();
-  } catch {
-    return "";
-  }
-}
-function DaySep({ label }) {
-  return (
-    <div style={{ textAlign: "center", margin: "10px 0" }}>
-      <span
-        style={{
-          display: "inline-block",
-          padding: "4px 10px",
-          borderRadius: 999,
-          border: "1px solid var(--border)",
-          background: "#fff",
-          fontSize: 12,
-          color: "#334155",
-        }}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock() {
+export default function ChatDock({ peerId: peerIdProp }) {
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -446,6 +408,13 @@ export default function ChatDock() {
   const typingTimeoutRef = useRef(null);
   const typingChannelRef = useRef(null);
   const lastTypingSentRef = useRef(0);
+
+  /* Accept peerId from route (prop) */
+  useEffect(() => {
+    if (peerIdProp && typeof peerIdProp === "string") {
+      setPeer(peerIdProp);
+    }
+  }, [peerIdProp]);
 
   /* auth */
   useEffect(() => {
@@ -602,7 +571,6 @@ export default function ChatDock() {
     return () => supabase.removeChannel(ch);
   }, [conn?.id, fetchMessages]);
 
-  // Keep auto-scroll to latest (unchanged)
   useEffect(() => {
     const el = scrollerRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -978,117 +946,6 @@ export default function ChatDock() {
     );
   }
 
-  /* -------- render helpers: messages with day separators (NEW) -------- */
-  const renderMessagesWithSeparators = () => {
-    const els = [];
-    let last = "";
-    for (const m of items) {
-      const mine = isMine(m);
-      const label = dayLabel(m.created_at);
-      if (label && label !== last) {
-        els.push(<DaySep key={`sep-${m.id || `${label}-${Math.random()}`}`} label={label} />);
-        last = label;
-      }
-
-      if (isDeletedAttachment(m.body)) {
-        const meta = parseDeleted(m.body);
-        els.push(
-          <div
-            key={m.id}
-            style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
-          >
-            <div
-              style={{
-                maxWidth: 520,
-                padding: "8px 10px",
-                borderRadius: 12,
-                border: "1px solid var(--border)",
-                background: "#f3f4f6",
-                fontSize: 13,
-              }}
-            >
-              Attachment deleted{meta?.name ? `: ${meta.name}` : ""}.
-            </div>
-          </div>
-        );
-        continue;
-      }
-
-      const meta = getAttachmentMeta(m.body);
-      els.push(
-        <div
-          key={m.id}
-          style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
-        >
-          {meta ? (
-            <AttachmentPreview
-              meta={meta}
-              mine={mine}
-              onDelete={mine ? deleteAttachment : undefined}
-              deleting={deletingPaths.has(meta?.path)}
-            />
-          ) : (
-            <div
-              style={{
-                maxWidth: 520,
-                padding: "8px 10px",
-                borderRadius: 12,
-                border: "1px solid var(--border)",
-                background: mine ? "#eef6ff" : "#f8fafc",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontSize: 14,
-                lineHeight: 1.4,
-              }}
-            >
-              {linkifyJSX(m.body)}
-
-              <div
-                style={{
-                  marginTop: 6,
-                  display: "flex",
-                  justifyContent: mine ? "flex-end" : "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                {/* COPY button */}
-                <button
-                  type="button"
-                  onClick={() => copyBody(m.body)}
-                  title="Copy message"
-                  style={{
-                    border: "1px solid var(--border)",
-                    background: "#fff",
-                    color: "#111",
-                    borderRadius: 8,
-                    padding: "2px 8px",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  Copy
-                </button>
-
-                <div
-                  style={{
-                    fontSize: 11,
-                    opacity: 0.6,
-                    textAlign: mine ? "right" : "left",
-                  }}
-                >
-                  {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-    return els;
-  };
-
   /* UI */
   return (
     <div
@@ -1161,7 +1018,7 @@ export default function ChatDock() {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateRows: "1fr auto auto", gap: 8, maxHeight: 380 }}>
+          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
             <div
               ref={scrollerRef}
               onDragOver={(e) => e.preventDefault()}
@@ -1172,20 +1029,116 @@ export default function ChatDock() {
                 padding: 12,
                 overflowY: "auto",
                 background: "#fff",
-                minHeight: 160,
-                maxHeight: 280,
+                minHeight: 140,
+                maxHeight: 260,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
 
-              {/* messages with day separators */}
-              {renderMessagesWithSeparators()}
+              {items.map((m) => {
+                const mine = isMine(m);
+
+                if (isDeletedAttachment(m.body)) {
+                  const meta = parseDeleted(m.body);
+                  return (
+                    <div
+                      key={m.id}
+                      style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
+                    >
+                      <div
+                        style={{
+                          maxWidth: 520,
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: "#f3f4f6",
+                          fontSize: 13,
+                        }}
+                      >
+                        Attachment deleted{meta?.name ? `: ${meta.name}` : ""}.
+                      </div>
+                    </div>
+                  );
+                }
+
+                const meta = getAttachmentMeta(m.body);
+                return (
+                  <div
+                    key={m.id}
+                    style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
+                  >
+                    {meta ? (
+                      <AttachmentPreview
+                        meta={meta}
+                        mine={mine}
+                        onDelete={mine ? deleteAttachment : undefined}
+                        deleting={deletingPaths.has(meta?.path)}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          maxWidth: 520,
+                          padding: "8px 10px",
+                          borderRadius: 12,
+                          border: "1px solid var(--border)",
+                          background: mine ? "#eef6ff" : "#f8fafc",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          fontSize: 14,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {linkifyJSX(m.body)}
+
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: "flex",
+                            justifyContent: mine ? "flex-end" : "space-between",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          {/* COPY button */}
+                          <button
+                            type="button"
+                            onClick={() => copyBody(m.body)}
+                            title="Copy message"
+                            style={{
+                              border: "1px solid var(--border)",
+                              background: "#fff",
+                              color: "#111",
+                              borderRadius: 8,
+                              padding: "2px 8px",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Copy
+                          </button>
+
+                          <div
+                            style={{
+                              fontSize: 11,
+                              opacity: 0.6,
+                              textAlign: mine ? "right" : "left",
+                            }}
+                          >
+                            {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            {/* TYPING indicator (NEW visual, same broadcast) */}
+            {/* TYPING hint */}
             {peerTyping && (
-              <div style={{ marginLeft: 6 }}>
-                <TypingIndicator names={["Someone"]} />
+              <div style={{ fontSize: 12, color: "#6b7280", margin: "0 0 0 6px" }}>
+                The other person is typing…
               </div>
             )}
 
@@ -1252,6 +1205,7 @@ export default function ChatDock() {
     </div>
   );
 }
+
 
 
 
