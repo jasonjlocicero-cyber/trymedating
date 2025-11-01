@@ -1,123 +1,106 @@
 // src/pages/InviteQR.jsx
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import QRCode from "react-qr-code";
-import { supabase } from "../lib/supabaseClient";
+import React, { useEffect, useMemo, useState, useRef } from 'react'
+import { supabase } from '../lib/supabaseClient'
+import QRShareCard from '../components/QRShareCard'
+import { Link } from 'react-router-dom'
 
 export default function InviteQR() {
-  const [me, setMe] = useState(null);
-  const [handle, setHandle] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const [me, setMe] = useState(null)
+  const [token, setToken] = useState('')
+  const [exp, setExp] = useState(null) // seconds epoch
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const tickRef = useRef(null)
 
-  // Load auth user
+  // load me
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!alive) return;
-      setMe(user || null);
-    })();
-    return () => { alive = false; };
-  }, []);
+    let alive = true
+    ;(async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (alive) setMe(user || null)
+    })()
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setMe(s?.user || null))
+    return () => sub?.subscription?.unsubscribe?.()
+  }, [])
 
-  // Fetch my profile handle
+  const secondsLeft = useMemo(() => {
+    if (!exp) return null
+    const s = Math.max(0, exp - Math.floor(Date.now()/1000))
+    return s
+  }, [exp])
+
+  const link = useMemo(() => {
+    if (!token) return ''
+    // IMPORTANT: we now use a signed token, to be redeemed by /redeem_invite
+    return `${location.origin}/connect?token=${encodeURIComponent(token)}`
+  }, [token])
+
+  async function mintNow() {
+    setBusy(true); setErr('')
+    try {
+      const at = (await supabase.auth.getSession()).data.session?.access_token ?? ''
+      const r = await fetch('/functions/v1/mint_invite', { headers: { Authorization: `Bearer ${at}` } })
+      const json = await r.json()
+      if (!r.ok) throw new Error(json?.error || 'Mint failed')
+      setToken(json.token)
+      setExp(json.exp)
+    } catch (e) {
+      setErr(e.message || 'Mint failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // initial mint + auto refresh ~10s before expiry
   useEffect(() => {
-    if (!me?.id) return;
-    let alive = true;
-    setLoading(true);
-    setErr("");
+    mintNow()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("handle")
-          .eq("user_id", me.id)
-          .maybeSingle();
-
-        if (error) throw error;
-        if (!data?.handle) throw new Error("Your profile handle is missing.");
-        if (!alive) return;
-
-        setHandle(data.handle);
-      } catch (e) {
-        if (!alive) return;
-        setErr(e.message || "Failed to load your profile.");
-      } finally {
-        if (alive) setLoading(false);
+  useEffect(() => {
+    if (tickRef.current) clearInterval(tickRef.current)
+    if (!exp) return
+    tickRef.current = setInterval(() => {
+      const sLeft = exp - Math.floor(Date.now()/1000)
+      if (sLeft <= 10) {
+        // proactively refresh once
+        clearInterval(tickRef.current)
+        mintNow()
       }
-    })();
-
-    return () => { alive = false; };
-  }, [me?.id]);
-
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  // QR directs to public profile; include a light hint param if you want: ?connect=1
-  const qrUrl = handle ? `${origin}/u/${encodeURIComponent(handle)}?connect=1` : "";
+    }, 1000)
+    return () => clearInterval(tickRef.current)
+  }, [exp])
 
   return (
-    <div className="container" style={{ maxWidth: 960, padding: "28px 12px" }}>
-      <h1 style={{ fontWeight: 900, marginBottom: 6 }}>My Invite</h1>
-      <p className="muted" style={{ marginBottom: 18 }}>
-        Show this QR to someone you’ve just met so they can view your public profile and request a connection.
+    <div className="container" style={{ maxWidth: 760, padding: '28px 0' }}>
+      <h1 style={{ fontWeight: 900, marginBottom: 8 }}>My Invite QR</h1>
+      <p className="muted" style={{ marginBottom: 16 }}>
+        Show this code to someone you met. It expires in {secondsLeft != null ? `${Math.floor(secondsLeft/60)
+          .toString().padStart(1,'0')}:${(secondsLeft%60).toString().padStart(2,'0')}` : '—'} and can only be used once.
       </p>
 
-      {loading && <div className="muted">Loading…</div>}
-      {!loading && err && (
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: 14,
-            background: "#fff5f5",
-            marginTop: 8,
-          }}
-        >
-          <div className="helper-error">{err}</div>
-        </div>
-      )}
+      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
 
-      {!loading && !err && handle && (
-        <div
-          style={{
-            display: "grid",
-            justifyContent: "center",
-            gap: 14,
-            marginTop: 6,
-          }}
-        >
-          {/* QR Card */}
-          <div
-            style={{
-              border: "1px solid var(--border)",
-              borderRadius: 16,
-              background: "#fff",
-              padding: 18,
-              display: "grid",
-              justifyItems: "center",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-            }}
-          >
-            <div style={{ background: "#fff", padding: 12 }}>
-              <QRCode value={qrUrl} size={264} />
-            </div>
-            <div className="qr-caption" style={{ marginTop: 8 }}>
-              Scan to view my profile
-            </div>
-          </div>
-
-          {/* Single centered action */}
-          <div style={{ display: "grid", justifyContent: "center" }}>
-            <Link className="btn btn-primary btn-pill" to={`/u/${handle}`}>
-              Public profile
-            </Link>
-          </div>
+      <div style={{ display: 'grid', placeItems: 'center' }}>
+        <div style={{ width: 260, justifySelf: 'center' }}>
+          <QRShareCard link={link} title="Scan to connect" />
         </div>
-      )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary btn-pill" onClick={mintNow} disabled={busy}>
+          {busy ? 'Refreshing…' : 'Refresh code'}
+        </button>
+        {me?.user_metadata?.handle && (
+          <Link to={`/u/${me.user_metadata.handle}`} className="btn btn-neutral btn-pill">
+            Public profile
+          </Link>
+        )}
+      </div>
     </div>
-  );
+  )
 }
+
 
 
 
