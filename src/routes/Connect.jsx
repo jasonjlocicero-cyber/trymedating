@@ -1,10 +1,11 @@
 // src/routes/Connect.jsx
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useNavigate, Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * Connect (QR handler)
+ * Connect (QR / deep-link handler)
+ *
  * Supported URL formats:
  *   • /connect?to=<recipientUserId>
  *   • /connect?u=<recipientUserId>
@@ -12,8 +13,8 @@ import { supabase } from '../lib/supabaseClient'
  *
  * Behavior:
  *   • If signed in and link is valid: ensure/create a pending request (requester = me.id, recipient = target)
- *   • Opens the chat bubble focused on the recipient so Accept/Reject is visible
- *   • Shows current status (pending/accepted/rejected) with CTAs
+ *   • Opens the Chat bubble focused on the recipient so Accept/Reject is visible
+ *   • Shows current status (pending/accepted/rejected) with clear CTAs + friendly error text
  */
 
 // Global opener used by ChatLauncher / ChatDock
@@ -77,7 +78,7 @@ export default function Connect({ me }) {
         const { data: prof } = await supabase
           .from('profiles')
           .select('handle, display_name')
-          .eq('user_id', recipientId) // adjust if your schema differs
+          .eq('user_id', recipientId) // if your schema uses id=auth.id, switch to .eq('id', recipientId)
           .maybeSingle()
         if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null)
       } catch {
@@ -87,9 +88,8 @@ export default function Connect({ me }) {
       // Check if a connection row already exists (either direction)
       const { data, error } = await supabase
         .from('connection_requests')
-        .select('requester, recipient, status')
+        .select('requester, recipient, status, created_at')
         .or(`and(requester.eq.${me.id},recipient.eq.${recipientId}),and(requester.eq.${recipientId},recipient.eq.${me.id})`)
-        .order('decided_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -103,7 +103,7 @@ export default function Connect({ me }) {
       }
 
       if (!data) {
-        // No prior row — create pending and open chat
+        // No prior row — try to create pending and open chat
         setStatus('none')
         setBusy(true)
         const { error: insErr } = await supabase
@@ -112,16 +112,16 @@ export default function Connect({ me }) {
         setBusy(false)
 
         if (insErr) {
-          // Duplicate pending request across either direction
-          if (insErr.code === '23505') {
-            setStatus('pending')
-            setMessage('Request already pending — opening chat…')
-            openChatWith(recipientId, recipientHandle || '')
+          // Handle 5-minute cooldown trigger (errcode P0001 + "cooldown" hint/message)
+          if (insErr.code === 'P0001' && /cool\s*down/i.test(insErr.message || '')) {
+            setMessage('You just sent a request. Try again in ~5 minutes.')
             return
           }
-          // Guard/trigger-based rate limit (raised as exception)
-          if (insErr.code === 'P0001' && /rate_limit/i.test(insErr.message || '')) {
-            setErrorText('You’re sending requests too quickly. Please wait a few minutes and try again.')
+          // Unique index on pending pair => already pending
+          if (insErr.code === '23505') {
+            setStatus('pending')
+            setMessage('Request already pending — check the chat to accept/decline.')
+            openChatWith(recipientId, recipientHandle || '')
             return
           }
           setErrorText(insErr.message || 'Could not send request')
@@ -130,14 +130,14 @@ export default function Connect({ me }) {
 
         setStatus('pending')
         setMessage('Request sent — opening chat…')
+        // Immediately open chat bubble focused on recipient
         openChatWith(recipientId, recipientHandle || '')
         return
       }
 
       // There is an existing row
       setStatus(data.status) // 'pending' | 'accepted' | 'rejected'
-
-      // Regardless of status, open the chat so Accept/Reject is visible (or messages if accepted)
+      // Open the chat so Accept/Reject is visible (or messages if accepted)
       openChatWith(recipientId, recipientHandle || '')
       if (data.status === 'pending') setMessage('Request is pending — check the chat to accept/reject.')
       if (data.status === 'accepted') setMessage('You are connected — chat is open.')
@@ -165,14 +165,14 @@ export default function Connect({ me }) {
     setBusy(false)
 
     if (error) {
-      if (error.code === '23505') {
-        setStatus('pending')
-        setMessage('Request already pending — opening chat…')
-        openChatWith(recipientId, recipientHandle || '')
+      if (error.code === 'P0001' && /cool\s*down/i.test(error.message || '')) {
+        setMessage('You just sent a request. Try again in ~5 minutes.')
         return
       }
-      if (error.code === 'P0001' && /rate_limit/i.test(error.message || '')) {
-        setErrorText('You’re sending requests too quickly. Please wait a few minutes and try again.')
+      if (error.code === '23505') {
+        setStatus('pending')
+        setMessage('Request already pending — check the chat to accept/decline.')
+        openChatWith(recipientId, recipientHandle || '')
         return
       }
       setErrorText(error.message || 'Could not send request')
@@ -272,6 +272,7 @@ export default function Connect({ me }) {
     </div>
   )
 }
+
 
 
 
