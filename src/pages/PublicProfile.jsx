@@ -1,5 +1,5 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
@@ -49,9 +49,10 @@ export default function PublicProfile() {
     (async () => {
       try {
         if (!cleanHandle) throw new Error("No handle provided.");
+        // NOTE: alias id -> user_id so the rest of the code can use profile.user_id
         const { data, error } = await supabase
           .from("profiles")
-          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
+          .select("id:user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
 
@@ -324,6 +325,7 @@ export default function PublicProfile() {
     </div>
   );
 }
+
 
 
 
