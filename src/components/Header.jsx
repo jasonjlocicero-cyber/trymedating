@@ -109,12 +109,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
 
           {me?.id ? (
             <>
-              <NavLink to="/profile" style={navLinkStyle}>
-                Profile
-              </NavLink>
-              <NavLink to="/settings" style={navLinkStyle}>
-                Settings
-              </NavLink>
+              {/* Profile & Settings intentionally removed */}
               <button
                 type="button"
                 className="btn btn-neutral"
@@ -134,6 +129,7 @@ export default function Header({ me, unread = 0, onSignOut = () => {} }) {
     </header>
   );
 }
+
 
 
 
