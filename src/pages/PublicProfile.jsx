@@ -1,29 +1,28 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 /**
  * PublicProfile
  * - Loads a profile by handle from /u/:handle
- * - Adds Block / Unblock and Report actions (MVP)
  * - If profile.is_public === false, injects <meta name="robots" content="noindex">
+ * - Shows basic profile info with (Message / Connect) actions
+ * - NEW: Block / Unblock actions (viewer can block this profile)
  */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
 
+  const [me, setMe] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState(null);
   const [error, setError] = useState("");
 
-  // Block/report state
-  const [myBlockRowId, setMyBlockRowId] = useState(null);
-  const iBlockedThisUser = !!myBlockRowId;
-  const [busyBlock, setBusyBlock] = useState(false);
-  const [busyReport, setBusyReport] = useState(false);
-  const [toast, setToast] = useState("");
+  // Block state (did *I* block this user?)
+  const [iBlocked, setIBlocked] = useState(false);
+  const targetUserId = profile?.user_id || null;
+  const canAct = !!(me?.id && targetUserId && me.id !== targetUserId);
 
   // Load viewer (me)
   useEffect(() => {
@@ -49,10 +48,9 @@ export default function PublicProfile() {
     (async () => {
       try {
         if (!cleanHandle) throw new Error("No handle provided.");
-        // NOTE: alias id -> user_id so the rest of the code can use profile.user_id
         const { data, error } = await supabase
           .from("profiles")
-          .select("id:user_id, display_name, handle, bio, avatar_url, is_public, created_at")
+          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at, id")
           .eq("handle", cleanHandle)
           .maybeSingle();
 
@@ -68,12 +66,10 @@ export default function PublicProfile() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [cleanHandle]);
 
-  // noindex on private
+  // Inject <meta name="robots" content="noindex"> when profile is private
   useEffect(() => {
     let tag;
     if (profile && profile.is_public === false) {
@@ -85,103 +81,76 @@ export default function PublicProfile() {
     return () => { if (tag) document.head.removeChild(tag); };
   }, [profile?.is_public]);
 
-  const avatar = profile?.avatar_url || "/logo-mark.png";
-  const title = profile?.display_name || `@${cleanHandle}`;
-  const canAct = !!(me?.id && profile?.user_id && me.id !== profile.user_id);
-
-  // Load whether I have blocked this user
+  // Did I already block this user? (RLS: you can only see rows where blocker = me)
   useEffect(() => {
-    if (!me?.id || !profile?.user_id) { setMyBlockRowId(null); return; }
     let alive = true;
     (async () => {
-      const { data } = await supabase
+      if (!me?.id || !targetUserId || me.id === targetUserId) {
+        if (alive) setIBlocked(false);
+        return;
+      }
+      const { data, error } = await supabase
         .from("blocks")
         .select("id")
-        .eq("user_id", me.id)
-        .eq("blocked_id", profile.user_id)
+        .eq("blocker", me.id)
+        .eq("blocked", targetUserId)
         .maybeSingle();
-      if (alive) setMyBlockRowId(data?.id || null);
+
+      if (!alive) return;
+      if (error && error.code !== "PGRST116") {
+        // ignore not-found shape errors
+        console.warn("[blocks check]", error.message);
+      }
+      setIBlocked(!!data?.id);
     })();
     return () => { alive = false; };
-  }, [me?.id, profile?.user_id]);
+  }, [me?.id, targetUserId]);
+
+  const avatar = profile?.avatar_url || "/logo-mark.png";
+  const title = profile?.display_name || `@${cleanHandle}`;
 
   // Actions
-  function openChat() {
-    if (!canAct || iBlockedThisUser) return;
+  const openChat = () => {
+    if (!canAct || iBlocked) return;
     const detail = {
       partnerId: profile.user_id,
       partnerName: profile.display_name || `@${profile.handle || cleanHandle}`,
     };
     window.dispatchEvent(new CustomEvent("open-chat", { detail }));
-  }
+  };
 
   async function blockUser() {
-    if (!canAct || busyBlock) return;
-    setBusyBlock(true); setToast("");
+    if (!canAct) return;
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("blocks")
-        .insert({ user_id: me.id, blocked_id: profile.user_id, reason: null })
-        .select("id")
-        .single();
-      if (error) throw error;
-      setMyBlockRowId(data.id);
-      setToast("User blocked. They can’t connect or message you.");
+        .insert({ blocker: me.id, blocked: targetUserId });
+      if (error && error.code !== "23505") throw error; // ignore unique conflict
+      setIBlocked(true);
     } catch (e) {
-      setToast(e.message || "Failed to block user");
-    } finally {
-      setBusyBlock(false);
+      alert(e.message || "Failed to block.");
     }
   }
 
   async function unblockUser() {
-    if (!iBlockedThisUser || busyBlock) return;
-    setBusyBlock(true); setToast("");
+    if (!canAct) return;
     try {
       const { error } = await supabase
         .from("blocks")
         .delete()
-        .eq("id", myBlockRowId);
+        .eq("blocker", me.id)
+        .eq("blocked", targetUserId);
       if (error) throw error;
-      setMyBlockRowId(null);
-      setToast("User unblocked.");
+      setIBlocked(false);
     } catch (e) {
-      setToast(e.message || "Failed to unblock");
-    } finally {
-      setBusyBlock(false);
-    }
-  }
-
-  async function reportUser() {
-    if (!canAct || busyReport) return;
-    const category = window.prompt(
-      "Report category (spam, harassment, impersonation, abuse, other):",
-      "spam"
-    );
-    if (!category) return;
-    const details = window.prompt("Details (optional):", "");
-    setBusyReport(true); setToast("");
-    try {
-      const { error } = await supabase
-        .from("reports")
-        .insert({
-          reporter_id: me.id,
-          target_id: profile.user_id,
-          category: (category || "other").toLowerCase(),
-          details: details || null,
-        });
-      if (error) throw error;
-      setToast("Report submitted. Thanks for helping keep TryMeDating safe.");
-    } catch (e) {
-      setToast(e.message || "Failed to submit report");
-    } finally {
-      setBusyReport(false);
+      alert(e.message || "Failed to unblock.");
     }
   }
 
   return (
     <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
       {loading && <div className="muted">Loading profile…</div>}
+
       {!loading && error && (
         <div
           style={{
@@ -215,9 +184,14 @@ export default function PublicProfile() {
           {/* Avatar */}
           <div
             style={{
-              width: 96, height: 96, borderRadius: "50%", overflow: "hidden",
-              border: "1px solid var(--border)", background: "#f8fafc",
-              display: "grid", placeItems: "center",
+              width: 96,
+              height: 96,
+              borderRadius: "50%",
+              overflow: "hidden",
+              border: "1px solid var(--border)",
+              background: "#f8fafc",
+              display: "grid",
+              placeItems: "center",
             }}
           >
             <img
@@ -236,84 +210,96 @@ export default function PublicProfile() {
                   @{profile.handle}
                 </span>
               )}
-              {profile?.is_public === false && (
-                <span
-                  style={{
-                    marginLeft: 8, padding: "2px 8px", borderRadius: 999,
-                    background: "#fde68a", fontWeight: 700, fontSize: 12,
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  Private
-                </span>
-              )}
             </div>
 
             <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
               {profile?.bio || <span className="muted">No bio yet.</span>}
             </div>
 
-            {/* Actions */}
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              {canAct && !iBlockedThisUser && profile?.is_public && (
+              {/* If I blocked them, show Unblock; otherwise show normal actions */}
+              {canAct && iBlocked ? (
                 <>
-                  <button className="btn btn-primary btn-pill" type="button" onClick={openChat} title="Open chat">
-                    Message
+                  <span className="helper-muted">You have blocked this user.</span>
+                  <button className="btn btn-accent btn-pill" onClick={unblockUser}>
+                    Unblock
                   </button>
-                  <Link
-                    className="btn btn-accent btn-pill"
-                    to={`/connect?to=${profile.user_id}`}
-                    title="Send connection request"
+                </>
+              ) : profile?.is_public ? (
+                <>
+                  {canAct && (
+                    <>
+                      <button
+                        className="btn btn-primary btn-pill"
+                        type="button"
+                        onClick={openChat}
+                        title="Open chat"
+                      >
+                        Message
+                      </button>
+                      <Link
+                        className="btn btn-neutral btn-pill"
+                        to={`/connect?to=${profile.user_id}`}
+                        title="Send connection request"
+                      >
+                        Connect
+                      </Link>
+                      {/* Block button (only if I can act and not already blocked) */}
+                      <button
+                        className="btn btn-accent btn-pill"
+                        type="button"
+                        onClick={blockUser}
+                        title="Block this user"
+                      >
+                        Block
+                      </button>
+                    </>
+                  )}
+                  {!canAct && (
+                    <span className="helper-muted">
+                      This is your profile or you’re not signed in.
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "#fde68a",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                    }}
                   >
-                    Connect
-                  </Link>
+                    Private profile
+                  </span>
+                  <span className="helper-muted" style={{ fontSize: 13 }}>
+                    This page is hidden from search engines.
+                  </span>
+                  {canAct && (
+                    <>
+                      <Link
+                        className="btn btn-neutral btn-pill"
+                        to={`/connect?to=${profile.user_id}`}
+                        title="Send connection request"
+                      >
+                        Request connect
+                      </Link>
+                      <button
+                        className="btn btn-accent btn-pill"
+                        type="button"
+                        onClick={blockUser}
+                        title="Block this user"
+                      >
+                        Block
+                      </button>
+                    </>
+                  )}
                 </>
               )}
-
-              {canAct && !iBlockedThisUser && (
-                <button
-                  className="btn btn-neutral btn-pill"
-                  type="button"
-                  onClick={reportUser}
-                  disabled={busyReport}
-                  title="Report this profile"
-                >
-                  {busyReport ? "Reporting…" : "Report"}
-                </button>
-              )}
-
-              {canAct && !iBlockedThisUser && (
-                <button
-                  className="btn btn-neutral btn-pill"
-                  type="button"
-                  onClick={blockUser}
-                  disabled={busyBlock}
-                  title="Block this user"
-                >
-                  {busyBlock ? "Blocking…" : "Block"}
-                </button>
-              )}
-
-              {canAct && iBlockedThisUser && (
-                <button
-                  className="btn btn-primary btn-pill"
-                  type="button"
-                  onClick={unblockUser}
-                  disabled={busyBlock}
-                  title="Unblock this user"
-                >
-                  {busyBlock ? "Unblocking…" : "Unblock"}
-                </button>
-              )}
-
-              {!canAct && <span className="helper-muted">This is your profile or you’re not signed in.</span>}
             </div>
-
-            {toast && (
-              <div className="helper-muted" style={{ marginTop: 8 }}>
-                {toast}
-              </div>
-            )}
           </div>
         </div>
       )}
