@@ -8,17 +8,14 @@ const STATUSES = ["accepted", "pending", "rejected", "disconnected", "blocked"];
 const isAccepted = (s) => s === "accepted";
 const isPending = (s) => s === "pending";
 
-/** In a row, who is the other person relative to me? */
 const otherPartyId = (row, myId) =>
   row?.requester_id === myId ? row?.addressee_id : row?.requester_id;
 
-/** Same "open-chat" event your ChatLauncher listens to */
 function openChatWith(partnerId, partnerName = "") {
   if (window.openChat) return window.openChat(partnerId, partnerName);
   window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
 }
 
-/** Little status pill */
 const Pill = ({ text, bg = "#f3f4f6", color = "#111" }) => (
   <span
     style={{
@@ -44,16 +41,15 @@ export default function Connections() {
   const myId = me?.id || null;
 
   // Data
-  const [rows, setRows] = useState([]);           // raw connections
-  const [profiles, setProfiles] = useState({});   // user_id -> {handle, display_name, avatar_url, ...}
+  const [rows, setRows] = useState([]);
+  const [profiles, setProfiles] = useState({});
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // UI state
-  const [filter, setFilter] = useState("all");    // "all" | one of STATUSES
-  const [q, setQ] = useState("");                 // search term (handle/display_name)
+  // UI
+  const [filter, setFilter] = useState("all");
+  const [q, setQ] = useState("");
 
-  // Bootstrap auth
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -68,16 +64,14 @@ export default function Connections() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // Fetch + wire realtime
   const refresh = useCallback(async () => {
     if (!myId) return;
     setErr("");
     setLoading(true);
     try {
-      // 1) fetch my connection rows
       const { data, error } = await supabase
         .from("connections")
-        .select("id, requester_id, addressee_id, status, created_at, updated_at")
+        .select("id, requester_id, addressee_id, status, blocked_by, blocked_at, created_at, updated_at")
         .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
         .order("updated_at", { ascending: false })
         .order("created_at", { ascending: false });
@@ -85,7 +79,6 @@ export default function Connections() {
 
       setRows(data || []);
 
-      // 2) fetch partner profiles in bulk
       const partnerIds = Array.from(
         new Set((data || []).map((r) => otherPartyId(r, myId)).filter(Boolean))
       );
@@ -109,31 +102,26 @@ export default function Connections() {
     }
   }, [myId]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
-  // Realtime subscription
   useEffect(() => {
     if (!myId) return;
     const filter =
       `or=(requester_id.eq.${myId},addressee_id.eq.${myId})`;
-
     const ch = supabase
       .channel(`connections:${myId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "connections", filter }, () =>
         refresh()
       )
       .subscribe();
-
     return () => supabase.removeChannel(ch);
   }, [myId, refresh]);
 
-  // Actions (mirror PublicProfile/ChatDock semantics)
+  // Actions
   const accept = async (id) => {
     const { error } = await supabase
       .from("connections")
-      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .update({ status: "accepted", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) alert(error.message);
   };
@@ -141,7 +129,7 @@ export default function Connections() {
   const reject = async (id) => {
     const { error } = await supabase
       .from("connections")
-      .update({ status: "rejected", updated_at: new Date().toISOString() })
+      .update({ status: "rejected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) alert(error.message);
   };
@@ -149,7 +137,7 @@ export default function Connections() {
   const cancel = async (id) => {
     const { error } = await supabase
       .from("connections")
-      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .update({ status: "disconnected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) alert(error.message);
   };
@@ -157,7 +145,7 @@ export default function Connections() {
   const disconnect = async (id) => {
     const { error } = await supabase
       .from("connections")
-      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .update({ status: "disconnected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
       .eq("id", id);
     if (error) alert(error.message);
   };
@@ -169,39 +157,62 @@ export default function Connections() {
         status: "pending",
         requester_id: myId,
         addressee_id: partnerId,
+        blocked_by: null,
+        blocked_at: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
     if (error) alert(error.message);
   };
 
-  // Filtering + search
+  const block = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({
+        status: "blocked",
+        blocked_by: myId,
+        blocked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  const unblock = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({
+        status: "disconnected",     // clear back to a neutral state
+        blocked_by: null,
+        blocked_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  // Filter/search
   const filtered = useMemo(() => {
     let out = rows;
-    if (filter !== "all") {
-      out = out.filter((r) => (r.status || "none") === filter);
-    }
+    if (filter !== "all") out = out.filter((r) => (r.status || "none") === filter);
     const needle = q.trim().toLowerCase();
     if (needle) {
       out = out.filter((r) => {
         const pid = otherPartyId(r, myId);
         const p = profiles[pid] || {};
-        const h = (p.handle || "").toLowerCase();
-        const dn = (p.display_name || "").toLowerCase();
-        return h.includes(needle) || dn.includes(needle);
+        return (p.handle || "").toLowerCase().includes(needle) ||
+               (p.display_name || "").toLowerCase().includes(needle);
       });
     }
     return out;
   }, [rows, profiles, filter, q, myId]);
 
-  // Status counters (for chips)
   const counts = useMemo(() => {
     const c = { all: rows.length };
     for (const s of STATUSES) c[s] = rows.filter((r) => r.status === s).length;
     return c;
   }, [rows]);
 
-  // Guard
   if (!myId) {
     return (
       <div className="container" style={{ padding: 24 }}>
@@ -214,13 +225,12 @@ export default function Connections() {
     );
   }
 
-  // UI helpers
-  const StatusPill = ({ s }) => {
+  const StatusPill = ({ s, youBlocked }) => {
     if (s === "accepted") return <Pill text="Connected" bg="#bbf7d0" />;
     if (s === "pending") return <Pill text="Pending" bg="#fde68a" />;
     if (s === "rejected") return <Pill text="Rejected" bg="#fecaca" />;
+    if (s === "blocked") return <Pill text={youBlocked ? "You blocked" : "Blocked"} bg="#e5e7eb" />;
     if (s === "disconnected") return <Pill text="Disconnected" />;
-    if (s === "blocked") return <Pill text="Blocked" bg="#e5e7eb" />;
     return <Pill text="Unknown" />;
   };
 
@@ -228,8 +238,6 @@ export default function Connections() {
     <div className="container" style={{ padding: 24, maxWidth: 980 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontWeight: 900, margin: 0 }}>Connections</h1>
-
-        {/* Quick actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>
           <button className="btn btn-primary" onClick={() => nav("/chat")}>Open Messages</button>
@@ -277,33 +285,18 @@ export default function Connections() {
           placeholder="Search by handle or name…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          style={{
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            padding: "10px 12px",
-          }}
+          style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "10px 12px" }}
         />
       </div>
 
-      {/* Error / loading */}
-      {err && (
-        <div className="helper-error" style={{ marginTop: 12 }}>
-          {err}
-        </div>
-      )}
+      {/* Error / Loading */}
+      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
       {loading && <div className="muted" style={{ marginTop: 12 }}>Loading…</div>}
 
       {/* List */}
       <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
         {filtered.length === 0 && !loading && (
-          <div
-            style={{
-              border: "1px solid var(--border)",
-              borderRadius: 12,
-              padding: 16,
-              background: "#fff",
-            }}
-          >
+          <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "#fff" }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>No matches</div>
             <div className="muted">Try a different filter or search.</div>
           </div>
@@ -312,9 +305,10 @@ export default function Connections() {
         {filtered.map((row) => {
           const partnerId = otherPartyId(row, myId);
           const p = profiles[partnerId] || {};
-          const name = p.display_name || (p.handle ? `@${p.handle}` : partnerId.slice(0, 6));
+          const name = p.display_name || (p.handle ? `@${p.handle}` : partnerId?.slice(0, 6));
           const avatar = p.avatar_url || "/logo-mark.png";
           const iAmRequester = row.requester_id === myId;
+          const youBlocked = row.status === "blocked" && row.blocked_by === myId;
 
           return (
             <div
@@ -333,16 +327,11 @@ export default function Connections() {
               {/* avatar */}
               <div
                 style={{
-                  width: 64, height: 64, borderRadius: "50%",
-                  overflow: "hidden", border: "1px solid var(--border)",
-                  display: "grid", placeItems: "center", background: "#f8fafc",
+                  width: 64, height: 64, borderRadius: "50%", overflow: "hidden",
+                  border: "1px solid var(--border)", display: "grid", placeItems: "center", background: "#f8fafc",
                 }}
               >
-                <img
-                  src={avatar}
-                  alt=""
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
 
               {/* main */}
@@ -356,7 +345,7 @@ export default function Connections() {
                   >
                     {name}
                   </Link>
-                  <StatusPill s={row.status} />
+                  <StatusPill s={row.status} youBlocked={youBlocked} />
                 </div>
                 <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
                   Updated {new Date(row.updated_at || row.created_at).toLocaleString()}
@@ -365,31 +354,35 @@ export default function Connections() {
 
               {/* actions */}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {isAccepted(row.status) && (
+                {row.status === "blocked" ? (
                   <>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => openChatWith(partnerId, name)}
-                      title="Open messages"
-                    >
+                    <button className="btn btn-primary" onClick={() => unblock(row.id)}>
+                      Unblock
+                    </button>
+                  </>
+                ) : isAccepted(row.status) ? (
+                  <>
+                    <button className="btn btn-primary" onClick={() => openChatWith(partnerId, name)}>
                       Message
                     </button>
                     <button className="btn btn-neutral" onClick={() => disconnect(row.id)}>
                       Disconnect
                     </button>
+                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
+                      Block
+                    </button>
                   </>
-                )}
-
-                {isPending(row.status) && iAmRequester && (
+                ) : isPending(row.status) && iAmRequester ? (
                   <>
                     <span className="helper-muted">Waiting for acceptance…</span>
                     <button className="btn btn-neutral" onClick={() => cancel(row.id)}>
                       Cancel
                     </button>
+                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
+                      Block
+                    </button>
                   </>
-                )}
-
-                {isPending(row.status) && !iAmRequester && (
+                ) : isPending(row.status) && !iAmRequester ? (
                   <>
                     <button className="btn btn-primary" onClick={() => accept(row.id)}>
                       Accept
@@ -397,17 +390,20 @@ export default function Connections() {
                     <button className="btn btn-neutral" onClick={() => reject(row.id)}>
                       Reject
                     </button>
+                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
+                      Block
+                    </button>
                   </>
-                )}
-
-                {(row.status === "rejected" || row.status === "disconnected") && (
-                  <button className="btn btn-primary" onClick={() => reconnect(row.id, partnerId)}>
-                    Reconnect
-                  </button>
-                )}
-
-                {row.status === "blocked" && (
-                  <span className="helper-muted">Blocked</span>
+                ) : (
+                  <>
+                    {/* rejected/disconnected */}
+                    <button className="btn btn-primary" onClick={() => reconnect(row.id, partnerId)}>
+                      Reconnect
+                    </button>
+                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
+                      Block
+                    </button>
+                  </>
                 )}
               </div>
             </div>
