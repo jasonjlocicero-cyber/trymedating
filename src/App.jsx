@@ -20,10 +20,9 @@ import Privacy from "./pages/Privacy";
 import ChatDockPage from "./pages/ChatDockPage";
 import InviteQR from "./pages/InviteQR";
 import DebugQR from "./pages/DebugQR";
-import Connections from "./pages/Connections"; // <-- new list of connections/requests
+import Connections from "./pages/Connections"; // new
 
 // Components / routes
-import ConnectionContext from "./components/ConnectionToast";
 import ConnectionToast from "./components/ConnectionToast";
 import Connect from "./routes/Connect";
 
@@ -57,7 +56,7 @@ function Home({ me }) {
           >
             Welcome to{" "}
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
-            <span style={{ color: "var(--brand-me)" }}>Me</span>
+            <span style={{ color: "var(--brand-teal)" }}>Me</span>
             <span style={{ color: "var(--brand-coral)" }}>Dating</span>
           </h1>
 
@@ -174,17 +173,13 @@ function Home({ me }) {
           }}
         >
           <span style={{ fontWeight: 700 }}>Your pace. Your privacy.</span>
-          <span className="muted">
-            Turn public off anytime • Block/report if needed • No public search
-          </span>
+          <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
         </div>
       </section>
-      {/* Intentionally no “Continue where you left off” strip */}
     </div>
   );
 }
 
-/** Small card component for the “How it works” grid */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -213,18 +208,11 @@ function FeatureCard({ title, text, icon }) {
         >
           <span>{icon}</span>
         </div>
-        <div style={{ fontWeight: 800 }}>{lcase(title)}</div>
+        <div style={{ fontWeight: 800 }}>{title}</div>
       </div>
-      <div className="muted" style={{ lineHeight: 1.55 }}>
-        {text}
-      </div>
+      <div className="muted" style={{ lineHeight: 1.55 }}>{text}</div>
     </div>
   );
-}
-
-function lcase(s) {
-  // keep original style: title case already set by caller
-  return s;
 }
 
 /* --------------------------
@@ -233,9 +221,7 @@ function lcase(s) {
 export default function App() {
   const [me, setMe] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
-
-  // unread count for messaging badge (used by Header via ChatLauncher)
-  const [unread, setUnread] = useState(0);
+  const [unread, setUnread] = useState(0); // for header badge
 
   useEffect(() => {
     let alive = true;
@@ -273,15 +259,14 @@ export default function App() {
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
-      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: "60vh" }}>
-        {loading?(
+        {loadingAuth ? (
           <div style={{ padding: 24, display: "grid", placeItems: "center" }}>
             <div className="muted">Loading…</div>
           </div>
-        ):(
+        ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
 
@@ -320,7 +305,7 @@ export default function App() {
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
             <Route
-              path="/chat/line/:handle"
+              path="/chat/handle/:handle"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
 
@@ -330,7 +315,7 @@ export default function App() {
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
 
-            {/* QR smoke test & connection link endpoint */}
+            {/* QR utilities */}
             <Route path="/debug-qr" element={<DebugQR />} />
             <Route path="/connect" element={<Connect me={me} />} />
 
