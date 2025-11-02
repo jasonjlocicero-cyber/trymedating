@@ -22,7 +22,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand */}
+        {/* Brand (icon + wordmark) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -31,49 +31,71 @@ export default function Header({ me, unread = 0, onSignOut }) {
             alignItems: "center",
             gap: 10,
             fontWeight: 900,
-            fontSize: 22, // slightly larger
+            fontSize: 22,
             letterSpacing: "-0.2px",
             lineHeight: 1,
           }}
         >
-          {/* Heart + wristband mark */}
+          {/* === Heart + wristband logo (closely matches your pasted mark) === */}
           <svg
-            width="26"
-            height="26"
-            viewBox="0 0 24 24"
+            width="30"
+            height="30"
+            viewBox="0 0 64 64"
             aria-hidden="true"
             style={{ display: "block", flex: "0 0 auto" }}
           >
-            {/* heart shape (white fill + teal stroke) */}
-            <defs>
-              <clipPath id="heartClip">
-                <path d="M12 21s-1.45-1.06-3.26-2.46C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.56C13.45 19.94 12 21 12 21z" />
-              </clipPath>
-            </defs>
+            {/* Heart outline */}
             <path
-              d="M12 21s-1.45-1.06-3.26-2.46C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.56C13.45 19.94 12 21 12 21z"
-              fill="#fff"
-              stroke="var(--brand-teal)"
-              strokeWidth="2"
+              d="M32 55
+                 C29 52 21 46 16 42
+                 C9 36 6 31 6 25
+                 C6 19 11 14 17 14
+                 C21 14 25 16 28 20
+                 C31 16 35 14 39 14
+                 C45 14 50 19 50 25
+                 C50 33 44 38 37 43
+                 C35 45 33.5 46.1 32 47.2
+                 Z"
+              fill="none"
+              stroke="var(--brand-coral)"
+              strokeWidth="4.5"
+              strokeLinecap="round"
               strokeLinejoin="round"
             />
-            {/* coral wristband clipped inside the heart */}
-            <g clipPath="url(#heartClip)">
-              <rect
-                x="-3"
-                y="9.6"
-                width="30"
-                height="5.4"
-                rx="2.7"
-                fill="var(--brand-coral)"
-                transform="rotate(-18 12 12)"
+
+            {/* Wristband (tilted ellipse) */}
+            <g transform="rotate(-18 40 42)">
+              <ellipse
+                cx="40"
+                cy="42"
+                rx="18"
+                ry="9"
+                fill="none"
+                stroke="var(--brand-teal)"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+              {/* inner knock-out to make it look like a band, not a filled oval */}
+              <ellipse
+                cx="40"
+                cy="42"
+                rx="13"
+                ry="6.5"
+                fill="var(--bg-light)"
               />
             </g>
-            {/* tiny highlight dot */}
-            <circle cx="8.3" cy="8.4" r="1.3" fill="var(--brand-teal-200)" />
+
+            {/* Small notch to mimic the “gap” where the band crosses the heart */}
+            <path
+              d="M21 39 C23 40 25 42 27 44"
+              fill="none"
+              stroke="var(--bg-light)"
+              strokeWidth="6"
+              strokeLinecap="round"
+            />
           </svg>
 
-          {/* colored wordmark */}
+          {/* Colored wordmark */}
           <span>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
             <span style={{ color: "var(--brand-teal)" }}>Me</span>
