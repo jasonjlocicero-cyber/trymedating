@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
-import { subscribeUnreadCount } from './lib/unread'
 
 // Layout
 import Header from './components/Header'
@@ -21,6 +20,7 @@ import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'
 import DebugQR from './pages/DebugQR'
+import Connections from './pages/Connections' // << NEW
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -82,9 +82,8 @@ function Home({ me }) {
               </>
             ) : (
               <>
-                {/* Settings CTA removed (by request) */}
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
+                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link> {/* NEW */}
               </>
             )}
           </div>
@@ -117,26 +116,10 @@ function Home({ me }) {
               gap: 16
             }}
           >
-            <FeatureCard
-              title="Create"
-              text="Set up a simple profile with your name and a short intro. Choose if it’s public."
-              icon="🧩"
-            />
-            <FeatureCard
-              title="Share"
-              text="Show your personal QR code to people you’ve met in real life to invite them."
-              icon="🔗"
-            />
-            <FeatureCard
-              title="Match"
-              text="You both must accept—this isn’t a browse-everyone app; it’s about real connections."
-              icon="🤝"
-            />
-            <FeatureCard
-              title="Message"
-              text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)."
-              icon="💬"
-            />
+            <FeatureCard title="Create" text="Set up a simple profile with your name and a short intro. Choose if it’s public." icon="🧩"/>
+            <FeatureCard title="Share" text="Show your personal QR code to people you’ve met in real life to invite them." icon="🔗"/>
+            <FeatureCard title="Match" text="You both must accept—this isn’t a browse-everyone app; it’s about real connections." icon="🤝"/>
+            <FeatureCard title="Message" text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)." icon="💬"/>
           </div>
         </div>
       </section>
@@ -165,31 +148,11 @@ function Home({ me }) {
           <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
         </div>
       </section>
-
-      {/* GET STARTED */}
-      <section style={{ padding: '28px 0' }}>
-        <div
-          className="container"
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexWrap: 'wrap'
-          }}
-        >
-          {!authed ? (
-            <>
-              <div className="muted">Ready to begin?</div>
-              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
-            </>
-          ) : null /* "Continue where you left off" removed */}
-        </div>
-      </section>
     </div>
   )
 }
 
+/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -233,7 +196,6 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
 
-  // Safe auth bootstrap with fallback timer
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -251,6 +213,7 @@ export default function App() {
     })()
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (!alive) return
       setMe(session?.user || null)
     })
 
@@ -261,17 +224,6 @@ export default function App() {
     }
   }, [])
 
-  // Live unread subscription (and initial fetch)
-  useEffect(() => {
-    let stop = () => {}
-    if (me?.id) {
-      stop = subscribeUnreadCount(supabase, me.id, (n) => setUnread(n))
-    } else {
-      setUnread(0)
-    }
-    return () => stop()
-  }, [me?.id])
-
   async function handleSignOut() {
     await supabase.auth.signOut()
   }
@@ -279,8 +231,6 @@ export default function App() {
   return (
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
-
-      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
@@ -291,68 +241,33 @@ export default function App() {
         ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
-
-            {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
-            {/* Private routes (basic guard) */}
-            <Route
-              path="/profile"
-              element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/settings"
-              element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
-            />
+            <Route path="/profile" element={me ? <ProfilePage /> : <Navigate to="/auth" replace />} />
+            <Route path="/settings" element={me ? <SettingsPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/connections" element={me ? <Connections /> : <Navigate to="/auth" replace />} /> {/* NEW */}
 
-            {/* Public profile */}
             <Route path="/u/:handle" element={<PublicProfile />} />
 
-            {/* Static pages */}
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
 
-            {/* Direct chat routes */}
-            <Route
-              path="/chat/:peerId"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat/handle/:handle"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
+            <Route path="/chat/:peerId" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/chat" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/chat/handle/:handle" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
 
-            {/* Invite QR */}
-            <Route
-              path="/invite"
-              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
-            />
-
-            {/* QR Smoke Test */}
+            <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
             <Route path="/debug-qr" element={<DebugQR />} />
-
-            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
 
-            {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}
       </main>
 
       <Footer />
-
-      {/* Chat bubble */}
-      <ChatLauncher
-        onUnreadChange={(n) => {
-          if (typeof n === 'number') setUnread(n)
-        }}
-      />
+      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </ChatProvider>
   )
 }
