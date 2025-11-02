@@ -1,64 +1,139 @@
 // src/components/Header.jsx
-import React from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import React from "react";
+import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, unread = 0, onSignOut }) {
-  const { pathname } = useLocation()
-  const active = (p) => (pathname === p ? { boxShadow: 'inset 0 0 0 2px var(--brand-teal)' } : {})
-
-  const UnreadPill = unread > 0 && (
-    <span
-      aria-label={`${unread} unread`}
-      title={`${unread} unread`}
+  return (
+    <header
+      className="site-header"
       style={{
-        marginLeft: 6,
-        padding: '0 7px',
-        borderRadius: 999,
-        background: 'var(--brand-coral)',
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: 800,
-        lineHeight: '18px',
-        minWidth: 18,
-        display: 'inline-flex',
-        justifyContent: 'center'
+        background: "var(--bg-light)",
+        borderBottom: "1px solid var(--border)",
+        boxShadow: "0 2px 4px rgba(0,0,0,.04)",
       }}
     >
-      {unread > 99 ? '99+' : unread}
-    </span>
-  )
-
-  return (
-    <header className="site-header">
-      <div className="container" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}>
+      <div
+        className="container"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 0",
+        }}
+      >
         {/* Brand */}
-        <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src="/logo-mark.png" alt="" width={26} height={26} />
-          <strong style={{ fontSize: 18 }}>TryMeDating</strong>
+        <Link
+          to="/"
+          aria-label="TryMeDating home"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontWeight: 900,
+            fontSize: 22, // a touch larger
+            letterSpacing: "-0.2px",
+            lineHeight: 1,
+          }}
+        >
+          {/* small heart mark */}
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            style={{ display: "block" }}
+          >
+            <path
+              d="M12 21s-1.45-1.067-3.26-2.457C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.564C13.45 19.933 12 21 12 21z"
+              fill="var(--brand-teal)"
+            />
+          </svg>
+
+          {/* colored wordmark */}
+          <span>
+            <span style={{ color: "var(--brand-teal)" }}>Try</span>
+            <span style={{ color: "var(--brand-teal)" }}>Me</span>
+            <span style={{ color: "var(--brand-coral)" }}>Dating</span>
+          </span>
         </Link>
 
-        <nav style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Link className="btn btn-neutral btn-pill" style={active('/')} to="/">Home</Link>
+        {/* Nav */}
+        <nav
+          aria-label="Main"
+          style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+        >
+          <NavLink
+            to="/"
+            end
+            className="btn btn-neutral btn-pill"
+            style={({ isActive }) => ({
+              background: isActive ? "var(--brand-teal)" : undefined,
+              color: isActive ? "#fff" : undefined,
+              borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+            })}
+          >
+            Home
+          </NavLink>
 
-          {me?.id ? (
-            <>
-              <Link
-                className="btn btn-neutral btn-pill"
-                style={active('/chat')}
-                to="/chat"
+          {/* Messages (to /chat). Unread badge if provided */}
+          <NavLink
+            to="/chat"
+            className="btn btn-neutral btn-pill"
+            style={({ isActive }) => ({
+              background: isActive ? "var(--brand-teal)" : undefined,
+              color: isActive ? "#fff" : undefined,
+              borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+              position: "relative",
+            })}
+          >
+            Messages
+            {unread > 0 && (
+              <span
+                aria-label={`${unread} unread`}
+                style={{
+                  position: "absolute",
+                  top: -6,
+                  right: -6,
+                  minWidth: 18,
+                  height: 18,
+                  padding: "0 5px",
+                  borderRadius: 999,
+                  background: "var(--brand-coral)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  display: "grid",
+                  placeItems: "center",
+                  lineHeight: 1,
+                }}
               >
-                Messages {UnreadPill}
-              </Link>
-              <button className="btn btn-accent btn-pill" onClick={onSignOut}>Sign out</button>
-            </>
+                {unread}
+              </span>
+            )}
+          </NavLink>
+
+          {/* Auth action */}
+          {me ? (
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="btn btn-accent btn-pill"
+              title="Sign out"
+            >
+              Sign out
+            </button>
           ) : (
-            <Link className="btn btn-primary btn-pill" to="/auth">Sign in</Link>
+            <NavLink to="/auth" className="btn btn-primary btn-pill">
+              Sign in
+            </NavLink>
           )}
         </nav>
       </div>
     </header>
-  )
+  );
 }
+
 
 
 
