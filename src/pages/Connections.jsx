@@ -3,12 +3,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-const STATUS_ORDER = ["accepted", "pending", "rejected", "disconnected", "blocked"];
-
-function initialCounter() {
-  return { all: 0, accepted: 0, pending: 0, rejected: 0, disconnected: 0, blocked: 0 };
-}
-
 function chip(txt, tone = "neutral") {
   const bg =
     tone === "success" ? "#bbf7d0" :
@@ -34,34 +28,33 @@ function chip(txt, tone = "neutral") {
 
 export default function Connections() {
   const nav = useNavigate();
-  const [me, setMe] = useState(null);
 
-  const [rows, setRows] = useState([]);               // connections
-  const [profiles, setProfiles] = useState(new Map()); // user_id -> profile
+  const [me, setMe] = useState(null);
+  const [rows, setRows] = useState([]);                 // connections
+  const [profilesMap, setProfilesMap] = useState(new Map()); // peer_id -> {handle, display_name, avatar_url}
   const [loading, setLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState("all"); // all | accepted | pending | rejected | disconnected | blocked
+  const [activeTab, setActiveTab] = useState("all"); // all|accepted|pending|rejected|disconnected|blocked
   const [q, setQ] = useState("");
 
+  // auth
   useEffect(() => {
     let alive = true;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!alive) return;
-      setMe(user ?? null);
+      if (alive) setMe(user ?? null);
     })();
     return () => { alive = false; };
   }, []);
 
-  // Load connections and peer profiles
+  // load connections + peer profiles via RPC
   useEffect(() => {
     if (!me?.id) return;
-
     let cancelled = false;
+
     (async () => {
       setLoading(true);
 
-      // 1) get all my connection rows
       const { data: cons, error } = await supabase
         .from("connections")
         .select("*")
@@ -73,47 +66,28 @@ export default function Connections() {
       if (error) {
         console.error("connections load error:", error);
         setRows([]);
-        setProfiles(new Map());
+        setProfilesMap(new Map());
         setLoading(false);
         return;
       }
-
       setRows(cons || []);
 
-      // 2) derive the set of peer IDs
-      const peerIds = Array.from(
-        new Set(
-          (cons || []).map((r) =>
-            r.requester_id === me.id ? r.addressee_id : r.requester_id
-          )
-        )
-      ).filter(Boolean);
-
-      if (peerIds.length === 0) {
-        setProfiles(new Map());
-        setLoading(false);
-        return;
-      }
-
-      // 3) fetch peer profiles ***by user_id*** (not id)
-      const { data: profs, error: pErr } = await supabase
-        .from("profiles")
-        .select("user_id, handle, display_name, full_name, username, avatar_url")
-        .in("user_id", peerIds);
+      const { data: peers, error: rpcErr } = await supabase.rpc(
+        "get_peer_profiles_for_user",
+        { p_uid: me.id }
+      );
 
       if (cancelled) return;
-      if (pErr) {
-        console.error("profiles load error:", pErr);
-        setProfiles(new Map());
+      if (rpcErr) {
+        console.error("rpc get_peer_profiles_for_user error:", rpcErr);
+        setProfilesMap(new Map());
         setLoading(false);
         return;
       }
 
       const map = new Map();
-      (profs || []).forEach((p) => {
-        map.set(p.user_id, p);
-      });
-      setProfiles(map);
+      (peers || []).forEach((p) => map.set(p.peer_id, p));
+      setProfilesMap(map);
       setLoading(false);
     })();
 
@@ -121,11 +95,11 @@ export default function Connections() {
   }, [me?.id]);
 
   const counters = useMemo(() => {
-    const c = initialCounter();
+    const c = { all: 0, accepted: 0, pending: 0, rejected: 0, disconnected: 0, blocked: 0 };
     for (const r of rows) {
-      const st = (r.status || "").toLowerCase();
+      const s = (r.status || "").toLowerCase();
       c.all++;
-      if (st in c) c[st]++;
+      if (s in c) c[s]++;
     }
     return c;
   }, [rows]);
@@ -133,30 +107,24 @@ export default function Connections() {
   const filtered = useMemo(() => {
     const low = q.trim().toLowerCase();
     return rows.filter((r) => {
-      // status filter
       if (activeTab !== "all" && (r.status || "").toLowerCase() !== activeTab) return false;
-
       if (!low) return true;
 
       const peerId = r.requester_id === me?.id ? r.addressee_id : r.requester_id;
-      const p = profiles.get(peerId) || {};
-      const dn = (p.display_name || p.full_name || p.username || p.handle || "").toLowerCase();
+      const p = profilesMap.get(peerId) || {};
+      const dn = (p.display_name || p.handle || "").toLowerCase();
       return dn.includes(low) || String(peerId || "").includes(low);
     });
-  }, [rows, activeTab, q, me?.id, profiles]);
+  }, [rows, activeTab, q, me?.id, profilesMap]);
 
   const openChat = (peerId) => nav(`/chat/${peerId}`);
-
   const disconnect = async (connId) => {
     await supabase.from("connections").update({ status: "disconnected" }).eq("id", connId);
   };
-
   const reconnect = async (connId) => {
     await supabase.from("connections").update({ status: "pending" }).eq("id", connId);
   };
-
   const blockPeer = async (connId) => {
-    // If you have a separate blocks table, call that here.
     await supabase.from("connections").update({ status: "blocked" }).eq("id", connId);
   };
 
@@ -171,7 +139,7 @@ export default function Connections() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* tabs */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
         {[
           ["all", counters.all],
@@ -221,7 +189,7 @@ export default function Connections() {
         />
       </div>
 
-      {/* List */}
+      {/* list */}
       <div style={{ marginTop: 14, border: "1px solid var(--border)", borderRadius: 12 }}>
         {loading ? (
           <div style={{ padding: 16 }} className="muted">Loading…</div>
@@ -230,14 +198,12 @@ export default function Connections() {
         ) : (
           filtered.map((r) => {
             const peerId = r.requester_id === me?.id ? r.addressee_id : r.requester_id;
-            const p = profiles.get(peerId) || {};
-            const name = p.display_name || p.full_name || p.username || p.handle || String(peerId).slice(0, 8);
+            const p = profilesMap.get(peerId) || {};
+            const name = p.display_name || p.handle || String(peerId).slice(0, 8);
+            const isImg = typeof p.avatar_url === "string" && p.avatar_url.length > 0;
 
-            // Simple avatar: image (if http/https) else initial
-            const isImg = typeof p.avatar_url === "string" && /^https?:\/\//i.test(p.avatar_url);
-
-            let tone = "muted";
             const s = (r.status || "").toLowerCase();
+            let tone = "muted";
             if (s === "accepted") tone = "success";
             else if (s === "pending") tone = "warn";
             else if (s === "rejected" || s === "blocked") tone = "danger";
@@ -302,6 +268,7 @@ export default function Connections() {
     </div>
   );
 }
+
 
 
 
