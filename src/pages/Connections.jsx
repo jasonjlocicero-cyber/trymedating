@@ -3,408 +3,419 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-/** ---- schema helpers (match your app) ---- */
-const TBL = "connections";
-const COL = {
-  id: "id",
-  req: "requester_id",
-  add: "addressee_id",
-  status: "status",
-  created: "created_at",
-  updated: "updated_at",
-};
+// Helpers
+const STATUSES = ["accepted", "pending", "rejected", "disconnected", "blocked"];
+const isAccepted = (s) => s === "accepted";
+const isPending = (s) => s === "pending";
 
-const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
-const peerOf = (row, me) => (row[COL.req] === me ? row[COL.add] : row[COL.req]);
-const isMeRequester = (row, me) => row[COL.req] === me;
+/** In a row, who is the other person relative to me? */
+const otherPartyId = (row, myId) =>
+  row?.requester_id === myId ? row?.addressee_id : row?.requester_id;
 
-/** pill */
-function Pill({ children, color = "#eef2ff" }) {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 700,
-        background: color,
-        color: "#111",
-      }}
-    >
-      {children}
-    </span>
-  );
+/** Same "open-chat" event your ChatLauncher listens to */
+function openChatWith(partnerId, partnerName = "") {
+  if (window.openChat) return window.openChat(partnerId, partnerName);
+  window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
 }
 
-/** small count badge */
-function Count({ n }) {
-  if (!Number.isFinite(n)) return null;
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        minWidth: 18,
-        padding: "0 6px",
-        marginLeft: 6,
-        borderRadius: 999,
-        background: "var(--brand-teal, #0fa37f)",
-        color: "#fff",
-        fontSize: 12,
-        fontWeight: 800,
-        textAlign: "center",
-      }}
-    >
-      {n}
-    </span>
-  );
-}
+/** Little status pill */
+const Pill = ({ text, bg = "#f3f4f6", color = "#111" }) => (
+  <span
+    style={{
+      padding: "3px 10px",
+      borderRadius: 999,
+      background: bg,
+      color,
+      fontWeight: 800,
+      fontSize: 12,
+      border: "1px solid var(--border)",
+      lineHeight: 1.6,
+    }}
+  >
+    {text}
+  </span>
+);
 
 export default function Connections() {
   const nav = useNavigate();
 
-  // auth
+  // Auth
   const [me, setMe] = useState(null);
-  const myId = toId(me?.id);
+  const myId = me?.id || null;
 
-  // data
-  const [rows, setRows] = useState([]);
-  const [peers, setPeers] = useState({}); // user_id -> {display_name, handle, avatar_url}
+  // Data
+  const [rows, setRows] = useState([]);           // raw connections
+  const [profiles, setProfiles] = useState({});   // user_id -> {handle, display_name, avatar_url, ...}
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
-  // ui
-  const [tab, setTab] = useState("all"); // all | pending | blocked
-  const [busyId, setBusyId] = useState(null);
+  // UI state
+  const [filter, setFilter] = useState("all");    // "all" | one of STATUSES
+  const [q, setQ] = useState("");                 // search term (handle/display_name)
 
-  /* get current user */
+  // Bootstrap auth
   useEffect(() => {
     let alive = true;
     (async () => {
-      const { data } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!alive) return;
-      setMe(data?.user || null);
+      setMe(user || null);
+      setLoading(false);
     })();
-    return () => {
-      alive = false;
-    };
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      setMe(session?.user || null);
+    });
+    return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  /* fetch connections + peer profiles */
-  const fetchConnections = useCallback(async () => {
+  // Fetch + wire realtime
+  const refresh = useCallback(async () => {
     if (!myId) return;
+    setErr("");
     setLoading(true);
+    try {
+      // 1) fetch my connection rows
+      const { data, error } = await supabase
+        .from("connections")
+        .select("id, requester_id, addressee_id, status, created_at, updated_at")
+        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
+        .order("updated_at", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw error;
 
-    // 1) all connections involving me
-    const or = `${COL.req}.eq.${myId},${COL.add}.eq.${myId}`;
-    const { data: cons, error } = await supabase
-      .from(TBL)
-      .select(`${COL.id}, ${COL.req}, ${COL.add}, ${COL.status}, ${COL.created}, ${COL.updated}`)
-      .or(or)
-      .order(COL.updated, { ascending: false, nullsFirst: false })
-      .order(COL.created, { ascending: false })
-      .limit(200);
+      setRows(data || []);
 
-    if (error) {
-      console.error(error);
-      setRows([]);
-      setPeers({});
+      // 2) fetch partner profiles in bulk
+      const partnerIds = Array.from(
+        new Set((data || []).map((r) => otherPartyId(r, myId)).filter(Boolean))
+      );
+      if (partnerIds.length) {
+        const { data: profs, error: pErr } = await supabase
+          .from("profiles")
+          .select("user_id, handle, display_name, avatar_url, is_public")
+          .in("user_id", partnerIds);
+        if (pErr) throw pErr;
+
+        const map = {};
+        for (const p of profs || []) map[p.user_id] = p;
+        setProfiles(map);
+      } else {
+        setProfiles({});
+      }
+    } catch (e) {
+      setErr(e.message || "Failed to load connections.");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    setRows(cons || []);
-
-    // 2) fetch peer profile cards
-    const peerIds = Array.from(
-      new Set((cons || []).map((r) => peerOf(r, myId)).filter(Boolean))
-    );
-
-    if (peerIds.length) {
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("user_id, display_name, handle, avatar_url")
-        .in("user_id", peerIds);
-
-      const map = {};
-      (profs || []).forEach((p) => (map[p.user_id] = p));
-      setPeers(map);
-    } else {
-      setPeers({});
-    }
-
-    setLoading(false);
   }, [myId]);
 
-  // initial + realtime
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Realtime subscription
   useEffect(() => {
     if (!myId) return;
-    fetchConnections();
+    const filter =
+      `or=(requester_id.eq.${myId},addressee_id.eq.${myId})`;
 
-    // live updates
-    const filter = `or=(${COL.req}.eq.${myId},${COL.add}.eq.${myId})`;
     const ch = supabase
       .channel(`connections:${myId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: TBL, filter },
-        () => fetchConnections()
+      .on("postgres_changes", { event: "*", schema: "public", table: "connections", filter }, () =>
+        refresh()
       )
       .subscribe();
 
     return () => supabase.removeChannel(ch);
-  }, [myId, fetchConnections]);
+  }, [myId, refresh]);
 
-  /* derived */
-  const pending = useMemo(
-    () => rows.filter((r) => r[COL.status] === "pending"),
-    [rows]
-  );
-  const blocked = useMemo(
-    () => rows.filter((r) => r[COL.status] === "blocked"),
-    [rows]
-  );
+  // Actions (mirror PublicProfile/ChatDock semantics)
+  const accept = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
 
-  const visible = useMemo(() => {
-    if (tab === "pending") return pending;
-    if (tab === "blocked") return blocked;
-    return rows;
-  }, [rows, pending, blocked, tab]);
+  const reject = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({ status: "rejected", updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
 
-  /* actions */
-  async function updateStatus(id, status) {
-    setBusyId(id);
-    try {
-      const { error } = await supabase
-        .from(TBL)
-        .update({ [COL.status]: status, [COL.updated]: new Date().toISOString() })
-        .eq(COL.id, id);
-      if (error) throw error;
-    } catch (e) {
-      alert(e.message || "Update failed.");
-      console.error(e);
-    } finally {
-      setBusyId(null);
+  const cancel = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  const disconnect = async (id) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  const reconnect = async (id, partnerId) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({
+        status: "pending",
+        requester_id: myId,
+        addressee_id: partnerId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    if (error) alert(error.message);
+  };
+
+  // Filtering + search
+  const filtered = useMemo(() => {
+    let out = rows;
+    if (filter !== "all") {
+      out = out.filter((r) => (r.status || "none") === filter);
     }
-  }
+    const needle = q.trim().toLowerCase();
+    if (needle) {
+      out = out.filter((r) => {
+        const pid = otherPartyId(r, myId);
+        const p = profiles[pid] || {};
+        const h = (p.handle || "").toLowerCase();
+        const dn = (p.display_name || "").toLowerCase();
+        return h.includes(needle) || dn.includes(needle);
+      });
+    }
+    return out;
+  }, [rows, profiles, filter, q, myId]);
 
-  const accept = (id) => updateStatus(id, "accepted");
-  const reject = (id) => updateStatus(id, "rejected");
-  const cancel = (id) => updateStatus(id, "disconnected");
-  const unblock = (id) => updateStatus(id, "disconnected");
+  // Status counters (for chips)
+  const counts = useMemo(() => {
+    const c = { all: rows.length };
+    for (const s of STATUSES) c[s] = rows.filter((r) => r.status === s).length;
+    return c;
+  }, [rows]);
 
-  function openChat(peerId) {
-    nav(`/chat/${peerId}`);
-  }
-
-  /* row rendering */
-  function Row({ r }) {
-    const id = r[COL.id];
-    const peerId = peerOf(r, myId);
-    const prof = peers[peerId] || {};
-    const mineIsReq = isMeRequester(r, myId);
-    const st = r[COL.status];
-
-    const avatar = prof?.avatar_url || "/logo-mark.png";
-    const title = prof?.display_name || `@${prof?.handle || "user"}`;
-
+  // Guard
+  if (!myId) {
     return (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1fr auto",
-          alignItems: "center",
-          gap: 12,
-          padding: 10,
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
-        {/* avatar */}
-        <div
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: "50%",
-            overflow: "hidden",
-            border: "1px solid var(--border)",
-            background: "#f8fafc",
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <img
-            src={avatar}
-            alt=""
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        </div>
-
-        {/* main */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 800 }}>{title}</div>
-            {prof?.handle && (
-              <span className="muted" style={{ fontSize: 13 }}>
-                @{prof.handle}
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-            {st === "accepted" && <Pill color="#bbf7d0">Connected</Pill>}
-            {st === "pending" && <Pill color="#fde68a">Pending</Pill>}
-            {st === "rejected" && <Pill color="#fecaca">Rejected</Pill>}
-            {st === "disconnected" && <Pill color="#e5e7eb">Disconnected</Pill>}
-            {st === "blocked" && <Pill color="#fca5a5">Blocked</Pill>}
-            <span className="muted" style={{ fontSize: 12 }}>
-              {new Date(r[COL.updated] || r[COL.created]).toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* actions */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {/* status-specific actions */}
-          {st === "accepted" && (
-            <>
-              <button
-                className="btn btn-primary"
-                onClick={() => openChat(peerId)}
-                title="Open chat"
-              >
-                Message
-              </button>
-            </>
-          )}
-
-          {st === "pending" && mineIsReq && (
-            <button
-              className="btn btn-neutral"
-              onClick={() => cancel(id)}
-              disabled={busyId === id}
-              title="Cancel request"
-            >
-              Cancel
-            </button>
-          )}
-
-          {st === "pending" && !mineIsReq && (
-            <>
-              <button
-                className="btn btn-primary"
-                onClick={() => accept(id)}
-                disabled={busyId === id}
-              >
-                Accept
-              </button>
-              <button
-                className="btn btn-accent"
-                onClick={() => reject(id)}
-                disabled={busyId === id}
-                title="Reject request"
-              >
-                Reject
-              </button>
-            </>
-          )}
-
-          {st === "blocked" && (
-            <button
-              className="btn btn-neutral"
-              onClick={() => unblock(id)}
-              disabled={busyId === id}
-              title="Unblock"
-            >
-              Unblock
-            </button>
-          )}
+      <div className="container" style={{ padding: 24 }}>
+        <h1 style={{ fontWeight: 900, marginBottom: 6 }}>Connections</h1>
+        <div className="muted">Please sign in to view your connections.</div>
+        <div style={{ marginTop: 10 }}>
+          <Link className="btn btn-primary" to="/auth">Sign in</Link>
         </div>
       </div>
     );
   }
 
-  /* empty-state helpers */
-  function EmptyState() {
-    if (tab === "pending") {
-      return (
-        <div className="muted" style={{ textAlign: "center" }}>
-          No pending requests yet.
-          <div style={{ marginTop: 8 }}>
-            <Link className="btn btn-primary btn-pill" to="/invite">
-              Show my invite QR
-            </Link>
-          </div>
-        </div>
-      );
-    }
-    if (tab === "blocked") {
-      return (
-        <div className="muted" style={{ textAlign: "center" }}>
-          You haven’t blocked anyone.
-        </div>
-      );
-    }
-    // all
-    return (
-      <div className="muted" style={{ textAlign: "center" }}>
-        No connections yet.
-        <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <Link className="btn btn-primary btn-pill" to="/invite">
-            Share your QR
-          </Link>
-          <Link className="btn btn-neutral btn-pill" to="/profile">
-            Edit profile
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  // UI helpers
+  const StatusPill = ({ s }) => {
+    if (s === "accepted") return <Pill text="Connected" bg="#bbf7d0" />;
+    if (s === "pending") return <Pill text="Pending" bg="#fde68a" />;
+    if (s === "rejected") return <Pill text="Rejected" bg="#fecaca" />;
+    if (s === "disconnected") return <Pill text="Disconnected" />;
+    if (s === "blocked") return <Pill text="Blocked" bg="#e5e7eb" />;
+    return <Pill text="Unknown" />;
+  };
 
-  /* UI */
   return (
-    <div className="container" style={{ maxWidth: 900, padding: "20px 12px" }}>
-      <h1 style={{ fontWeight: 900, marginBottom: 6 }}>Connections</h1>
-      <div className="muted" style={{ marginBottom: 12 }}>
-        Manage people you’ve connected with, requests awaiting action, and any blocks.
+    <div className="container" style={{ padding: 24, maxWidth: 980 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ fontWeight: 900, margin: 0 }}>Connections</h1>
+
+        {/* Quick actions */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>
+          <button className="btn btn-primary" onClick={() => nav("/chat")}>Open Messages</button>
+        </div>
       </div>
 
-      {/* tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <button
-          className={`btn ${tab === "all" ? "btn-primary" : "btn-neutral"}`}
-          onClick={() => setTab("all")}
-          title="All connections"
-        >
-          All <Count n={rows.length} />
-        </button>
-        <button
-          className={`btn ${tab === "pending" ? "btn-primary" : "btn-neutral"}`}
-          onClick={() => setTab("pending")}
-          title="Pending requests"
-        >
-          Pending <Count n={pending.length} />
-        </button>
-        <button
-          className={`btn ${tab === "blocked" ? "btn-primary" : "btn-neutral"}`}
-          onClick={() => setTab("blocked")}
-          title="Blocked users"
-        >
-          Blocked <Count n={blocked.length} />
-        </button>
+      {/* Filters + search */}
+      <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[
+            ["all", "All"],
+            ["accepted", "Accepted"],
+            ["pending", "Pending"],
+            ["rejected", "Rejected"],
+            ["disconnected", "Disconnected"],
+            ["blocked", "Blocked"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={`btn ${filter === key ? "btn-primary" : "btn-neutral"}`}
+              onClick={() => setFilter(key)}
+              aria-pressed={filter === key}
+              style={{ padding: "6px 12px" }}
+            >
+              {label}
+              <span
+                style={{
+                  marginLeft: 8,
+                  background: "#fff",
+                  color: "#111",
+                  borderRadius: 999,
+                  padding: "0 8px",
+                  border: "1px solid var(--border)",
+                  fontWeight: 800,
+                  fontSize: 12,
+                }}
+              >
+                {counts[key] ?? 0}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <input
+          placeholder="Search by handle or name…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            padding: "10px 12px",
+          }}
+        />
       </div>
 
-      {/* content */}
-      <div style={{ display: "grid", gap: 10 }}>
-        {loading ? (
-          <div className="muted">Loading…</div>
-        ) : visible.length ? (
-          visible.map((r) => <Row key={r[COL.id]} r={r} />)
-        ) : (
-          <EmptyState />
+      {/* Error / loading */}
+      {err && (
+        <div className="helper-error" style={{ marginTop: 12 }}>
+          {err}
+        </div>
+      )}
+      {loading && <div className="muted" style={{ marginTop: 12 }}>Loading…</div>}
+
+      {/* List */}
+      <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+        {filtered.length === 0 && !loading && (
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              padding: 16,
+              background: "#fff",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>No matches</div>
+            <div className="muted">Try a different filter or search.</div>
+          </div>
         )}
+
+        {filtered.map((row) => {
+          const partnerId = otherPartyId(row, myId);
+          const p = profiles[partnerId] || {};
+          const name = p.display_name || (p.handle ? `@${p.handle}` : partnerId.slice(0, 6));
+          const avatar = p.avatar_url || "/logo-mark.png";
+          const iAmRequester = row.requester_id === myId;
+
+          return (
+            <div
+              key={row.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "64px 1fr auto",
+                gap: 12,
+                alignItems: "center",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              {/* avatar */}
+              <div
+                style={{
+                  width: 64, height: 64, borderRadius: "50%",
+                  overflow: "hidden", border: "1px solid var(--border)",
+                  display: "grid", placeItems: "center", background: "#f8fafc",
+                }}
+              >
+                <img
+                  src={avatar}
+                  alt=""
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              </div>
+
+              {/* main */}
+              <div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <Link
+                    to={p.handle ? `/u/${p.handle}` : "#"}
+                    title="View public profile"
+                    style={{ fontWeight: 800, textDecoration: p.handle ? "none" : "line-through" }}
+                    onClick={(e) => { if (!p.handle) e.preventDefault(); }}
+                  >
+                    {name}
+                  </Link>
+                  <StatusPill s={row.status} />
+                </div>
+                <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                  Updated {new Date(row.updated_at || row.created_at).toLocaleString()}
+                </div>
+              </div>
+
+              {/* actions */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {isAccepted(row.status) && (
+                  <>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => openChatWith(partnerId, name)}
+                      title="Open messages"
+                    >
+                      Message
+                    </button>
+                    <button className="btn btn-neutral" onClick={() => disconnect(row.id)}>
+                      Disconnect
+                    </button>
+                  </>
+                )}
+
+                {isPending(row.status) && iAmRequester && (
+                  <>
+                    <span className="helper-muted">Waiting for acceptance…</span>
+                    <button className="btn btn-neutral" onClick={() => cancel(row.id)}>
+                      Cancel
+                    </button>
+                  </>
+                )}
+
+                {isPending(row.status) && !iAmRequester && (
+                  <>
+                    <button className="btn btn-primary" onClick={() => accept(row.id)}>
+                      Accept
+                    </button>
+                    <button className="btn btn-neutral" onClick={() => reject(row.id)}>
+                      Reject
+                    </button>
+                  </>
+                )}
+
+                {(row.status === "rejected" || row.status === "disconnected") && (
+                  <button className="btn btn-primary" onClick={() => reconnect(row.id, partnerId)}>
+                    Reconnect
+                  </button>
+                )}
+
+                {row.status === "blocked" && (
+                  <span className="helper-muted">Blocked</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
+
 
