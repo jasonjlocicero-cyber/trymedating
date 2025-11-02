@@ -1,43 +1,67 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-/**
- * PublicProfile
- * - Loads a profile by handle from /u/:handle
- * - If profile.is_public === false, injects <meta name="robots" content="noindex">
- * - Shows basic profile info with (Message / Connect) actions
- * - Block/Unblock kept if you added blocks table; otherwise buttons hide automatically.
- */
+/** Small status pill */
+const Pill = ({ text, bg = "#f3f4f6", color = "#111" }) => (
+  <span
+    style={{
+      padding: "4px 10px",
+      borderRadius: 999,
+      background: bg,
+      color,
+      fontWeight: 800,
+      fontSize: 12,
+      border: "1px solid var(--border)",
+    }}
+  >
+    {text}
+  </span>
+);
+
+/** Dispatches the same event ChatLauncher listens to */
+function openChatWith(partnerId, partnerName = "") {
+  if (window.openChat) return window.openChat(partnerId, partnerName);
+  window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
+}
+
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
 
   const [me, setMe] = useState(null);
+  const myId = me?.id || null;
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Optional block state (safe even if blocks table not present; UI hides if not actionable)
-  const [iBlocked, setIBlocked] = useState(false);
-  const targetUserId = profile?.user_id || null;
-  const canAct = !!(me?.id && targetUserId && me.id !== targetUserId);
+  // most-recent connection row between me and profile.user_id
+  const [conn, setConn] = useState(null);
+  const status = conn?.status || "none";
+  const targetId = profile?.user_id || null;
 
-  // Load viewer
+  const avatar = profile?.avatar_url || "/logo-mark.png";
+  const title = profile?.display_name || (profile?.handle ? `@${profile.handle}` : cleanHandle);
+
+  const canAct = useMemo(() => !!(myId && targetId && myId !== targetId), [myId, targetId]);
+
+  // Load me
   useEffect(() => {
     let mounted = true;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (mounted) setMe(user || null);
+      if (!mounted) return;
+      setMe(user || null);
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setMe(session?.user || null);
     });
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // Fetch profile by handle (NOTE: select user_id, not id)
+  // Load profile
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -52,7 +76,6 @@ export default function PublicProfile() {
           .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
-
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
         if (!alive) return;
@@ -65,80 +88,153 @@ export default function PublicProfile() {
       }
     })();
 
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [cleanHandle]);
 
-  // Inject <meta name="robots" content="noindex"> when profile is private
+  // Load latest connection row (any status) for the pair
+  async function refreshConn(pid = myId, tid = targetId) {
+    if (!pid || !tid) return setConn(null);
+    const { data, error } = await supabase
+      .from("connections")
+      .select("*")
+      .or(
+        `and(requester_id.eq.${pid},addressee_id.eq.${tid}),and(requester_id.eq.${tid},addressee_id.eq.${pid})`
+      )
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!error) setConn(data || null);
+  }
+
   useEffect(() => {
-    let tag;
-    if (profile && profile.is_public === false) {
-      tag = document.createElement("meta");
-      tag.setAttribute("name", "robots");
-      tag.setAttribute("content", "noindex");
-      document.head.appendChild(tag);
+    refreshConn();
+    // subscribe for live updates on this pair
+    if (!myId || !targetId) return;
+    const filter =
+      `or=(and(requester_id.eq.${myId},addressee_id.eq.${targetId}),` +
+      `and(requester_id.eq.${targetId},addressee_id.eq.${myId}))`;
+
+    const ch = supabase
+      .channel(`publicprofile:${myId}<->${targetId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "connections", filter }, () =>
+        refreshConn()
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(ch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myId, targetId]);
+
+  /* ---- Actions (mirror ChatDock semantics) ---- */
+  const requestConnect = async () => {
+    if (!canAct) return;
+    // re-use row if rejected/disconnected
+    const { data: prev } = await supabase
+      .from("connections")
+      .select("*")
+      .or(
+        `and(requester_id.eq.${myId},addressee_id.eq.${targetId}),and(requester_id.eq.${targetId},addressee_id.eq.${myId})`
+      )
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    const row = prev?.[0];
+
+    // If other side already requested me, accept that one
+    if (
+      row &&
+      row.status === "pending" &&
+      row.requester_id === targetId &&
+      row.addressee_id === myId
+    ) {
+      await acceptRequest(row.id);
+      return;
     }
-    return () => { if (tag) document.head.removeChild(tag); };
-  }, [profile?.is_public]);
 
-  // Check if *I* blocked this user (only if table exists & I’m signed in)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!me?.id || !targetUserId || me.id === targetUserId) {
-        if (alive) setIBlocked(false);
-        return;
-      }
-      try {
-        const { data, error } = await supabase
-          .from("blocks")
-          .select("id")
-          .eq("blocker", me.id)
-          .eq("blocked", targetUserId)
-          .maybeSingle();
-        if (!alive) return;
-        if (error && error.code !== "PGRST116") console.warn("[blocks check]", error.message);
-        setIBlocked(!!data?.id);
-      } catch {
-        // Table might not exist; ignore silently.
-        if (alive) setIBlocked(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [me?.id, targetUserId]);
+    if (row && (row.status === "rejected" || row.status === "disconnected")) {
+      const { data, error } = await supabase
+        .from("connections")
+        .update({ status: "pending", updated_at: new Date().toISOString() })
+        .eq("id", row.id)
+        .select();
+      if (error) { alert(error.message); return; }
+      setConn(Array.isArray(data) ? data[0] : data);
+      return;
+    }
 
-  const avatar = profile?.avatar_url || "/logo-mark.png";
-  const title = profile?.display_name || `@${cleanHandle}`;
-
-  // Actions
-  const openChat = () => {
-    if (!canAct || iBlocked) return;
-    const detail = {
-      partnerId: profile.user_id,
-      partnerName: profile.display_name || `@${profile.handle || cleanHandle}`,
-    };
-    window.dispatchEvent(new CustomEvent("open-chat", { detail }));
+    const { data, error } = await supabase
+      .from("connections")
+      .insert({ requester_id: myId, addressee_id: targetId, status: "pending" })
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
   };
 
-  // Optional block/unblock if you kept the feature
-  async function blockUser() {
-    if (!canAct) return;
-    const { error } = await supabase
-      .from("blocks")
-      .insert({ blocker: me.id, blocked: profile.user_id });
-    if (error && error.code !== "23505") return alert(error.message);
-    setIBlocked(true);
-  }
-  async function unblockUser() {
-    if (!canAct) return;
-    const { error } = await supabase
-      .from("blocks")
-      .delete()
-      .eq("blocker", me.id)
-      .eq("blocked", profile.user_id);
-    if (error) return alert(error.message);
-    setIBlocked(false);
-  }
+  const acceptRequest = async (id = conn?.id) => {
+    if (!id) return;
+    const { data, error } = await supabase
+      .from("connections")
+      .update({ status: "accepted", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
+  };
 
+  const rejectRequest = async () => {
+    if (!conn || conn.status !== "pending") return;
+    const { data, error } = await supabase
+      .from("connections")
+      .update({ status: "rejected", updated_at: new Date().toISOString() })
+      .eq("id", conn.id)
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
+  };
+
+  const cancelPending = async () => {
+    if (!conn || conn.status !== "pending") return;
+    const { data, error } = await supabase
+      .from("connections")
+      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .eq("id", conn.id)
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
+  };
+
+  const disconnect = async () => {
+    if (!conn || conn.status !== "accepted") return;
+    const { data, error } = await supabase
+      .from("connections")
+      .update({ status: "disconnected", updated_at: new Date().toISOString() })
+      .eq("id", conn.id)
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
+  };
+
+  const reconnect = async () => {
+    if (!conn) return;
+    const { data, error } = await supabase
+      .from("connections")
+      .update({
+        status: "pending",
+        requester_id: myId,
+        addressee_id: targetId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conn.id)
+      .select();
+    if (error) { alert(error.message); return; }
+    setConn(Array.isArray(data) ? data[0] : data);
+  };
+
+  /* ---- Render ---- */
   return (
     <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
       {loading && <div className="muted">Loading profile…</div>}
@@ -155,7 +251,7 @@ export default function PublicProfile() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div className="helper-error">{error}</div>
           <div style={{ marginTop: 10 }}>
-            <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
+            <Link className="btn btn-neutral" to="/">Back home</Link>
           </div>
         </div>
       )}
@@ -176,110 +272,80 @@ export default function PublicProfile() {
           {/* Avatar */}
           <div
             style={{
-              width: 96,
-              height: 96,
-              borderRadius: "50%",
-              overflow: "hidden",
-              border: "1px solid var(--border)",
-              background: "#f8fafc",
-              display: "grid",
-              placeItems: "center",
+              width: 96, height: 96, borderRadius: "50%", overflow: "hidden",
+              border: "1px solid var(--border)", background: "#f8fafc", display: "grid", placeItems: "center",
             }}
           >
-            <img
-              src={avatar}
-              alt={`${title} avatar`}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
+            <img src={avatar} alt={`${title} avatar`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
 
           {/* Main */}
           <div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
-              {profile?.handle && (
-                <span className="muted" style={{ fontSize: 14 }}>
-                  @{profile.handle}
-                </span>
-              )}
+              {profile?.handle && <span className="muted" style={{ fontSize: 14 }}>@{profile.handle}</span>}
+              {profile?.is_public === false && <Pill text="Private" bg="#fde68a" />}
             </div>
 
             <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
               {profile?.bio || <span className="muted">No bio yet.</span>}
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              {/* If I blocked them, show Unblock; else normal actions */}
-              {canAct && iBlocked ? (
+            {/* Actions */}
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+              {!myId && (
                 <>
-                  <span className="helper-muted">You have blocked this user.</span>
-                  <button className="btn btn-accent btn-pill" onClick={unblockUser}>
-                    Unblock
-                  </button>
+                  <Pill text="Sign in to connect" />
+                  <Link className="btn btn-primary" to="/auth">Sign in</Link>
                 </>
-              ) : profile?.is_public ? (
+              )}
+
+              {myId && !canAct && <span className="helper-muted">This is your profile.</span>}
+
+              {myId && canAct && (
                 <>
-                  {canAct && (
+                  {/* Status chip */}
+                  {status === "accepted" && <Pill text="Connected" bg="#bbf7d0" />}
+                  {status === "pending" && <Pill text="Pending" bg="#fde68a" />}
+                  {status === "rejected" && <Pill text="Rejected" bg="#fecaca" />}
+                  {status === "disconnected" && <Pill text="Disconnected" />}
+                  {status === "none" && <Pill text="No connection" />}
+
+                  {/* CTA buttons */}
+                  {status === "accepted" && (
                     <>
                       <button
-                        className="btn btn-primary btn-pill"
+                        className="btn btn-primary"
                         type="button"
-                        onClick={openChat}
+                        onClick={() => openChatWith(targetId, title)}
                         title="Open chat"
                       >
                         Message
                       </button>
-                      <Link
-                        className="btn btn-neutral btn-pill"
-                        to={`/connect?to=${profile.user_id}`}
-                        title="Send connection request"
-                      >
-                        Connect
-                      </Link>
-                      {/* Optional block button */}
-                      {me?.id && (
-                        <button
-                          className="btn btn-accent btn-pill"
-                          type="button"
-                          onClick={blockUser}
-                          title="Block this user"
-                        >
-                          Block
-                        </button>
-                      )}
+                      <button className="btn btn-neutral" onClick={disconnect}>Disconnect</button>
                     </>
                   )}
-                  {!canAct && (
-                    <span className="helper-muted">
-                      This is your profile or you’re not signed in.
-                    </span>
+
+                  {status === "pending" && conn?.requester_id === myId && (
+                    <>
+                      <span className="muted">Request sent.</span>
+                      <button className="btn btn-neutral" onClick={cancelPending}>Cancel</button>
+                    </>
                   )}
-                </>
-              ) : (
-                <>
-                  <span
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      background: "#fde68a",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      border: "1px solid var(--border)",
-                    }}
-                  >
-                    Private profile
-                  </span>
-                  <span className="helper-muted" style={{ fontSize: 13 }}>
-                    This page is hidden from search engines.
-                  </span>
-                  {canAct && (
-                    <Link
-                      className="btn btn-neutral btn-pill"
-                      to={`/connect?to=${profile.user_id}`}
-                      title="Send connection request"
-                    >
-                      Request connect
-                    </Link>
+
+                  {status === "pending" && conn?.addressee_id === myId && (
+                    <>
+                      <button className="btn btn-primary" onClick={() => acceptRequest()}>Accept</button>
+                      <button className="btn btn-neutral" onClick={rejectRequest}>Reject</button>
+                    </>
+                  )}
+
+                  {(status === "rejected" || status === "disconnected") && (
+                    <button className="btn btn-primary" onClick={reconnect}>Reconnect</button>
+                  )}
+
+                  {status === "none" && (
+                    <button className="btn btn-primary" onClick={requestConnect}>Connect</button>
                   )}
                 </>
               )}
@@ -290,11 +356,12 @@ export default function PublicProfile() {
 
       {/* Back link */}
       <div style={{ marginTop: 16 }}>
-        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
+        <Link className="btn btn-neutral" to="/">← Back home</Link>
       </div>
     </div>
   );
 }
+
 
 
 
