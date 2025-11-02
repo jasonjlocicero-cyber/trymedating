@@ -14,11 +14,30 @@ const C = {
 };
 const ACCEPTED = new Set(["accepted", "connected", "approved"]);
 
-function toId(v) {
-  if (!v) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "object" && v.id) return String(v.id);
-  return String(v);
+const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
+
+/* ---------- helpers for display ---------- */
+function pickName(p = {}) {
+  return (
+    p.display_name ||
+    p.full_name ||
+    p.username ||
+    (p.handle ? `@${p.handle}` : "") ||
+    ""
+  );
+}
+function pickHandle(p = {}) {
+  return p.handle ? `@${p.handle}` : "";
+}
+function pickAvatar(p = {}) {
+  return p.avatar_url || p.photo_url || p.avatar || "";
+}
+function initialsFrom(s = "") {
+  const parts = s.replace(/^@/, "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "";
+  const a = parts[0][0] || "";
+  const b = parts.length > 1 ? parts[1][0] : "";
+  return (a + b).toUpperCase();
 }
 
 function StatusChip({ status }) {
@@ -61,30 +80,26 @@ export default function Connections() {
   // ui state
   const [filter, setFilter] = useState("all"); // all | accepted | pending | rejected | disconnected | blocked
   const [q, setQ] = useState("");
-  const [busyId, setBusyId] = useState(""); // for per-row spinners
+  const [busyId, setBusyId] = useState(""); // per-row spinner id
 
   // data
   const [rows, setRows] = useState([]);
-  const [profiles, setProfiles] = useState({}); // by userId
+  const [profiles, setProfiles] = useState({}); // { userId: profile }
 
   // blocks
   const [blockedSet, setBlockedSet] = useState(new Set());
   const loadBlocks = useCallback(async () => {
     if (!myId) return;
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("blocks")
       .select("blocked")
       .eq("blocker", myId);
-    if (error) {
-      console.error(error);
-      setBlockedSet(new Set());
-      return;
-    }
     setBlockedSet(new Set((data || []).map((r) => r.blocked)));
   }, [myId]);
 
   const refresh = useCallback(async () => {
     if (!myId) return;
+
     // Fetch my connections (both directions)
     const pairOr = `${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`;
     const { data, error } = await supabase
@@ -101,43 +116,56 @@ export default function Connections() {
     }
     setRows(data || []);
 
-    // Collect peer ids and batch fetch profiles (supports id or user_id schemas)
-    const peerIds = [];
+    // Gather peer auth IDs
+    const ids = [];
     (data || []).forEach((r) => {
       const other = r[C.requester] === myId ? r[C.addressee] : r[C.requester];
-      if (other) peerIds.push(other);
+      if (other) ids.push(other);
     });
-    const uniq = Array.from(new Set(peerIds));
-    if (uniq.length === 0) {
+    const uniq = Array.from(new Set(ids));
+    if (uniq.length === 0) { setProfiles({}); return; }
+
+    // ---- Robust profile fetch ----
+    // Try by user_id first (works for schemas without 'id' column).
+    let got = [];
+    let errA = null;
+    let errB = null;
+
+    const selCommon = "handle,display_name,full_name,username,avatar_url,photo_url,avatar";
+
+    const byUserId = await supabase
+      .from("profiles")
+      .select(`user_id,${selCommon}`)
+      .in("user_id", uniq);
+
+    if (!byUserId.error && byUserId.data) got = byUserId.data;
+    else errA = byUserId.error;
+
+    // If the table doesn't have user_id (or returned empty), try by id.
+    if ((!got || got.length === 0) || errA) {
+      const byId = await supabase
+        .from("profiles")
+        .select(`id,${selCommon}`)
+        .in("id", uniq);
+      if (!byId.error && byId.data) got = byId.data;
+      else errB = byId.error;
+    }
+
+    if ((errA && errB) || !got) {
+      console.warn("profiles lookup failed", { errA, errB });
       setProfiles({});
       return;
     }
 
-    // Try by id first
-    const byId = await supabase
-      .from("profiles")
-      .select("id, user_id, handle, display_name, avatar_url")
-      .in("id", uniq);
-
-    const foundIds = new Set((byId.data || []).map((p) => p.id));
-    const missing = uniq.filter((id) => !foundIds.has(id));
-
-    let byUserId = { data: [] };
-    if (missing.length) {
-      byUserId = await supabase
-        .from("profiles")
-        .select("id, user_id, handle, display_name, avatar_url")
-        .in("user_id", missing);
-    }
-
     const map = {};
-    [...(byId.data || []), ...(byUserId.data || [])].forEach((p) => {
-      const key = p.id || p.user_id;
+    got.forEach((p) => {
+      const key = p.user_id || p.id;
+      if (!key) return;
       map[key] = {
-        id: p.id || p.user_id,
+        id: key,
         handle: p.handle || "",
-        name: p.display_name || "",
-        avatar: p.avatar_url || "",
+        name: pickName(p),
+        avatar: pickAvatar(p),
       };
     });
     setProfiles(map);
@@ -147,7 +175,6 @@ export default function Connections() {
     refresh();
     loadBlocks();
     if (!myId) return;
-    // live updates
     const ch = supabase
       .channel(`connections:${myId}`)
       .on(
@@ -160,7 +187,7 @@ export default function Connections() {
     return () => supabase.removeChannel(ch);
   }, [myId, refresh, loadBlocks]);
 
-  // derived list with peer + blocked flag
+  // list w/ peer and blocked flag
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows
@@ -179,7 +206,7 @@ export default function Connections() {
       });
   }, [rows, profiles, myId, filter, q, blockedSet]);
 
-  // counts for tabs (including "Blocked")
+  // counters
   const Counts = useMemo(() => {
     const c = { all: rows.length, accepted: 0, pending: 0, rejected: 0, disconnected: 0, blocked: 0 };
     rows.forEach((r) => {
@@ -191,10 +218,9 @@ export default function Connections() {
     return c;
   }, [rows, blockedSet, myId]);
 
-  // helper for button loading
   const setSpin = (id, v) => setBusyId(v ? String(id) : "");
 
-  // connection actions
+  // actions
   const accept = async (row) => {
     setSpin(row.id, true);
     try {
@@ -261,7 +287,7 @@ export default function Connections() {
     setSpin(`blk:${peerId}`, true);
     try {
       const { error } = await supabase.from("blocks").insert({ blocker: myId, blocked: peerId });
-      if (error && error.code !== "23505") throw error; // ignore duplicate
+      if (error && error.code !== "23505") throw error;
       await loadBlocks();
     } catch (e) { alert(e.message || "Failed to block"); }
     finally { setSpin(`blk:${peerId}`, false); }
@@ -276,14 +302,13 @@ export default function Connections() {
     finally { setSpin(`blk:${peerId}`, false); }
   };
 
-  // delete conversation (requires existing block)
+  // delete conversation (requires block; enforced by RPC)
   const deleteConversation = async (peerId) => {
     if (!window.confirm("Delete the entire conversation with this user? This can’t be undone.")) return;
     setSpin(`del:${peerId}`, true);
     try {
       const { error } = await supabase.rpc("delete_conversation_with_block", { p_peer: peerId });
       if (error) throw error;
-      // no UI diff needed here; messages are removed; connections remain
       alert("Conversation deleted.");
     } catch (e) { alert(e.message || "Failed to delete conversation"); }
     finally { setSpin(`del:${peerId}`, false); }
@@ -367,14 +392,15 @@ export default function Connections() {
           view.map((r) => {
             const mineIsRequester = r[C.requester] === myId;
             const isPending = r[C.status] === "pending";
-            const canAccept = isPending && !mineIsRequester; // I am addressee
-            const canCancel = isPending && mineIsRequester;  // I sent it
+            const canAccept = isPending && !mineIsRequester;
+            const canCancel = isPending && mineIsRequester;
             const isAccepted = ACCEPTED.has(r[C.status]);
             const isBlocked = r.isBlocked;
 
-            const avatar = r.peer?.avatar;
             const display = r.peer?.name || r.peer?.handle || r.peerId?.slice(0, 8);
-            const handle = r.peer?.handle ? `@${r.peer.handle}` : "";
+            const handleTxt = r.peer?.handle || "";
+            const avatarUrl = r.peer?.avatar || "";
+            const initials = initialsFrom(display || handleTxt || r.peerId);
 
             const spin = (suffix) => busyId === suffix;
 
@@ -390,6 +416,7 @@ export default function Connections() {
                   borderBottom: "1px solid var(--border)",
                 }}
               >
+                {/* Avatar */}
                 <div
                   style={{
                     width: 42,
@@ -398,16 +425,32 @@ export default function Connections() {
                     background: "#f1f5f9",
                     border: "1px solid var(--border)",
                     overflow: "hidden",
+                    display: "grid",
+                    placeItems: "center",
+                    fontWeight: 800,
+                    color: "#1f2937",
                   }}
+                  aria-label="avatar"
                 >
-                  {avatar ? (
-                    <img alt="" src={avatar} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  ) : null}
+                  {avatarUrl ? (
+                    <img
+                      alt=""
+                      src={avatarUrl}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  ) : (
+                    <span>{initials || "?"}</span>
+                  )}
                 </div>
 
+                {/* Name / handle / status */}
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <strong
+                      style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                      title={display}
+                    >
                       {display}
                     </strong>
                     <StatusChip status={r[C.status]} />
@@ -417,17 +460,14 @@ export default function Connections() {
                       </span>
                     )}
                   </div>
-                  {handle && <div className="muted" style={{ fontSize: 12 }}>{handle}</div>}
+                  {handleTxt && <div className="muted" style={{ fontSize: 12 }}>{handleTxt}</div>}
                 </div>
 
+                {/* Actions */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {/* Messaging / connect controls, disabled if blocked */}
                   {isAccepted && !isBlocked && (
                     <>
-                      <button
-                        className="btn btn-primary btn-pill"
-                        onClick={() => nav(`/chat/${r.peerId}`)}
-                      >
+                      <button className="btn btn-primary btn-pill" onClick={() => nav(`/chat/${r.peerId}`)}>
                         Message
                       </button>
                       <button
