@@ -3,412 +3,518 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-// Helpers
-const STATUSES = ["accepted", "pending", "rejected", "disconnected", "blocked"];
-const isAccepted = (s) => s === "accepted";
-const isPending = (s) => s === "pending";
+const TABLE = "connections";
+const C = {
+  id: "id",
+  requester: "requester_id",
+  addressee: "addressee_id",
+  status: "status",
+  createdAt: "created_at",
+  updatedAt: "updated_at",
+};
+const ACCEPTED = new Set(["accepted", "connected", "approved"]);
 
-const otherPartyId = (row, myId) =>
-  row?.requester_id === myId ? row?.addressee_id : row?.requester_id;
-
-function openChatWith(partnerId, partnerName = "") {
-  if (window.openChat) return window.openChat(partnerId, partnerName);
-  window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
+function toId(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object" && v.id) return String(v.id);
+  return String(v);
 }
 
-const Pill = ({ text, bg = "#f3f4f6", color = "#111" }) => (
-  <span
-    style={{
-      padding: "3px 10px",
-      borderRadius: 999,
-      background: bg,
-      color,
-      fontWeight: 800,
-      fontSize: 12,
-      border: "1px solid var(--border)",
-      lineHeight: 1.6,
-    }}
-  >
-    {text}
-  </span>
-);
+function StatusChip({ status }) {
+  const map = {
+    accepted: { bg: "#bbf7d0", fg: "#14532d", text: "Accepted" },
+    pending: { bg: "#fde68a", fg: "#78350f", text: "Pending" },
+    rejected: { bg: "#fecaca", fg: "#7f1d1d", text: "Rejected" },
+    disconnected: { bg: "#e5e7eb", fg: "#374151", text: "Disconnected" },
+  };
+  const s = map[status] || { bg: "#f3f4f6", fg: "#111827", text: status || "Unknown" };
+  return (
+    <span
+      style={{
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 800,
+        background: s.bg,
+        color: s.fg,
+        display: "inline-block",
+      }}
+    >
+      {s.text}
+    </span>
+  );
+}
 
 export default function Connections() {
   const nav = useNavigate();
 
-  // Auth
+  // auth
   const [me, setMe] = useState(null);
-  const myId = me?.id || null;
-
-  // Data
-  const [rows, setRows] = useState([]);
-  const [profiles, setProfiles] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-
-  // UI
-  const [filter, setFilter] = useState("all");
-  const [q, setQ] = useState("");
-
+  const myId = toId(me?.id);
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!alive) return;
-      setMe(user || null);
-      setLoading(false);
-    })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      setMe(session?.user || null);
-    });
-    return () => sub?.subscription?.unsubscribe?.();
+    let on = true;
+    supabase.auth.getUser().then(({ data }) => on && setMe(data?.user || null));
+    return () => { on = false; };
   }, []);
+
+  // ui state
+  const [filter, setFilter] = useState("all"); // all | accepted | pending | rejected | disconnected | blocked
+  const [q, setQ] = useState("");
+  const [busyId, setBusyId] = useState(""); // for per-row spinners
+
+  // data
+  const [rows, setRows] = useState([]);
+  const [profiles, setProfiles] = useState({}); // by userId
+
+  // blocks
+  const [blockedSet, setBlockedSet] = useState(new Set());
+  const loadBlocks = useCallback(async () => {
+    if (!myId) return;
+    const { data, error } = await supabase
+      .from("blocks")
+      .select("blocked")
+      .eq("blocker", myId);
+    if (error) {
+      console.error(error);
+      setBlockedSet(new Set());
+      return;
+    }
+    setBlockedSet(new Set((data || []).map((r) => r.blocked)));
+  }, [myId]);
 
   const refresh = useCallback(async () => {
     if (!myId) return;
-    setErr("");
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("connections")
-        .select("id, requester_id, addressee_id, status, blocked_by, blocked_at, created_at, updated_at")
-        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
-        .order("updated_at", { ascending: false })
-        .order("created_at", { ascending: false });
-      if (error) throw error;
+    // Fetch my connections (both directions)
+    const pairOr = `${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`;
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select("*")
+      .or(pairOr)
+      .order(C.updatedAt, { ascending: false })
+      .order(C.createdAt, { ascending: false });
 
-      setRows(data || []);
-
-      const partnerIds = Array.from(
-        new Set((data || []).map((r) => otherPartyId(r, myId)).filter(Boolean))
-      );
-      if (partnerIds.length) {
-        const { data: profs, error: pErr } = await supabase
-          .from("profiles")
-          .select("user_id, handle, display_name, avatar_url, is_public")
-          .in("user_id", partnerIds);
-        if (pErr) throw pErr;
-
-        const map = {};
-        for (const p of profs || []) map[p.user_id] = p;
-        setProfiles(map);
-      } else {
-        setProfiles({});
-      }
-    } catch (e) {
-      setErr(e.message || "Failed to load connections.");
-    } finally {
-      setLoading(false);
+    if (error) {
+      console.error(error);
+      setRows([]);
+      return;
     }
+    setRows(data || []);
+
+    // Collect peer ids and batch fetch profiles (supports id or user_id schemas)
+    const peerIds = [];
+    (data || []).forEach((r) => {
+      const other = r[C.requester] === myId ? r[C.addressee] : r[C.requester];
+      if (other) peerIds.push(other);
+    });
+    const uniq = Array.from(new Set(peerIds));
+    if (uniq.length === 0) {
+      setProfiles({});
+      return;
+    }
+
+    // Try by id first
+    const byId = await supabase
+      .from("profiles")
+      .select("id, user_id, handle, display_name, avatar_url")
+      .in("id", uniq);
+
+    const foundIds = new Set((byId.data || []).map((p) => p.id));
+    const missing = uniq.filter((id) => !foundIds.has(id));
+
+    let byUserId = { data: [] };
+    if (missing.length) {
+      byUserId = await supabase
+        .from("profiles")
+        .select("id, user_id, handle, display_name, avatar_url")
+        .in("user_id", missing);
+    }
+
+    const map = {};
+    [...(byId.data || []), ...(byUserId.data || [])].forEach((p) => {
+      const key = p.id || p.user_id;
+      map[key] = {
+        id: p.id || p.user_id,
+        handle: p.handle || "",
+        name: p.display_name || "",
+        avatar: p.avatar_url || "",
+      };
+    });
+    setProfiles(map);
   }, [myId]);
 
-  useEffect(() => { refresh(); }, [refresh]);
-
   useEffect(() => {
+    refresh();
+    loadBlocks();
     if (!myId) return;
-    const filter =
-      `or=(requester_id.eq.${myId},addressee_id.eq.${myId})`;
+    // live updates
     const ch = supabase
       .channel(`connections:${myId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "connections", filter }, () =>
-        refresh()
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: TABLE,
+          filter: `or(${C.requester}=eq.${myId},${C.addressee}=eq.${myId})` },
+        () => { refresh(); loadBlocks(); }
       )
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [myId, refresh]);
+  }, [myId, refresh, loadBlocks]);
 
-  // Actions
-  const accept = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({ status: "accepted", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const reject = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({ status: "rejected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const cancel = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({ status: "disconnected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const disconnect = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({ status: "disconnected", blocked_by: null, blocked_at: null, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const reconnect = async (id, partnerId) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({
-        status: "pending",
-        requester_id: myId,
-        addressee_id: partnerId,
-        blocked_by: null,
-        blocked_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const block = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({
-        status: "blocked",
-        blocked_by: myId,
-        blocked_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  const unblock = async (id) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({
-        status: "disconnected",     // clear back to a neutral state
-        blocked_by: null,
-        blocked_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (error) alert(error.message);
-  };
-
-  // Filter/search
-  const filtered = useMemo(() => {
-    let out = rows;
-    if (filter !== "all") out = out.filter((r) => (r.status || "none") === filter);
+  // derived list with peer + blocked flag
+  const view = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (needle) {
-      out = out.filter((r) => {
-        const pid = otherPartyId(r, myId);
-        const p = profiles[pid] || {};
-        return (p.handle || "").toLowerCase().includes(needle) ||
-               (p.display_name || "").toLowerCase().includes(needle);
+    return rows
+      .map((r) => {
+        const other = r[C.requester] === myId ? r[C.addressee] : r[C.requester];
+        const prof = profiles[other] || {};
+        const isBlocked = blockedSet.has(other);
+        return { ...r, peerId: other, peer: prof, isBlocked };
+      })
+      .filter((r) => {
+        if (filter === "blocked") return r.isBlocked;
+        if (filter !== "all" && r[C.status] !== filter) return false;
+        if (!needle) return true;
+        const hay = `${r.peer?.name || ""} ${r.peer?.handle || ""}`.toLowerCase();
+        return hay.includes(needle);
       });
-    }
-    return out;
-  }, [rows, profiles, filter, q, myId]);
+  }, [rows, profiles, myId, filter, q, blockedSet]);
 
-  const counts = useMemo(() => {
-    const c = { all: rows.length };
-    for (const s of STATUSES) c[s] = rows.filter((r) => r.status === s).length;
+  // counts for tabs (including "Blocked")
+  const Counts = useMemo(() => {
+    const c = { all: rows.length, accepted: 0, pending: 0, rejected: 0, disconnected: 0, blocked: 0 };
+    rows.forEach((r) => {
+      const other = r[C.requester] === myId ? r[C.addressee] : r[C.requester];
+      if (blockedSet.has(other)) c.blocked += 1;
+      const s = r[C.status];
+      if (s in c) c[s] += 1;
+    });
     return c;
-  }, [rows]);
+  }, [rows, blockedSet, myId]);
 
-  if (!myId) {
+  // helper for button loading
+  const setSpin = (id, v) => setBusyId(v ? String(id) : "");
+
+  // connection actions
+  const accept = async (row) => {
+    setSpin(row.id, true);
+    try {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({ [C.status]: "accepted", [C.updatedAt]: new Date().toISOString() })
+        .eq(C.id, row.id);
+      if (error) throw error;
+    } catch (e) { alert(e.message || "Failed to accept"); }
+    finally { setSpin(row.id, false); }
+  };
+  const reject = async (row) => {
+    setSpin(row.id, true);
+    try {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({ [C.status]: "rejected", [C.updatedAt]: new Date().toISOString() })
+        .eq(C.id, row.id);
+      if (error) throw error;
+    } catch (e) { alert(e.message || "Failed to reject"); }
+    finally { setSpin(row.id, false); }
+  };
+  const cancel = async (row) => {
+    setSpin(row.id, true);
+    try {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({ [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() })
+        .eq(C.id, row.id);
+      if (error) throw error;
+    } catch (e) { alert(e.message || "Failed to cancel"); }
+    finally { setSpin(row.id, false); }
+  };
+  const disconnect = async (row) => {
+    setSpin(row.id, true);
+    try {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({ [C.status]: "disconnected", [C.updatedAt]: new Date().toISOString() })
+        .eq(C.id, row.id);
+      if (error) throw error;
+    } catch (e) { alert(e.message || "Failed to disconnect"); }
+    finally { setSpin(row.id, false); }
+  };
+  const reconnect = async (row) => {
+    setSpin(row.id, true);
+    try {
+      const { error } = await supabase
+        .from(TABLE)
+        .update({
+          [C.status]: "pending",
+          [C.requester]: myId,
+          [C.addressee]: row.peerId,
+          [C.updatedAt]: new Date().toISOString(),
+        })
+        .eq(C.id, row.id);
+      if (error) throw error;
+    } catch (e) { alert(e.message || "Failed to reconnect"); }
+    finally { setSpin(row.id, false); }
+  };
+
+  // block / unblock
+  const block = async (peerId) => {
+    setSpin(`blk:${peerId}`, true);
+    try {
+      const { error } = await supabase.from("blocks").insert({ blocker: myId, blocked: peerId });
+      if (error && error.code !== "23505") throw error; // ignore duplicate
+      await loadBlocks();
+    } catch (e) { alert(e.message || "Failed to block"); }
+    finally { setSpin(`blk:${peerId}`, false); }
+  };
+  const unblock = async (peerId) => {
+    setSpin(`blk:${peerId}`, true);
+    try {
+      const { error } = await supabase.from("blocks").delete().eq("blocker", myId).eq("blocked", peerId);
+      if (error) throw error;
+      await loadBlocks();
+    } catch (e) { alert(e.message || "Failed to unblock"); }
+    finally { setSpin(`blk:${peerId}`, false); }
+  };
+
+  // delete conversation (requires existing block)
+  const deleteConversation = async (peerId) => {
+    if (!window.confirm("Delete the entire conversation with this user? This can’t be undone.")) return;
+    setSpin(`del:${peerId}`, true);
+    try {
+      const { error } = await supabase.rpc("delete_conversation_with_block", { p_peer: peerId });
+      if (error) throw error;
+      // no UI diff needed here; messages are removed; connections remain
+      alert("Conversation deleted.");
+    } catch (e) { alert(e.message || "Failed to delete conversation"); }
+    finally { setSpin(`del:${peerId}`, false); }
+  };
+
+  if (!me) {
     return (
       <div className="container" style={{ padding: 24 }}>
-        <h1 style={{ fontWeight: 900, marginBottom: 6 }}>Connections</h1>
         <div className="muted">Please sign in to view your connections.</div>
-        <div style={{ marginTop: 10 }}>
-          <Link className="btn btn-primary" to="/auth">Sign in</Link>
-        </div>
       </div>
     );
   }
 
-  const StatusPill = ({ s, youBlocked }) => {
-    if (s === "accepted") return <Pill text="Connected" bg="#bbf7d0" />;
-    if (s === "pending") return <Pill text="Pending" bg="#fde68a" />;
-    if (s === "rejected") return <Pill text="Rejected" bg="#fecaca" />;
-    if (s === "blocked") return <Pill text={youBlocked ? "You blocked" : "Blocked"} bg="#e5e7eb" />;
-    if (s === "disconnected") return <Pill text="Disconnected" />;
-    return <Pill text="Unknown" />;
-  };
+  const tabs = ["all", "accepted", "pending", "rejected", "disconnected", "blocked"];
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 980 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontWeight: 900, margin: 0 }}>Connections</h1>
+    <div className="container" style={{ padding: 24, maxWidth: 960 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+        <h1 style={{ fontWeight: 900 }}>Connections</h1>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>
-          <button className="btn btn-primary" onClick={() => nav("/chat")}>Open Messages</button>
+          <Link to="/invite" className="btn btn-neutral btn-pill">My Invite QR</Link>
+          <Link to="/chat" className="btn btn-primary btn-pill">Open Messages</Link>
         </div>
       </div>
 
-      {/* Filters + search */}
-      <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[
-            ["all", "All"],
-            ["accepted", "Accepted"],
-            ["pending", "Pending"],
-            ["rejected", "Rejected"],
-            ["disconnected", "Disconnected"],
-            ["blocked", "Blocked"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`btn ${filter === key ? "btn-primary" : "btn-neutral"}`}
-              onClick={() => setFilter(key)}
-              aria-pressed={filter === key}
-              style={{ padding: "6px 12px" }}
-            >
-              {label}
-              <span
-                style={{
-                  marginLeft: 8,
-                  background: "#fff",
-                  color: "#111",
-                  borderRadius: 999,
-                  padding: "0 8px",
-                  border: "1px solid var(--border)",
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                {counts[key] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
+      {/* filters */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+        {tabs.map((key) => (
+          <button
+            key={key}
+            className="btn btn-neutral btn-pill"
+            onClick={() => setFilter(key)}
+            style={{
+              background: filter === key ? "var(--brand-teal)" : undefined,
+              color: filter === key ? "#fff" : undefined,
+            }}
+          >
+            {key[0].toUpperCase() + key.slice(1)}{" "}
+            <span style={{
+              marginLeft: 6,
+              fontWeight: 800,
+              background: "#fff",
+              color: "#111",
+              borderRadius: 999,
+              padding: "0 6px",
+              display: "inline-block",
+            }}>
+              {Counts[key]}
+            </span>
+          </button>
+        ))}
 
         <input
-          placeholder="Search by handle or name…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "10px 12px" }}
+          placeholder="Search by handle or name…"
+          style={{
+            marginLeft: "auto",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            padding: "8px 12px",
+            minWidth: 260,
+          }}
         />
       </div>
 
-      {/* Error / Loading */}
-      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
-      {loading && <div className="muted" style={{ marginTop: 12 }}>Loading…</div>}
-
-      {/* List */}
-      <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
-        {filtered.length === 0 && !loading && (
-          <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16, background: "#fff" }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>No matches</div>
-            <div className="muted">Try a different filter or search.</div>
+      {/* list */}
+      <div
+        style={{
+          marginTop: 14,
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      >
+        {view.length === 0 ? (
+          <div style={{ padding: 20, color: "#6b7280" }}>
+            No matches — try a different filter or search.
           </div>
-        )}
+        ) : (
+          view.map((r) => {
+            const mineIsRequester = r[C.requester] === myId;
+            const isPending = r[C.status] === "pending";
+            const canAccept = isPending && !mineIsRequester; // I am addressee
+            const canCancel = isPending && mineIsRequester;  // I sent it
+            const isAccepted = ACCEPTED.has(r[C.status]);
+            const isBlocked = r.isBlocked;
 
-        {filtered.map((row) => {
-          const partnerId = otherPartyId(row, myId);
-          const p = profiles[partnerId] || {};
-          const name = p.display_name || (p.handle ? `@${p.handle}` : partnerId?.slice(0, 6));
-          const avatar = p.avatar_url || "/logo-mark.png";
-          const iAmRequester = row.requester_id === myId;
-          const youBlocked = row.status === "blocked" && row.blocked_by === myId;
+            const avatar = r.peer?.avatar;
+            const display = r.peer?.name || r.peer?.handle || r.peerId?.slice(0, 8);
+            const handle = r.peer?.handle ? `@${r.peer.handle}` : "";
 
-          return (
-            <div
-              key={row.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "64px 1fr auto",
-                gap: 12,
-                alignItems: "center",
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                padding: 12,
-                background: "#fff",
-              }}
-            >
-              {/* avatar */}
+            const spin = (suffix) => busyId === suffix;
+
+            return (
               <div
+                key={r.id}
                 style={{
-                  width: 64, height: 64, borderRadius: "50%", overflow: "hidden",
-                  border: "1px solid var(--border)", display: "grid", placeItems: "center", background: "#f8fafc",
+                  display: "grid",
+                  gridTemplateColumns: "auto 1fr auto",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "12px 14px",
+                  borderBottom: "1px solid var(--border)",
                 }}
               >
-                <img src={avatar} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              </div>
-
-              {/* main */}
-              <div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <Link
-                    to={p.handle ? `/u/${p.handle}` : "#"}
-                    title="View public profile"
-                    style={{ fontWeight: 800, textDecoration: p.handle ? "none" : "line-through" }}
-                    onClick={(e) => { if (!p.handle) e.preventDefault(); }}
-                  >
-                    {name}
-                  </Link>
-                  <StatusPill s={row.status} youBlocked={youBlocked} />
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: "50%",
+                    background: "#f1f5f9",
+                    border: "1px solid var(--border)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {avatar ? (
+                    <img alt="" src={avatar} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : null}
                 </div>
-                <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-                  Updated {new Date(row.updated_at || row.created_at).toLocaleString()}
-                </div>
-              </div>
 
-              {/* actions */}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {row.status === "blocked" ? (
-                  <>
-                    <button className="btn btn-primary" onClick={() => unblock(row.id)}>
-                      Unblock
-                    </button>
-                  </>
-                ) : isAccepted(row.status) ? (
-                  <>
-                    <button className="btn btn-primary" onClick={() => openChatWith(partnerId, name)}>
-                      Message
-                    </button>
-                    <button className="btn btn-neutral" onClick={() => disconnect(row.id)}>
-                      Disconnect
-                    </button>
-                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {display}
+                    </strong>
+                    <StatusChip status={r[C.status]} />
+                    {isBlocked && (
+                      <span style={{ padding: "2px 8px", borderRadius: 999, background: "#fecaca", fontSize: 12, fontWeight: 800, color: "#7f1d1d" }}>
+                        Blocked
+                      </span>
+                    )}
+                  </div>
+                  {handle && <div className="muted" style={{ fontSize: 12 }}>{handle}</div>}
+                </div>
+
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {/* Messaging / connect controls, disabled if blocked */}
+                  {isAccepted && !isBlocked && (
+                    <>
+                      <button
+                        className="btn btn-primary btn-pill"
+                        onClick={() => nav(`/chat/${r.peerId}`)}
+                      >
+                        Message
+                      </button>
+                      <button
+                        className="btn btn-accent btn-pill"
+                        disabled={spin(String(r.id))}
+                        onClick={() => disconnect(r)}
+                        title="Disconnect"
+                      >
+                        Disconnect
+                      </button>
+                    </>
+                  )}
+
+                  {isBlocked && (
+                    <>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        disabled={spin(`blk:${r.peerId}`)}
+                        onClick={() => unblock(r.peerId)}
+                      >
+                        Unblock
+                      </button>
+                      <button
+                        className="btn btn-accent btn-pill"
+                        disabled={spin(`del:${r.peerId}`)}
+                        onClick={() => deleteConversation(r.peerId)}
+                        title="Delete entire conversation"
+                      >
+                        Delete conversation
+                      </button>
+                    </>
+                  )}
+
+                  {!isBlocked && (
+                    <button
+                      className="btn btn-neutral btn-pill"
+                      disabled={spin(`blk:${r.peerId}`)}
+                      onClick={() => block(r.peerId)}
+                      title="Block this user"
+                    >
                       Block
                     </button>
-                  </>
-                ) : isPending(row.status) && iAmRequester ? (
-                  <>
-                    <span className="helper-muted">Waiting for acceptance…</span>
-                    <button className="btn btn-neutral" onClick={() => cancel(row.id)}>
+                  )}
+
+                  {canAccept && !isBlocked && (
+                    <>
+                      <button
+                        className="btn btn-primary btn-pill"
+                        disabled={spin(String(r.id))}
+                        onClick={() => accept(r)}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        disabled={spin(String(r.id))}
+                        onClick={() => reject(r)}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+
+                  {canCancel && !isBlocked && (
+                    <button
+                      className="btn btn-neutral btn-pill"
+                      disabled={spin(String(r.id))}
+                      onClick={() => cancel(r)}
+                    >
                       Cancel
                     </button>
-                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
-                      Block
-                    </button>
-                  </>
-                ) : isPending(row.status) && !iAmRequester ? (
-                  <>
-                    <button className="btn btn-primary" onClick={() => accept(row.id)}>
-                      Accept
-                    </button>
-                    <button className="btn btn-neutral" onClick={() => reject(row.id)}>
-                      Reject
-                    </button>
-                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
-                      Block
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {/* rejected/disconnected */}
-                    <button className="btn btn-primary" onClick={() => reconnect(row.id, partnerId)}>
+                  )}
+
+                  {(r[C.status] === "rejected" || r[C.status] === "disconnected") && !isBlocked && (
+                    <button
+                      className="btn btn-primary btn-pill"
+                      disabled={spin(String(r.id))}
+                      onClick={() => reconnect(r)}
+                    >
                       Reconnect
                     </button>
-                    <button className="btn btn-neutral" onClick={() => block(row.id)}>
-                      Block
-                    </button>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </div>
   );
