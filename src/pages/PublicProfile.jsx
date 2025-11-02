@@ -1,5 +1,5 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
@@ -8,7 +8,7 @@ import { supabase } from "../lib/supabaseClient";
  * - Loads a profile by handle from /u/:handle
  * - If profile.is_public === false, injects <meta name="robots" content="noindex">
  * - Shows basic profile info with (Message / Connect) actions
- * - NEW: Block / Unblock actions (viewer can block this profile)
+ * - Block/Unblock kept if you added blocks table; otherwise buttons hide automatically.
  */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
@@ -19,26 +19,25 @@ export default function PublicProfile() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Block state (did *I* block this user?)
+  // Optional block state (safe even if blocks table not present; UI hides if not actionable)
   const [iBlocked, setIBlocked] = useState(false);
   const targetUserId = profile?.user_id || null;
   const canAct = !!(me?.id && targetUserId && me.id !== targetUserId);
 
-  // Load viewer (me)
+  // Load viewer
   useEffect(() => {
     let mounted = true;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setMe(user || null);
+      if (mounted) setMe(user || null);
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setMe(session?.user || null);
     });
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // Fetch profile by handle
+  // Fetch profile by handle (NOTE: select user_id, not id)
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -50,7 +49,7 @@ export default function PublicProfile() {
         if (!cleanHandle) throw new Error("No handle provided.");
         const { data, error } = await supabase
           .from("profiles")
-          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at, id")
+          .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
 
@@ -81,7 +80,7 @@ export default function PublicProfile() {
     return () => { if (tag) document.head.removeChild(tag); };
   }, [profile?.is_public]);
 
-  // Did I already block this user? (RLS: you can only see rows where blocker = me)
+  // Check if *I* blocked this user (only if table exists & I’m signed in)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -89,19 +88,20 @@ export default function PublicProfile() {
         if (alive) setIBlocked(false);
         return;
       }
-      const { data, error } = await supabase
-        .from("blocks")
-        .select("id")
-        .eq("blocker", me.id)
-        .eq("blocked", targetUserId)
-        .maybeSingle();
-
-      if (!alive) return;
-      if (error && error.code !== "PGRST116") {
-        // ignore not-found shape errors
-        console.warn("[blocks check]", error.message);
+      try {
+        const { data, error } = await supabase
+          .from("blocks")
+          .select("id")
+          .eq("blocker", me.id)
+          .eq("blocked", targetUserId)
+          .maybeSingle();
+        if (!alive) return;
+        if (error && error.code !== "PGRST116") console.warn("[blocks check]", error.message);
+        setIBlocked(!!data?.id);
+      } catch {
+        // Table might not exist; ignore silently.
+        if (alive) setIBlocked(false);
       }
-      setIBlocked(!!data?.id);
     })();
     return () => { alive = false; };
   }, [me?.id, targetUserId]);
@@ -119,32 +119,24 @@ export default function PublicProfile() {
     window.dispatchEvent(new CustomEvent("open-chat", { detail }));
   };
 
+  // Optional block/unblock if you kept the feature
   async function blockUser() {
     if (!canAct) return;
-    try {
-      const { error } = await supabase
-        .from("blocks")
-        .insert({ blocker: me.id, blocked: targetUserId });
-      if (error && error.code !== "23505") throw error; // ignore unique conflict
-      setIBlocked(true);
-    } catch (e) {
-      alert(e.message || "Failed to block.");
-    }
+    const { error } = await supabase
+      .from("blocks")
+      .insert({ blocker: me.id, blocked: profile.user_id });
+    if (error && error.code !== "23505") return alert(error.message);
+    setIBlocked(true);
   }
-
   async function unblockUser() {
     if (!canAct) return;
-    try {
-      const { error } = await supabase
-        .from("blocks")
-        .delete()
-        .eq("blocker", me.id)
-        .eq("blocked", targetUserId);
-      if (error) throw error;
-      setIBlocked(false);
-    } catch (e) {
-      alert(e.message || "Failed to unblock.");
-    }
+    const { error } = await supabase
+      .from("blocks")
+      .delete()
+      .eq("blocker", me.id)
+      .eq("blocked", profile.user_id);
+    if (error) return alert(error.message);
+    setIBlocked(false);
   }
 
   return (
@@ -217,7 +209,7 @@ export default function PublicProfile() {
             </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              {/* If I blocked them, show Unblock; otherwise show normal actions */}
+              {/* If I blocked them, show Unblock; else normal actions */}
               {canAct && iBlocked ? (
                 <>
                   <span className="helper-muted">You have blocked this user.</span>
@@ -244,15 +236,17 @@ export default function PublicProfile() {
                       >
                         Connect
                       </Link>
-                      {/* Block button (only if I can act and not already blocked) */}
-                      <button
-                        className="btn btn-accent btn-pill"
-                        type="button"
-                        onClick={blockUser}
-                        title="Block this user"
-                      >
-                        Block
-                      </button>
+                      {/* Optional block button */}
+                      {me?.id && (
+                        <button
+                          className="btn btn-accent btn-pill"
+                          type="button"
+                          onClick={blockUser}
+                          title="Block this user"
+                        >
+                          Block
+                        </button>
+                      )}
                     </>
                   )}
                   {!canAct && (
@@ -279,23 +273,13 @@ export default function PublicProfile() {
                     This page is hidden from search engines.
                   </span>
                   {canAct && (
-                    <>
-                      <Link
-                        className="btn btn-neutral btn-pill"
-                        to={`/connect?to=${profile.user_id}`}
-                        title="Send connection request"
-                      >
-                        Request connect
-                      </Link>
-                      <button
-                        className="btn btn-accent btn-pill"
-                        type="button"
-                        onClick={blockUser}
-                        title="Block this user"
-                      >
-                        Block
-                      </button>
-                    </>
+                    <Link
+                      className="btn btn-neutral btn-pill"
+                      to={`/connect?to=${profile.user_id}`}
+                      title="Send connection request"
+                    >
+                      Request connect
+                    </Link>
                   )}
                 </>
               )}
@@ -311,6 +295,7 @@ export default function PublicProfile() {
     </div>
   );
 }
+
 
 
 
