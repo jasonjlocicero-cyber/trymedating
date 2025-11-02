@@ -29,25 +29,48 @@ export default function Header({ me, unread = 0, onSignOut }) {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 10,
             fontWeight: 900,
-            fontSize: 22, // a touch larger
+            fontSize: 22, // slightly larger
             letterSpacing: "-0.2px",
             lineHeight: 1,
           }}
         >
-          {/* small heart mark */}
+          {/* Heart + wristband mark */}
           <svg
-            width="24"
-            height="24"
+            width="26"
+            height="26"
             viewBox="0 0 24 24"
             aria-hidden="true"
-            style={{ display: "block" }}
+            style={{ display: "block", flex: "0 0 auto" }}
           >
+            {/* heart shape (white fill + teal stroke) */}
+            <defs>
+              <clipPath id="heartClip">
+                <path d="M12 21s-1.45-1.06-3.26-2.46C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.56C13.45 19.94 12 21 12 21z" />
+              </clipPath>
+            </defs>
             <path
-              d="M12 21s-1.45-1.067-3.26-2.457C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.564C13.45 19.933 12 21 12 21z"
-              fill="var(--brand-teal)"
+              d="M12 21s-1.45-1.06-3.26-2.46C6.01 16.88 3 14.51 3 10.98 3 8.79 4.79 7 6.98 7c1.24 0 2.46.58 3.22 1.58C10.78 7.58 12 7 13.24 7 15.43 7 17.22 8.79 17.22 10.98c0 3.53-3.01 5.9-5.74 7.56C13.45 19.94 12 21 12 21z"
+              fill="#fff"
+              stroke="var(--brand-teal)"
+              strokeWidth="2"
+              strokeLinejoin="round"
             />
+            {/* coral wristband clipped inside the heart */}
+            <g clipPath="url(#heartClip)">
+              <rect
+                x="-3"
+                y="9.6"
+                width="30"
+                height="5.4"
+                rx="2.7"
+                fill="var(--brand-coral)"
+                transform="rotate(-18 12 12)"
+              />
+            </g>
+            {/* tiny highlight dot */}
+            <circle cx="8.3" cy="8.4" r="1.3" fill="var(--brand-teal-200)" />
           </svg>
 
           {/* colored wordmark */}
@@ -76,7 +99,6 @@ export default function Header({ me, unread = 0, onSignOut }) {
             Home
           </NavLink>
 
-          {/* Messages (to /chat). Unread badge if provided */}
           <NavLink
             to="/chat"
             className="btn btn-neutral btn-pill"
@@ -113,7 +135,6 @@ export default function Header({ me, unread = 0, onSignOut }) {
             )}
           </NavLink>
 
-          {/* Auth action */}
           {me ? (
             <button
               type="button"
