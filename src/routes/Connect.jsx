@@ -1,206 +1,186 @@
 // src/routes/Connect.jsx
-import React, { useEffect, useMemo, useState } from 'react'
-import { useSearchParams, useNavigate, Link, useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
-
-/**
- * Connect (QR / deep-link handler)
- *
- * Supported URL formats:
- *   • /connect?to=<recipientUserId>
- *   • /connect?u=<recipientUserId>
- *   • /connect/:token   (token may be a UUID, or b64 JSON like {"t":"tmdv1","pid":"<uuid>"})
- *
- * Behavior:
- *   • If signed in and link is valid: ensure/create a pending request (requester = me.id, recipient = target)
- *   • Opens the Chat bubble focused on the recipient so Accept/Reject is visible
- *   • Shows current status (pending/accepted/rejected) with clear CTAs + friendly error text
- */
+import React, { useEffect, useState, useMemo } from 'react';
+import { useSearchParams, useNavigate, Link, useParams } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 
 // Global opener used by ChatLauncher / ChatDock
 function openChatWith(partnerId, partnerName = '') {
-  if (window.openChat) return window.openChat(partnerId, partnerName)
-  window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }))
+  if (window.openChat) return window.openChat(partnerId, partnerName);
+  window.dispatchEvent(new CustomEvent('open-chat', { detail: { partnerId, partnerName } }));
 }
 
 // Decode UUID from plain token or base64 JSON token
 function tryDecodeToken(token) {
-  if (!token) return null
-  // plain UUID?
+  if (!token) return null;
   if (/^[0-9a-f-]{8}-[0-9a-f-]{4}-[1-5][0-9a-f-]{3}-[89ab][0-9a-f-]{3}-[0-9a-f-]{12}$/i.test(token)) {
-    return token
+    return token;
   }
-  // base64 JSON with { pid: "<uuid>" }
   try {
-    const json = JSON.parse(atob(token))
-    if (json && typeof json.pid === 'string') return json.pid
+    const json = JSON.parse(atob(token));
+    if (json && typeof json.pid === 'string') return json.pid;
   } catch (_) {}
-  return null
+  return null;
 }
 
 export default function Connect({ me }) {
-  const [sp] = useSearchParams()
-  const { token } = useParams()
-  const nav = useNavigate()
+  const [sp] = useSearchParams();
+  const { token } = useParams();
+  const nav = useNavigate();
 
-  // Accept both ?to= and ?u= and /:token
   const recipientId = useMemo(() => {
-    const byTo = sp.get('to')
-    const byU = sp.get('u')
-    return byTo || byU || tryDecodeToken(token) || ''
-  }, [sp, token])
+    const byTo = sp.get('to');
+    const byU = sp.get('u');
+    return byTo || byU || tryDecodeToken(token) || '';
+  }, [sp, token]);
 
-  const authed = !!me?.id
+  const authed = !!me?.id;
 
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('unknown') // 'unknown' | 'invalid' | 'self' | 'none' | 'pending' | 'accepted' | 'rejected'
-  const [errorText, setErrorText] = useState('')
-  const [recipientHandle, setRecipientHandle] = useState(null) // optional: show who you're connecting to
-  const [message, setMessage] = useState('') // small inline status text
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('unknown'); // 'unknown' | 'invalid' | 'self' | 'blocked' | 'none' | 'pending' | 'accepted' | 'rejected'
+  const [errorText, setErrorText] = useState('');
+  const [recipientHandle, setRecipientHandle] = useState(null);
+  const [message, setMessage] = useState('');
+
+  // helper: check either-direction block
+  async function checkEitherBlocked(a, b) {
+    if (!a || !b) return false;
+    // We can see rows where blocker = me (a). We *may not* see rows where blocker = b due to RLS.
+    // So we check if *I* blocked them here, and rely on DB policy to block the action if they blocked me.
+    const { data, error } = await supabase
+      .from('blocks')
+      .select('id')
+      .eq('blocker', a)
+      .eq('blocked', b)
+      .maybeSingle();
+    if (error && error.code !== 'PGRST116') console.warn('[blocks check]', error.message);
+    return !!data?.id;
+  }
 
   // Load current relationship status (if signed in and link valid)
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
     async function init() {
-      setErrorText('')
-      setMessage('')
+      setErrorText('');
+      setMessage('');
 
-      if (!recipientId) { setStatus('invalid'); return }
+      if (!recipientId) { setStatus('invalid'); return; }
+      if (!authed) { setStatus('none'); return; }
+      if (recipientId === me.id) { setStatus('self'); return; }
 
-      // If not authed yet, show CTA; we won't auto-redirect here to avoid surprise
-      if (!authed) { setStatus('none'); return }
-
-      if (recipientId === me.id) { setStatus('self'); return }
-
-      // Optional: fetch a public handle/display name to show
+      // Optional: fetch display name/handle to show
       try {
         const { data: prof } = await supabase
           .from('profiles')
           .select('handle, display_name')
-          .eq('user_id', recipientId) // if your schema uses id=auth.id, switch to .eq('id', recipientId)
-          .maybeSingle()
-        if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null)
-      } catch {
-        /* noop */
+          .eq('user_id', recipientId)
+          .maybeSingle();
+        if (!cancelled) setRecipientHandle(prof?.display_name || prof?.handle || null);
+      } catch {}
+
+      // If *I* blocked them → stop now
+      const iBlocked = await checkEitherBlocked(me.id, recipientId);
+      if (iBlocked) {
+        if (!cancelled) {
+          setStatus('blocked');
+          setMessage('You have blocked this user. Unblock to send requests.');
+        }
+        return;
       }
 
       // Check if a connection row already exists (either direction)
       const { data, error } = await supabase
         .from('connection_requests')
-        .select('requester, recipient, status, created_at')
+        .select('requester, recipient, status')
         .or(`and(requester.eq.${me.id},recipient.eq.${recipientId}),and(requester.eq.${recipientId},recipient.eq.${me.id})`)
+        .order('decided_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(1)
-        .maybeSingle()
+        .maybeSingle();
 
-      if (cancelled) return
+      if (cancelled) return;
 
       if (error && error.code !== 'PGRST116') {
-        setErrorText(error.message || 'Failed to load status')
-        setStatus('none')
-        return
+        setErrorText(error.message || 'Failed to load status');
+        setStatus('none');
+        return;
       }
 
       if (!data) {
-        // No prior row — try to create pending and open chat
-        setStatus('none')
-        setBusy(true)
+        // No prior row — create pending and open chat (DB-side policies will still block if they blocked me)
+        setStatus('none');
+        setBusy(true);
         const { error: insErr } = await supabase
           .from('connection_requests')
-          .insert({ requester: me.id, recipient: recipientId, status: 'pending' })
-        setBusy(false)
-
-        if (insErr) {
-          // Handle 5-minute cooldown trigger (errcode P0001 + "cooldown" hint/message)
-          if (insErr.code === 'P0001' && /cool\s*down/i.test(insErr.message || '')) {
-            setMessage('You just sent a request. Try again in ~5 minutes.')
-            return
-          }
-          // Unique index on pending pair => already pending
-          if (insErr.code === '23505') {
-            setStatus('pending')
-            setMessage('Request already pending — check the chat to accept/decline.')
-            openChatWith(recipientId, recipientHandle || '')
-            return
-          }
-          setErrorText(insErr.message || 'Could not send request')
-          return
+          .insert({ requester: me.id, recipient: recipientId, status: 'pending' });
+        setBusy(false);
+        if (insErr && insErr.code !== '23505') {
+          // Could be blocked by them (RLS) → surface a friendly message
+          setStatus('blocked');
+          setMessage('Unable to request. One side may have blocked the other.');
+          return;
         }
-
-        setStatus('pending')
-        setMessage('Request sent — opening chat…')
-        // Immediately open chat bubble focused on recipient
-        openChatWith(recipientId, recipientHandle || '')
-        return
+        setStatus('pending');
+        setMessage('Request sent — opening chat…');
+        openChatWith(recipientId, recipientHandle || '');
+        return;
       }
 
-      // There is an existing row
-      setStatus(data.status) // 'pending' | 'accepted' | 'rejected'
-      // Open the chat so Accept/Reject is visible (or messages if accepted)
-      openChatWith(recipientId, recipientHandle || '')
-      if (data.status === 'pending') setMessage('Request is pending — check the chat to accept/reject.')
-      if (data.status === 'accepted') setMessage('You are connected — chat is open.')
-      if (data.status === 'rejected') setMessage('This request was declined.')
+      setStatus(data.status); // 'pending' | 'accepted' | 'rejected'
+      openChatWith(recipientId, recipientHandle || '');
+      if (data.status === 'pending') setMessage('Request is pending — check the chat to accept/reject.');
+      if (data.status === 'accepted') setMessage('You are connected — chat is open.');
+      if (data.status === 'rejected') setMessage('This request was declined.');
     }
 
-    init()
-    return () => { cancelled = true }
+    init();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recipientId, authed, me?.id])
+  }, [recipientId, authed, me?.id]);
 
   async function requestConnection() {
-    if (!authed) {
-      nav('/auth')
-      return
-    }
+    if (!authed) { nav('/auth'); return; }
     if (!recipientId || recipientId === me.id) {
-      setStatus(recipientId === me.id ? 'self' : 'invalid')
-      return
+      setStatus(recipientId === me.id ? 'self' : 'invalid');
+      return;
     }
-    setBusy(true)
+    // quick block check (my side)
+    const iBlocked = await checkEitherBlocked(me.id, recipientId);
+    if (iBlocked) {
+      setStatus('blocked');
+      setMessage('You have blocked this user. Unblock to send requests.');
+      return;
+    }
+    setBusy(true);
     const { error } = await supabase
       .from('connection_requests')
-      .insert({ requester: me.id, recipient: recipientId, status: 'pending' })
-    setBusy(false)
-
-    if (error) {
-      if (error.code === 'P0001' && /cool\s*down/i.test(error.message || '')) {
-        setMessage('You just sent a request. Try again in ~5 minutes.')
-        return
-      }
-      if (error.code === '23505') {
-        setStatus('pending')
-        setMessage('Request already pending — check the chat to accept/decline.')
-        openChatWith(recipientId, recipientHandle || '')
-        return
-      }
-      setErrorText(error.message || 'Could not send request')
-      return
+      .insert({ requester: me.id, recipient: recipientId, status: 'pending' });
+    setBusy(false);
+    if (error && error.code !== '23505') {
+      setStatus('blocked');
+      setMessage('Unable to request. One side may have blocked the other.');
+    } else {
+      setStatus('pending');
+      setMessage('Request sent — opening chat…');
+      openChatWith(recipientId, recipientHandle || '');
     }
-
-    setStatus('pending')
-    setMessage('Request sent — opening chat…')
-    openChatWith(recipientId, recipientHandle || '')
   }
 
   function goToMessages() {
-    if (recipientId) openChatWith(recipientId, recipientHandle || '')
-    nav('/')
+    if (recipientId) openChatWith(recipientId, recipientHandle || '');
+    nav('/');
   }
 
   return (
     <div className="container" style={{ padding: 24, maxWidth: 680 }}>
       <h2 style={{ fontWeight: 800, marginBottom: 8 }}>Connect</h2>
 
-      {/* Context / who you're connecting to */}
       {recipientHandle && (
         <div className="muted" style={{ marginBottom: 8 }}>
           You’re connecting with <strong>{recipientHandle}</strong>.
         </div>
       )}
 
-      {/* Error or invalid states */}
       {status === 'invalid' && (
         <div className="muted" style={{ marginTop: 8 }}>
           This link is missing a valid <code>to</code>/<code>u</code> user id or token.
@@ -209,6 +189,11 @@ export default function Connect({ me }) {
       {status === 'self' && (
         <div className="muted" style={{ marginTop: 8 }}>
           You can’t connect with yourself.
+        </div>
+      )}
+      {status === 'blocked' && (
+        <div className="muted" style={{ marginTop: 8 }}>
+          Connection disabled: one side has a block in place.
         </div>
       )}
       {errorText && (
@@ -222,7 +207,6 @@ export default function Connect({ me }) {
         </div>
       )}
 
-      {/* Main actions */}
       <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {status === 'accepted' ? (
           <>
@@ -264,14 +248,14 @@ export default function Connect({ me }) {
         ) : null}
       </div>
 
-      {/* Small note */}
       <div className="muted" style={{ marginTop: 16 }}>
         After you send a request, the other person will see a popup to <strong>Accept</strong> or <strong>Decline</strong>.
         The chat bubble will open automatically so you can decide right away.
       </div>
     </div>
-  )
+  );
 }
+
 
 
 
