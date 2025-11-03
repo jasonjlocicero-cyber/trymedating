@@ -1,14 +1,15 @@
 // src/pages/Connections.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 
+/* small pill */
 function Pill({ children, tone = 'neutral' }) {
   const colors = {
     neutral: '#e5e7eb',
     good: '#bbf7d0',
     warn: '#fde68a',
-    bad: '#fecaca'
+    bad: '#fecaca',
   };
   return (
     <span
@@ -27,8 +28,55 @@ function Pill({ children, tone = 'neutral' }) {
   );
 }
 
+/** Try to fetch profiles by `id`; if that column doesn't exist in your schema,
+ *  fall back to `user_id`. Returns a map keyed by the column that matched. */
+async function fetchProfilesMap(otherIds) {
+  const map = {};
+  if (!otherIds.length) return { map, key: 'id' };
+
+  // Attempt 1: use profiles.id
+  let key = 'id';
+  let res = await supabase
+    .from('profiles')
+    .select('id, handle, display_name, avatar_url')
+    .in('id', otherIds);
+
+  if (res.error) {
+    // Likely "column profiles.id does not exist" => use user_id instead
+    key = 'user_id';
+    res = await supabase
+      .from('profiles')
+      .select('user_id, handle, display_name, avatar_url')
+      .in('user_id', otherIds);
+  }
+
+  if (!res.error && res.data) {
+    for (const p of res.data) {
+      const k = p[key];
+      if (k) map[k] = p;
+    }
+  }
+  return { map, key };
+}
+
+/** Best-effort check for who I blocked; ignores errors if table/columns differ. */
+async function fetchBlockedMap(myId, otherIds) {
+  const bm = {};
+  if (!myId || !otherIds.length) return bm;
+  try {
+    const { data, error } = await supabase
+      .from('blocks')
+      .select('blocked')
+      .eq('blocker', myId)
+      .in('blocked', otherIds);
+    if (!error && data) data.forEach((r) => (bm[r.blocked] = true));
+  } catch {
+    // ignore — feature optional
+  }
+  return bm;
+}
+
 export default function Connections() {
-  const nav = useNavigate();
   const [me, setMe] = useState(null);
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState('all'); // all | accepted | pending | rejected | disconnected | blocked
@@ -44,61 +92,36 @@ export default function Connections() {
   }, []);
 
   async function load() {
+    if (!me?.id) return;
     setLoading(true);
 
-    // Fetch each counterpart user once; include whether I blocked them (blocked_by_me) and latest status
-    // This uses DISTINCT ON to keep the most recent connection row between us
-    const { data, error } = await supabase.rpc('exec_sql', {
-      // NOTE: exec_sql is not a real RPC; if you don't have one, keep the prior
-      // select pattern you used; otherwise, create a view. For most users, use from() with
-      // filters & joins. Here we keep things simple and stick to a REST-friendly query:
-    });
-
-    // Fallback: REST approach — get my counterpart IDs, their latest connection row,
-    // and whether I blocked them.
-    const my = (await supabase.auth.getUser()).data?.user?.id;
-
-    // 1) grab latest connection per pair (me <-> other)
-    const { data: latest } = await supabase
+    // 1) pull recent connection rows where I'm in the pair
+    const { data: all } = await supabase
       .from('connections')
       .select('*')
-      .or(`requester_id.eq.${my},addressee_id.eq.${my}`)
+      .or(`requester_id.eq.${me.id},addressee_id.eq.${me.id}`)
       .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false });
 
-    // keep only first occurrence per counterpart
+    // keep only the latest per counterpart
     const seen = new Set();
     const latestPer = [];
-    for (const r of latest || []) {
-      const other = r.requester_id === my ? r.addressee_id : r.requester_id;
+    for (const r of all || []) {
+      const other = r.requester_id === me.id ? r.addressee_id : r.requester_id;
       if (seen.has(other)) continue;
       seen.add(other);
       latestPer.push({ ...r, other_id: other });
     }
 
-    // 2) hydrate counterpart profile info
-    const otherIds = latestPer.map(r => r.other_id);
-    let profMap = {};
-    if (otherIds.length) {
-      const { data: profs } = await supabase
-        .from('profiles')
-        .select('id, handle, display_name, avatar_url')
-        .in('id', otherIds);
-      (profs || []).forEach(p => { profMap[p.id] = p; });
-    }
+    // 2) hydrate profiles (works with either profiles.id or profiles.user_id)
+    const otherIds = latestPer.map((r) => r.other_id);
+    const { map: profMap } = await fetchProfilesMap(otherIds);
 
-    // 3) figure out "blocked_by_me"
-    let blockedMap = {};
-    if (otherIds.length) {
-      const { data: blocked } = await supabase
-        .from('blocks')
-        .select('blocked')
-        .eq('blocker', my)
-        .in('blocked', otherIds);
-      (blocked || []).forEach(b => { blockedMap[b.blocked] = true; });
-    }
+    // 3) blocked map (optional)
+    const blockedMap = await fetchBlockedMap(me.id, otherIds);
 
-    const combined = latestPer.map(r => {
+    // 4) combine
+    const combined = latestPer.map((r) => {
       const p = profMap[r.other_id] || {};
       return {
         connection_id: r.id,
@@ -115,24 +138,29 @@ export default function Connections() {
     setLoading(false);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [me?.id]);
 
   const filtered = useMemo(() => {
     let arr = rows;
     if (filter !== 'all') {
       if (filter === 'blocked') {
-        arr = arr.filter(r => r.blocked_by_me);
+        arr = arr.filter((r) => r.blocked_by_me);
       } else {
-        arr = arr.filter(r => r.status === filter);
+        arr = arr.filter((r) => r.status === filter);
       }
     }
     if (q.trim()) {
       const qq = q.trim().toLowerCase();
-      arr = arr.filter(r => (r.name || '').toLowerCase().includes(qq) || (r.handle || '').toLowerCase().includes(qq));
+      arr = arr.filter(
+        (r) =>
+          (r.name || '').toLowerCase().includes(qq) ||
+          (r.handle || '').toLowerCase().includes(qq)
+      );
     }
     return arr;
   }, [rows, filter, q]);
 
+  /* actions */
   async function reconnect(row) {
     setBusyId(row.other_id);
     try {
@@ -172,10 +200,7 @@ export default function Connections() {
   async function unblock(row) {
     setBusyId(row.other_id);
     try {
-      await supabase.from('blocks')
-        .delete()
-        .eq('blocker', me.id)
-        .eq('blocked', row.other_id);
+      await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', row.other_id);
       await load();
     } finally {
       setBusyId('');
@@ -184,8 +209,7 @@ export default function Connections() {
 
   async function deleteChat(row) {
     if (!row.blocked_by_me) return;
-    const ok = window.confirm(`Delete the entire chat with ${row.name}? This cannot be undone.`);
-    if (!ok) return;
+    if (!window.confirm(`Delete the entire chat with ${row.name}? This cannot be undone.`)) return;
     setBusyId(row.other_id);
     try {
       const { error } = await supabase.rpc('delete_conversation', { peer: row.other_id });
@@ -200,9 +224,9 @@ export default function Connections() {
   }
 
   const count = (key) =>
-    key === 'blocked' ? rows.filter(r => r.blocked_by_me).length
+    key === 'blocked' ? rows.filter((r) => r.blocked_by_me).length
       : key === 'all' ? rows.length
-      : rows.filter(r => r.status === key).length;
+      : rows.filter((r) => r.status === key).length;
 
   return (
     <div className="container" style={{ padding: 16, maxWidth: 920 }}>
@@ -214,7 +238,6 @@ export default function Connections() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
         {[
           ['all', 'All'],
@@ -232,27 +255,26 @@ export default function Connections() {
               background: filter === k ? 'var(--brand-teal)' : '#f3f4f6',
               color: filter === k ? '#fff' : '#111827',
               border: '1px solid #e5e7eb',
-              fontWeight: 800
+              fontWeight: 800,
             }}
           >
-            {label} <span style={{ opacity: .7, marginLeft: 6 }}>{count(k)}</span>
+            {label} <span style={{ opacity: 0.7, marginLeft: 6 }}>{count(k)}</span>
           </button>
         ))}
         <input
           value={q}
-          onChange={e => setQ(e.target.value)}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="Search by handle or name…"
           style={{
             marginLeft: 'auto',
             border: '1px solid var(--border)',
             borderRadius: 12,
             padding: '8px 12px',
-            minWidth: 240
+            minWidth: 240,
           }}
         />
       </div>
 
-      {/* List */}
       <div style={{ marginTop: 12, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 16 }} className="muted">Loading…</div>
@@ -268,15 +290,20 @@ export default function Connections() {
                 gap: 12,
                 alignItems: 'center',
                 padding: 12,
-                borderTop: '1px solid var(--border)'
+                borderTop: '1px solid var(--border)',
               }}
             >
               {/* avatar */}
               <div
                 style={{
-                  width: 40, height: 40, borderRadius: '50%',
-                  border: '1px solid var(--border)', overflow: 'hidden',
-                  display: 'grid', placeItems: 'center', background: '#fff'
+                  width: 40,
+                  height: 40,
+                  borderRadius: '50%',
+                  border: '1px solid var(--border)',
+                  overflow: 'hidden',
+                  display: 'grid',
+                  placeItems: 'center',
+                  background: '#fff',
                 }}
               >
                 {r.avatar_url ? (
@@ -297,7 +324,11 @@ export default function Connections() {
                   {r.status === 'pending' && <Pill tone="warn">Pending</Pill>}
                   {r.status === 'rejected' && <Pill tone="bad">Rejected</Pill>}
                   {r.status === 'disconnected' && <Pill>Disconnected</Pill>}
-                  {r.blocked_by_me && <span style={{ marginLeft: 8 }}><Pill tone="bad">Blocked</Pill></span>}
+                  {r.blocked_by_me && (
+                    <span style={{ marginLeft: 8 }}>
+                      <Pill tone="bad">Blocked</Pill>
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -316,7 +347,6 @@ export default function Connections() {
                   </button>
                 )}
 
-                {/* Block / Unblock */}
                 {!r.blocked_by_me ? (
                   <button
                     className="btn btn-neutral btn-pill"
@@ -335,7 +365,6 @@ export default function Connections() {
                   </button>
                 )}
 
-                {/* Reconnect (for rejected/disconnected) */}
                 {(r.status === 'rejected' || r.status === 'disconnected') && (
                   <button
                     className="btn btn-primary btn-pill"
@@ -346,7 +375,6 @@ export default function Connections() {
                   </button>
                 )}
 
-                {/* DELETE CHAT — only if I blocked them */}
                 {r.blocked_by_me && (
                   <button
                     className="btn btn-accent btn-pill"
