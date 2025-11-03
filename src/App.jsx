@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
+import ReportUser from './pages/ReportUser'
 
 // Layout
 import Header from './components/Header'
@@ -309,7 +310,8 @@ export default function App() {
 
             {/* Public profile */}
             <Route path="/u/:handle" element={<PublicProfile />} />
-
+            <Route path="/report" element={me ? <ReportUser /> : <Navigate to="/auth" replace />} />
+            
             {/* Static pages */}
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
