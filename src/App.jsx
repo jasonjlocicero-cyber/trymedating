@@ -21,14 +21,14 @@ import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'
 import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
-import Report from './pages/Report' // NEW
+import Report from './pages/Report' // if not present, remove this import
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect' // QR route to create a connection request
+import Connect from './routes/Connect'
 
 /** --------------------------
- * Home (hero + features + CTA)
+ * Home (hero + features)
  * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
@@ -66,6 +66,7 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
+          {/* Primary CTAs (only hero buttons — no “continue” strip anywhere) */}
           <div
             style={{
               display: 'flex',
@@ -167,32 +168,8 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* GET STARTED */}
-      <section style={{ padding: '28px 0' }}>
-        <div
-          className="container"
-          style={{
-            display: 'flex',
-            gap: 12,
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexWrap: 'wrap'
-          }}
-        >
-          {!authed ? (
-            <>
-              <div className="muted">Ready to begin?</div>
-              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
-            </>
-          ) : (
-            <>
-              <div className="muted">Pick where to continue:</div>
-              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
-              <Link className="btn btn-accent btn-pill" to="/connections">Open Connections</Link>
-            </>
-          )}
-        </div>
-      </section>
+      {/* IMPORTANT: We do NOT render any “continue/edit profile/open connections” strip here.
+         Please keep this area empty to avoid reintroducing that UI. */}
     </div>
   )
 }
@@ -305,15 +282,13 @@ export default function App() {
               element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
             />
             <Route
-              path="/invite"
-              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
-            />
-            <Route
               path="/connections"
               element={me ? <Connections /> : <Navigate to="/auth" replace />}
             />
+
+            {/* Optional report page (guarded). If you don’t have Report.jsx yet, delete these two lines. */}
             <Route
-              path="/report"
+              path="/report/:peerId"
               element={me ? <Report /> : <Navigate to="/auth" replace />}
             />
 
@@ -339,11 +314,17 @@ export default function App() {
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
 
-            {/* QR scan / connect route (can be visited before auth) */}
-            <Route path="/connect" element={<Connect me={me} />} />
+            {/* Invite QR */}
+            <Route
+              path="/invite"
+              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
+            />
 
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
+
+            {/* QR scan route to create a pending connection request */}
+            <Route path="/connect" element={<Connect me={me} />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -358,6 +339,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
