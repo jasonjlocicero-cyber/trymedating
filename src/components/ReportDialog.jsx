@@ -53,14 +53,13 @@ export default function ReportDialog({
     setBusy(true);
     try {
       const payload = {
-        // reporter_id is enforced/filled by trigger; sending it is fine too:
-        reporter_id: me.id,
-        reported_user_id: targetUserId,
-        connection_id: connectionId || null,
-        message_id: messageId || null,
-        category: cat,
-        details: details?.trim() || null,
-      };
+         -- reporter is set by the trigger
+         reported: targetUserId,             // <— legacy column name
+         connection_id: connectionId || null,
+         message_id: messageId || null,
+         category: cat,
+         details: details?.trim() || null,
+       };
       const { error } = await supabase.from("reports").insert(payload);
       if (error) throw error;
       setDone(true);
