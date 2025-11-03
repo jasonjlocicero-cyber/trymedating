@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
-import ReportUser from './pages/ReportUser'
 
 // Layout
 import Header from './components/Header'
@@ -20,11 +19,13 @@ import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
 import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'
+import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
+import Report from './pages/Report' // NEW
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect'
+import Connect from './routes/Connect' // QR route to create a connection request
 
 /** --------------------------
  * Home (hero + features + CTA)
@@ -165,10 +166,38 @@ function Home({ me }) {
           <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
         </div>
       </section>
+
+      {/* GET STARTED */}
+      <section style={{ padding: '28px 0' }}>
+        <div
+          className="container"
+          style={{
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexWrap: 'wrap'
+          }}
+        >
+          {!authed ? (
+            <>
+              <div className="muted">Ready to begin?</div>
+              <Link className="btn btn-primary btn-pill" to="/auth">Get started</Link>
+            </>
+          ) : (
+            <>
+              <div className="muted">Pick where to continue:</div>
+              <Link className="btn btn-primary btn-pill" to="/profile">Edit Profile</Link>
+              <Link className="btn btn-accent btn-pill" to="/connections">Open Connections</Link>
+            </>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
 
+/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
     <div
@@ -211,7 +240,7 @@ export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
 
-  // unread count for messaging badge
+  // unread count for messaging badge (used by Header via ChatLauncher)
   const [unread, setUnread] = useState(0)
 
   // Safe auth bootstrap with fallback timer
@@ -232,6 +261,7 @@ export default function App() {
     })()
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+      if (!alive) return
       setMe(session?.user || null)
     })
 
@@ -242,44 +272,6 @@ export default function App() {
     }
   }, [])
 
-  // Unread counter (fetch + realtime)
-  useEffect(() => {
-    let cancelled = false
-    if (!me?.id) {
-      setUnread(0)
-      return
-    }
-
-    async function refresh() {
-      try {
-        const { count, error } = await supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('recipient', me.id)
-          .is('read_at', null)
-        if (!cancelled) setUnread(error ? 0 : (count || 0))
-      } catch {
-        if (!cancelled) setUnread(0)
-      }
-    }
-
-    refresh()
-
-    const ch = supabase
-      .channel(`unread:${me.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
-        refresh
-      )
-      .subscribe()
-
-    return () => {
-      cancelled = true
-      try { supabase.removeChannel(ch) } catch {}
-    }
-  }, [me?.id])
-
   async function handleSignOut() {
     await supabase.auth.signOut()
   }
@@ -288,7 +280,7 @@ export default function App() {
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
 
-      {/* Global toast for inbound connection requests */}
+      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
@@ -303,30 +295,55 @@ export default function App() {
             {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
 
-            {/* Private routes */}
-            <Route path="/profile" element={me ? <ProfilePage /> : <Navigate to="/auth" replace />} />
-            <Route path="/settings" element={me ? <SettingsPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/connections" element={me ? <Connections /> : <Navigate to="/auth" replace />} />
+            {/* Private routes (basic guard) */}
+            <Route
+              path="/profile"
+              element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/settings"
+              element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/invite"
+              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/connections"
+              element={me ? <Connections /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/report"
+              element={me ? <Report /> : <Navigate to="/auth" replace />}
+            />
 
             {/* Public profile */}
             <Route path="/u/:handle" element={<PublicProfile />} />
-            <Route path="/report" element={me ? <ReportUser /> : <Navigate to="/auth" replace />} />
-            
+
             {/* Static pages */}
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
 
             {/* Direct chat routes */}
-            <Route path="/chat/:peerId" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat/handle/:handle" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route
+              path="/chat/:peerId"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
+            <Route
+              path="/chat/handle/:handle"
+              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
+            />
 
-            {/* Invite QR */}
-            <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
-
-            {/* QR scan route */}
+            {/* QR scan / connect route (can be visited before auth) */}
             <Route path="/connect" element={<Connect me={me} />} />
+
+            {/* QR Smoke Test */}
+            <Route path="/debug-qr" element={<DebugQR />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -337,7 +354,7 @@ export default function App() {
       <Footer />
 
       {/* Bottom-right chat bubble (render once) */}
-      <ChatLauncher onUnreadChange={(n) => typeof n === 'number' && setUnread(n)} />
+      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
     </ChatProvider>
   )
 }
