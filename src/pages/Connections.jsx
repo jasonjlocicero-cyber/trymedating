@@ -1,399 +1,368 @@
 // src/pages/Connections.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { supabase } from "../lib/supabaseClient";
 
-/* small pill */
-function Pill({ children, tone = 'neutral' }) {
-  const colors = {
-    neutral: '#e5e7eb',
-    good: '#bbf7d0',
-    warn: '#fde68a',
-    bad: '#fecaca',
-  };
+const ACCEPTED = new Set(["accepted", "connected", "approved"]);
+const STATUS_BADGE = {
+  pending: { label: "Pending", bg: "#fde68a" },
+  accepted: { label: "Connected", bg: "#bbf7d0" },
+  connected: { label: "Connected", bg: "#bbf7d0" },
+  approved: { label: "Connected", bg: "#bbf7d0" },
+  rejected: { label: "Rejected", bg: "#fecaca" },
+  disconnected: { label: "Disconnected", bg: "#e5e7eb" },
+  blocked: { label: "Blocked", bg: "#fca5a5" },
+};
+const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
+
+function Badge({ status }) {
+  const meta = STATUS_BADGE[status] || { label: status, bg: "#f3f4f6" };
   return (
     <span
       style={{
-        display: 'inline-block',
-        padding: '2px 8px',
+        padding: "2px 10px",
         borderRadius: 999,
-        background: colors[tone] || colors.neutral,
+        background: meta.bg,
         fontSize: 12,
-        fontWeight: 700,
-        color: '#111',
+        fontWeight: 800,
+        border: "1px solid var(--border)",
       }}
     >
-      {children}
+      {meta.label}
     </span>
   );
 }
 
-/** Try to fetch profiles by `id`; if that column doesn't exist in your schema,
- *  fall back to `user_id`. Returns a map keyed by the column that matched. */
-async function fetchProfilesMap(otherIds) {
-  const map = {};
-  if (!otherIds.length) return { map, key: 'id' };
-
-  // Attempt 1: use profiles.id
-  let key = 'id';
-  let res = await supabase
-    .from('profiles')
-    .select('id, handle, display_name, avatar_url')
-    .in('id', otherIds);
-
-  if (res.error) {
-    // Likely "column profiles.id does not exist" => use user_id instead
-    key = 'user_id';
-    res = await supabase
-      .from('profiles')
-      .select('user_id, handle, display_name, avatar_url')
-      .in('user_id', otherIds);
-  }
-
-  if (!res.error && res.data) {
-    for (const p of res.data) {
-      const k = p[key];
-      if (k) map[k] = p;
-    }
-  }
-  return { map, key };
-}
-
-/** Best-effort check for who I blocked; ignores errors if table/columns differ. */
-async function fetchBlockedMap(myId, otherIds) {
-  const bm = {};
-  if (!myId || !otherIds.length) return bm;
-  try {
-    const { data, error } = await supabase
-      .from('blocks')
-      .select('blocked')
-      .eq('blocker', myId)
-      .in('blocked', otherIds);
-    if (!error && data) data.forEach((r) => (bm[r.blocked] = true));
-  } catch {
-    // ignore — feature optional
-  }
-  return bm;
-}
-
 export default function Connections() {
   const [me, setMe] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [filter, setFilter] = useState('all'); // all | accepted | pending | rejected | disconnected | blocked
-  const [q, setQ] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState('');
+  const myId = toId(me?.id);
 
+  const [rows, setRows] = useState([]);
+  const [profilesByUserId, setProfilesByUserId] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("all"); // all | pending | connected | blocked | disconnected
+
+  // Load auth
   useEffect(() => {
+    let mounted = true;
     (async () => {
-      const { data } = await supabase.auth.getUser();
-      setMe(data?.user || null);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!mounted) return;
+      setMe(user || null);
     })();
+    return () => { mounted = false; };
   }, []);
 
-  async function load() {
-    if (!me?.id) return;
+  const refresh = useCallback(async () => {
+    if (!myId) return;
     setLoading(true);
-
-    // 1) pull recent connection rows where I'm in the pair
-    const { data: all } = await supabase
-      .from('connections')
-      .select('*')
-      .or(`requester_id.eq.${me.id},addressee_id.eq.${me.id}`)
-      .order('updated_at', { ascending: false })
-      .order('created_at', { ascending: false });
-
-    // keep only the latest per counterpart
-    const seen = new Set();
-    const latestPer = [];
-    for (const r of all || []) {
-      const other = r.requester_id === me.id ? r.addressee_id : r.requester_id;
-      if (seen.has(other)) continue;
-      seen.add(other);
-      latestPer.push({ ...r, other_id: other });
-    }
-
-    // 2) hydrate profiles (works with either profiles.id or profiles.user_id)
-    const otherIds = latestPer.map((r) => r.other_id);
-    const { map: profMap } = await fetchProfilesMap(otherIds);
-
-    // 3) blocked map (optional)
-    const blockedMap = await fetchBlockedMap(me.id, otherIds);
-
-    // 4) combine
-    const combined = latestPer.map((r) => {
-      const p = profMap[r.other_id] || {};
-      return {
-        connection_id: r.id,
-        other_id: r.other_id,
-        status: r.status,
-        name: p.display_name || p.handle || r.other_id.slice(0, 8),
-        handle: p.handle || '',
-        avatar_url: p.avatar_url || '',
-        blocked_by_me: !!blockedMap[r.other_id],
-      };
-    });
-
-    setRows(combined);
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, [me?.id]);
-
-  const filtered = useMemo(() => {
-    let arr = rows;
-    if (filter !== 'all') {
-      if (filter === 'blocked') {
-        arr = arr.filter((r) => r.blocked_by_me);
-      } else {
-        arr = arr.filter((r) => r.status === filter);
-      }
-    }
-    if (q.trim()) {
-      const qq = q.trim().toLowerCase();
-      arr = arr.filter(
-        (r) =>
-          (r.name || '').toLowerCase().includes(qq) ||
-          (r.handle || '').toLowerCase().includes(qq)
-      );
-    }
-    return arr;
-  }, [rows, filter, q]);
-
-  /* actions */
-  async function reconnect(row) {
-    setBusyId(row.other_id);
     try {
-      await supabase
-        .from('connections')
-        .update({ status: 'pending', updated_at: new Date().toISOString() })
-        .eq('id', row.connection_id);
-      await load();
-    } finally {
-      setBusyId('');
-    }
-  }
+      // 1) Get all my connection rows (either side)
+      const { data: cons, error } = await supabase
+        .from("connections")
+        .select("id, requester_id, addressee_id, status, blocked_by, created_at, updated_at")
+        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
+        .order("updated_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false });
 
-  async function disconnect(row) {
-    setBusyId(row.other_id);
-    try {
-      await supabase
-        .from('connections')
-        .update({ status: 'disconnected', updated_at: new Date().toISOString() })
-        .eq('id', row.connection_id);
-      await load();
-    } finally {
-      setBusyId('');
-    }
-  }
-
-  async function block(row) {
-    setBusyId(row.other_id);
-    try {
-      await supabase.from('blocks').insert({ blocker: me.id, blocked: row.other_id });
-      await load();
-    } finally {
-      setBusyId('');
-    }
-  }
-
-  async function unblock(row) {
-    setBusyId(row.other_id);
-    try {
-      await supabase.from('blocks').delete().eq('blocker', me.id).eq('blocked', row.other_id);
-      await load();
-    } finally {
-      setBusyId('');
-    }
-  }
-
-  async function deleteChat(row) {
-    if (!row.blocked_by_me) return;
-    if (!window.confirm(`Delete the entire chat with ${row.name}? This cannot be undone.`)) return;
-    setBusyId(row.other_id);
-    try {
-      const { error } = await supabase.rpc('delete_conversation', { peer: row.other_id });
       if (error) throw error;
-      await load();
-      alert('Conversation deleted.');
-    } catch (e) {
-      alert(e.message || 'Delete failed');
-    } finally {
-      setBusyId('');
-    }
-  }
 
-  const count = (key) =>
-    key === 'blocked' ? rows.filter((r) => r.blocked_by_me).length
-      : key === 'all' ? rows.length
-      : rows.filter((r) => r.status === key).length;
+      setRows(cons || []);
+
+      // 2) Fetch peer profiles in bulk by user_id for avatars/names/handles
+      const peerIds = new Set();
+      (cons || []).forEach((r) => {
+        const peer =
+          r.requester_id === myId ? r.addressee_id : r.requester_id;
+        if (peer) peerIds.add(peer);
+      });
+
+      if (peerIds.size) {
+        const { data: profs, error: pErr } = await supabase
+          .from("profiles")
+          .select("user_id, display_name, handle, avatar_url")
+          .in("user_id", Array.from(peerIds));
+        if (pErr) throw pErr;
+
+        const map = {};
+        (profs || []).forEach((p) => { map[p.user_id] = p; });
+        setProfilesByUserId(map);
+      } else {
+        setProfilesByUserId({});
+      }
+    } catch (e) {
+      alert(e.message || "Failed to load connections.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [myId]);
+
+  useEffect(() => {
+    if (!myId) return;
+    refresh();
+  }, [myId, refresh]);
+
+  // Action helpers
+  const openChat = (peerId, displayNameOrHandle = "") => {
+    if (!peerId) return;
+    // ChatLauncher listens to this to open the dock
+    if (window.openChat) {
+      window.openChat(peerId, displayNameOrHandle);
+    } else {
+      window.dispatchEvent(new CustomEvent("open-chat", {
+        detail: { partnerId: peerId, partnerName: displayNameOrHandle },
+      }));
+    }
+  };
+
+  const updateConn = async (id, patch) => {
+    const { error } = await supabase
+      .from("connections")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) throw error;
+    await refresh();
+  };
+
+  const accept = async (row) => updateConn(row.id, { status: "accepted" });
+  const reject = async (row) => updateConn(row.id, { status: "rejected" });
+  const disconnect = async (row) => updateConn(row.id, { status: "disconnected" });
+  const reconnect = async (row) => updateConn(row.id, { status: "pending" });
+
+  const cancelPending = async (row) => updateConn(row.id, { status: "disconnected" });
+
+  const blockConn = async (row) => {
+    if (!myId) return;
+    await updateConn(row.id, { status: "blocked", blocked_by: myId });
+  };
+
+  const unblockConn = async (row) => {
+    // Only the blocker should see this button in the first place
+    await updateConn(row.id, { status: "disconnected", blocked_by: null });
+  };
+
+  // Optional: full purge via RPC if present; otherwise fallback to deleting only MY messages
+  const deleteConversation = async (row) => {
+    if (!myId) return;
+    if (!(row.status === "blocked" && row.blocked_by === myId)) return;
+
+    const sure = window.confirm(
+      "Delete this conversation? (This will remove messages. If the server RPC isn’t installed yet, only YOUR messages will be deleted.)"
+    );
+    if (!sure) return;
+
+    try {
+      // Try RPC first (server-side function we can add later)
+      const { error: rpcErr } = await supabase.rpc("delete_conversation", { conn_id: row.id });
+      if (!rpcErr) {
+        await refresh();
+        return;
+      }
+
+      // Fallback: delete only *my* messages (works with typical RLS that allows delete_own)
+      await supabase
+        .from("messages")
+        .delete()
+        .eq("connection_id", row.id)
+        .eq("sender", myId);
+
+      await refresh();
+    } catch (e) {
+      alert(e.message || "Failed to delete conversation.");
+      console.error(e);
+    }
+  };
+
+  // Derived list per tab
+  const filtered = useMemo(() => {
+    if (tab === "all") return rows;
+    if (tab === "connected") return rows.filter((r) => ACCEPTED.has(r.status));
+    if (tab === "pending") return rows.filter((r) => r.status === "pending");
+    if (tab === "blocked") return rows.filter((r) => r.status === "blocked");
+    if (tab === "disconnected") return rows.filter((r) => r.status === "disconnected" || r.status === "rejected");
+    return rows;
+  }, [rows, tab]);
+
+  // Render one row
+  const Row = ({ row }) => {
+    const peerId = row.requester_id === myId ? row.addressee_id : row.requester_id;
+    const p = profilesByUserId[peerId] || null;
+    const title = p?.display_name || (p?.handle ? `@${p.handle}` : peerId.slice(0, 8));
+    const sub = p?.handle ? `@${p.handle}` : peerId;
+    const avatar = p?.avatar_url || "/logo-mark.png";
+    const iAmRequester = row.requester_id === myId;
+
+    const canUnblock = row.status === "blocked" && row.blocked_by === myId;
+    const blockedByOther = row.status === "blocked" && row.blocked_by && row.blocked_by !== myId;
+
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto",
+          gap: 12,
+          alignItems: "center",
+          padding: 12,
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      >
+        {/* Avatar */}
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: "50%",
+            overflow: "hidden",
+            border: "1px solid var(--border)",
+            background: "#f8fafc",
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          <img
+            src={avatar}
+            alt={`${title} avatar`}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        </div>
+
+        {/* Name + status */}
+        <div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <strong>{title}</strong>
+            <span className="muted" style={{ fontSize: 12 }}>{sub}</span>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <Badge status={row.status} />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {/* Open chat (only useful when not blocked) */}
+          {row.status !== "blocked" && (
+            <button
+              className="btn btn-primary btn-pill"
+              onClick={() => openChat(peerId, title)}
+              title="Open chat"
+            >
+              Message
+            </button>
+          )}
+
+          {/* Pending states */}
+          {row.status === "pending" && iAmRequester && (
+            <button className="btn btn-neutral btn-pill" onClick={() => cancelPending(row)}>
+              Cancel
+            </button>
+          )}
+          {row.status === "pending" && !iAmRequester && (
+            <>
+              <button className="btn btn-primary btn-pill" onClick={() => accept(row)}>
+                Accept
+              </button>
+              <button className="btn btn-neutral btn-pill" onClick={() => reject(row)}>
+                Reject
+              </button>
+            </>
+          )}
+
+          {/* Connected */}
+          {ACCEPTED.has(row.status) && (
+            <>
+              <button className="btn btn-neutral btn-pill" onClick={() => disconnect(row)}>
+                Disconnect
+              </button>
+              <button className="btn btn-neutral btn-pill" onClick={() => blockConn(row)}>
+                Block
+              </button>
+            </>
+          )}
+
+          {/* Blocked */}
+          {canUnblock && (
+            <>
+              <button className="btn btn-primary btn-pill" onClick={() => unblockConn(row)}>
+                Unblock
+              </button>
+              <button className="btn btn-neutral btn-pill" onClick={() => deleteConversation(row)}>
+                Delete conversation
+              </button>
+            </>
+          )}
+          {blockedByOther && (
+            <button className="btn btn-neutral btn-pill" disabled>
+              Blocked
+            </button>
+          )}
+
+          {/* Disconnected / Rejected */}
+          {(row.status === "disconnected" || row.status === "rejected") && (
+            <button className="btn btn-primary btn-pill" onClick={() => reconnect(row)}>
+              Reconnect
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  if (!me) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
+        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Connections</h1>
+        <div className="muted">Please sign in to view your connections.</div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ padding: 16, maxWidth: 920 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+    <div className="container" style={{ padding: "24px 0", maxWidth: 900 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 14,
+        }}
+      >
         <h1 style={{ fontWeight: 900, margin: 0 }}>Connections</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Link className="btn btn-neutral btn-pill" to="/invite">My Invite QR</Link>
-          <Link className="btn btn-primary btn-pill" to="/chat">Open Messages</Link>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["all", "connected", "pending", "blocked", "disconnected"].map((t) => (
+            <button
+              key={t}
+              className={`btn btn-pill ${tab === t ? "btn-primary" : "btn-neutral"}`}
+              onClick={() => setTab(t)}
+            >
+              {t[0].toUpperCase() + t.slice(1)}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-        {[
-          ['all', 'All'],
-          ['accepted', 'Accepted'],
-          ['pending', 'Pending'],
-          ['rejected', 'Rejected'],
-          ['disconnected', 'Disconnected'],
-          ['blocked', 'Blocked'],
-        ].map(([k, label]) => (
-          <button
-            key={k}
-            className="btn btn-pill"
-            onClick={() => setFilter(k)}
-            style={{
-              background: filter === k ? 'var(--brand-teal)' : '#f3f4f6',
-              color: filter === k ? '#fff' : '#111827',
-              border: '1px solid #e5e7eb',
-              fontWeight: 800,
-            }}
-          >
-            {label} <span style={{ opacity: 0.7, marginLeft: 6 }}>{count(k)}</span>
-          </button>
+      {loading && <div className="muted">Loading…</div>}
+
+      {!loading && filtered.length === 0 && (
+        <div className="muted">No connections in this view.</div>
+      )}
+
+      <div style={{ display: "grid", gap: 10 }}>
+        {filtered.map((r) => (
+          <Row key={r.id} row={r} />
         ))}
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by handle or name…"
-          style={{
-            marginLeft: 'auto',
-            border: '1px solid var(--border)',
-            borderRadius: 12,
-            padding: '8px 12px',
-            minWidth: 240,
-          }}
-        />
       </div>
 
-      <div style={{ marginTop: 12, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: 16 }} className="muted">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 16 }} className="muted">No matches</div>
-        ) : (
-          filtered.map((r) => (
-            <div
-              key={r.other_id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'auto 1fr auto',
-                gap: 12,
-                alignItems: 'center',
-                padding: 12,
-                borderTop: '1px solid var(--border)',
-              }}
-            >
-              {/* avatar */}
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  border: '1px solid var(--border)',
-                  overflow: 'hidden',
-                  display: 'grid',
-                  placeItems: 'center',
-                  background: '#fff',
-                }}
-              >
-                {r.avatar_url ? (
-                  <img src={r.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ fontWeight: 800 }}>{(r.name || '?').slice(0, 1)}</div>
-                )}
-              </div>
-
-              {/* name + status */}
-              <div>
-                <div style={{ fontWeight: 800 }}>
-                  {r.name}
-                  {r.handle ? <span className="muted" style={{ marginLeft: 8 }}>@{r.handle}</span> : null}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  {r.status === 'accepted' && <Pill tone="good">Accepted</Pill>}
-                  {r.status === 'pending' && <Pill tone="warn">Pending</Pill>}
-                  {r.status === 'rejected' && <Pill tone="bad">Rejected</Pill>}
-                  {r.status === 'disconnected' && <Pill>Disconnected</Pill>}
-                  {r.blocked_by_me && (
-                    <span style={{ marginLeft: 8 }}>
-                      <Pill tone="bad">Blocked</Pill>
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* actions */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {r.status === 'accepted' ? (
-                  <Link className="btn btn-primary btn-pill" to={`/chat/${r.other_id}`}>Message</Link>
-                ) : null}
-                {r.status === 'accepted' && (
-                  <button
-                    className="btn btn-accent btn-pill"
-                    disabled={busyId === r.other_id}
-                    onClick={() => disconnect(r)}
-                  >
-                    Disconnect
-                  </button>
-                )}
-
-                {!r.blocked_by_me ? (
-                  <button
-                    className="btn btn-neutral btn-pill"
-                    disabled={busyId === r.other_id}
-                    onClick={() => block(r)}
-                  >
-                    Block
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-neutral btn-pill"
-                    disabled={busyId === r.other_id}
-                    onClick={() => unblock(r)}
-                  >
-                    Unblock
-                  </button>
-                )}
-
-                {(r.status === 'rejected' || r.status === 'disconnected') && (
-                  <button
-                    className="btn btn-primary btn-pill"
-                    disabled={busyId === r.other_id}
-                    onClick={() => reconnect(r)}
-                  >
-                    Reconnect
-                  </button>
-                )}
-
-                {r.blocked_by_me && (
-                  <button
-                    className="btn btn-accent btn-pill"
-                    style={{ background: '#dc2626', borderColor: '#b91c1c' }}
-                    disabled={busyId === r.other_id}
-                    onClick={() => deleteChat(r)}
-                    title="Delete entire conversation (requires block)"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </div>
-          ))
-        )}
+      <div className="helper-muted" style={{ marginTop: 12 }}>
+        Tip: You can <b>Unblock</b> only if you were the one who blocked. After unblocking,
+        the status returns to <b>Disconnected</b>.
       </div>
     </div>
   );
 }
+
 
 
 
