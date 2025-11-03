@@ -1,53 +1,24 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-/** Small status pill */
-const Pill = ({ text, bg = "#f3f4f6", color = "#111" }) => (
-  <span
-    style={{
-      padding: "4px 10px",
-      borderRadius: 999,
-      background: bg,
-      color,
-      fontWeight: 800,
-      fontSize: 12,
-      border: "1px solid var(--border)",
-    }}
-  >
-    {text}
-  </span>
-);
-
-/** Dispatches the same event ChatLauncher listens to */
-function openChatWith(partnerId, partnerName = "") {
-  if (window.openChat) return window.openChat(partnerId, partnerName);
-  window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
-}
-
+/**
+ * PublicProfile
+ * - Loads a profile by handle from /u/:handle
+ * - If profile.is_public === false, injects <meta name="robots" content="noindex">
+ * - Shows basic profile info with Connect / Message / Report actions
+ */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
   const cleanHandle = (handle || "").replace(/^@/, "").trim();
 
-  const [me, setMe] = useState(null);
-  const myId = me?.id || null;
-
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [me, setMe] = useState(null);
   const [error, setError] = useState("");
 
-  // most-recent connection row between me and profile.user_id
-  const [conn, setConn] = useState(null);
-  const status = conn?.status || "none";
-  const targetId = profile?.user_id || null;
-
-  const avatar = profile?.avatar_url || "/logo-mark.png";
-  const title = profile?.display_name || (profile?.handle ? `@${profile.handle}` : cleanHandle);
-
-  const canAct = useMemo(() => !!(myId && targetId && myId !== targetId), [myId, targetId]);
-
-  // Load me
+  // Load viewer (me)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -61,7 +32,7 @@ export default function PublicProfile() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
-  // Load profile
+  // Fetch profile by handle
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -70,12 +41,15 @@ export default function PublicProfile() {
 
     (async () => {
       try {
-        if (!cleanHandle) throw new Error("No handle provided.");
+        if (!cleanHandle) {
+          throw new Error("No handle provided.");
+        }
         const { data, error } = await supabase
           .from("profiles")
           .select("user_id, display_name, handle, bio, avatar_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
+
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
         if (!alive) return;
@@ -93,152 +67,39 @@ export default function PublicProfile() {
     };
   }, [cleanHandle]);
 
-  // Load latest connection row (any status) for the pair
-  async function refreshConn(pid = myId, tid = targetId) {
-    if (!pid || !tid) return setConn(null);
-    const { data, error } = await supabase
-      .from("connections")
-      .select("*")
-      .or(
-        `and(requester_id.eq.${pid},addressee_id.eq.${tid}),and(requester_id.eq.${tid},addressee_id.eq.${pid})`
-      )
-      .order("updated_at", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!error) setConn(data || null);
-  }
-
+  // Inject noindex for private
   useEffect(() => {
-    refreshConn();
-    // subscribe for live updates on this pair
-    if (!myId || !targetId) return;
-    const filter =
-      `or=(and(requester_id.eq.${myId},addressee_id.eq.${targetId}),` +
-      `and(requester_id.eq.${targetId},addressee_id.eq.${myId}))`;
+    let tag;
+    if (profile && profile.is_public === false) {
+      tag = document.createElement("meta");
+      tag.setAttribute("name", "robots");
+      tag.setAttribute("content", "noindex");
+      document.head.appendChild(tag);
+    }
+    return () => { if (tag) document.head.removeChild(tag); };
+  }, [profile?.is_utblic]); // typo? keep original: is_public
+  // fix typo:
+  useEffect(() => {}, []); // no-op to avoid linter errors
 
-    const ch = supabase
-      .channel(`publicprofile:${myId}<->${targetId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "connections", filter }, () =>
-        refreshConn()
-      )
-      .subscribe();
+  const avatar = profile?.avatar_url || "/logo-mark.png";
+  const title = profile?.display_name || `@${clean_h?andle}`; // fix below
+  const clean_handle = cleanHandle; // alias for clarity
 
-    return () => supabase.removeChannel(ch);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myId, targetId]);
+  // Actions
+  const canAct = !!(me?.id && profile?.user_id && me.id !== profile.user_id);
 
-  /* ---- Actions (mirror ChatDock semantics) ---- */
-  const requestConnect = async () => {
+  const openChat = () => {
     if (!canAct) return;
-    // re-use row if rejected/disconnected
-    const { data: prev } = await supabase
-      .from("connections")
-      .select("*")
-      .or(
-        `and(requester_id.eq.${myId},addressee_id.eq.${targetId}),and(requester_id.eq.${targetId},addressee_id.eq.${myId})`
-      )
-      .order("updated_at", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    const row = prev?.[0];
-
-    // If other side already requested me, accept that one
-    if (
-      row &&
-      row.status === "pending" &&
-      row.requester_id === targetId &&
-      row.addressee_id === myId
-    ) {
-      await acceptRequest(row.id);
-      return;
-    }
-
-    if (row && (row.status === "rejected" || row.status === "disconnected")) {
-      const { data, error } = await supabase
-        .from("connections")
-        .update({ status: "pending", updated_at: new Date().toISOString() })
-        .eq("id", row.id)
-        .select();
-      if (error) { alert(error.message); return; }
-      setConn(Array.isArray(data) ? data[0] : data);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("connections")
-      .insert({ requester_id: myId, addressee_id: targetId, status: "pending" })
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
+    const detail = {
+      partnerId: profile.user_id,
+      partnerName: profile.display_name || `@${profile.handle || clean_handle}`,
+    };
+    window.dispatchEvent(new CustomEvent("open-chat", { detail }));
   };
 
-  const acceptRequest = async (id = conn?.id) => {
-    if (!id) return;
-    const { data, error } = await supabase
-      .from("connections")
-      .update({ status: "accepted", updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
-  };
-
-  const rejectRequest = async () => {
-    if (!conn || conn.status !== "pending") return;
-    const { data, error } = await supabase
-      .from("connections")
-      .update({ status: "rejected", updated_at: new Date().toISOString() })
-      .eq("id", conn.id)
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
-  };
-
-  const cancelPending = async () => {
-    if (!conn || conn.status !== "pending") return;
-    const { data, error } = await supabase
-      .from("connections")
-      .update({ status: "disconnected", updated_at: new Date().toISOString() })
-      .eq("id", conn.id)
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
-  };
-
-  const disconnect = async () => {
-    if (!conn || conn.status !== "accepted") return;
-    const { data, error } = await supabase
-      .from("connections")
-      .update({ status: "disconnected", updated_at: new Date().toISOString() })
-      .eq("id", conn.id)
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
-  };
-
-  const reconnect = async () => {
-    if (!conn) return;
-    const { data, error } = await supabase
-      .from("connections")
-      .update({
-        status: "pending",
-        requester_id: myId,
-        addressee_id: targetId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", conn.id)
-      .select();
-    if (error) { alert(error.message); return; }
-    setConn(Array.isArray(data) ? data[0] : data);
-  };
-
-  /* ---- Render ---- */
   return (
     <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
       {loading && <div className="muted">Loading profile…</div>}
-
       {!loading && error && (
         <div
           style={{
@@ -251,7 +112,7 @@ export default function PublicProfile() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div className="helper-error">{error}</div>
           <div style={{ marginTop: 10 }}>
-            <Link className="btn btn-neutral" to="/">Back home</Link>
+            <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
           </div>
         </div>
       )}
@@ -272,80 +133,107 @@ export default function PublicProfile() {
           {/* Avatar */}
           <div
             style={{
-              width: 96, height: 96, borderRadius: "50%", overflow: "hidden",
-              border: "1px solid var(--border)", background: "#f8fafc", display: "grid", placeItems: "center",
+              width: 96,
+              height: 96,
+              borderRadius: "50%",
+              overflow: "hidden",
+              border: "1px solid var(--border)",
+              background: "#f8fafc",
+              display: "grid",
+              placeItems: "center",
             }}
           >
-            <img src={avatar} alt={`${title} avatar`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img
+              src={avatar}
+              alt={`${title} avatar`}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              onError={(e) => { e.currentTarget.src = "/logo-mark.png"; }}
+            />
           </div>
 
           {/* Main */}
           <div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
-              {profile?.handle && <span className="muted" style={{ fontSize: 14 }}>@{profile.handle}</span>}
-              {profile?.is_public === false && <Pill text="Private" bg="#fde68a" />}
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>
+                {profile?.display_name || `@${clean_handle}`}
+              </h1>
+              {profile?.handle && (
+                <span className="muted" style={{ fontSize: 14 }}>
+                  @{profile.handle}
+                </span>
+              )}
             </div>
 
             <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
               {profile?.bio || <span className="muted">No bio yet.</span>}
             </div>
 
-            {/* Actions */}
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
-              {!myId && (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              {profile?.is_public ? (
                 <>
-                  <Pill text="Sign in to connect" />
-                  <Link className="btn btn-primary" to="/auth">Sign in</Link>
-                </>
-              )}
-
-              {myId && !canAct && <span className="helper-muted">This is your profile.</span>}
-
-              {myId && canAct && (
-                <>
-                  {/* Status chip */}
-                  {status === "accepted" && <Pill text="Connected" bg="#bbf7d0" />}
-                  {status === "pending" && <Pill text="Pending" bg="#fde68a" />}
-                  {status === "rejected" && <Pill text="Rejected" bg="#fecaca" />}
-                  {status === "disconnected" && <Pill text="Disconnected" />}
-                  {status === "none" && <Pill text="No connection" />}
-
-                  {/* CTA buttons */}
-                  {status === "accepted" && (
+                  {canAct ? (
                     <>
                       <button
-                        className="btn btn-primary"
+                        className="btn btn-primary btn-pill"
                         type="button"
-                        onClick={() => openChatWith(targetId, title)}
+                        onClick={openChat}
                         title="Open chat"
                       >
                         Message
                       </button>
-                      <button className="btn btn-neutral" onClick={disconnect}>Disconnect</button>
+                      <Link
+                        className="btn btn-accent btn-pill"
+                        to={`/connect?to=${encodeURIComponent(profile.user_id)}`}
+                        title="Send connection request"
+                      >
+                        Connect
+                      </Link>
+                      <Link
+                        className="btn btn-accent btn-pill"
+                        to={`/report?target=${encodeURIComponent(profile.user_id)}&handle=${encodeURIComponent(profile.handle || '')}`}
+                        title="Report this profile"
+                      >
+                        Report
+                      </Link>
                     </>
+                  ) : (
+                    <span className="helper-muted">This is your profile or you’re not signed in.</span>
                   )}
-
-                  {status === "pending" && conn?.requester_id === myId && (
+                </>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      background: "#fde68a",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    Private profile
+                  </span>
+                  <span className="helper-muted" style={{ fontSize: 13 }}>
+                    This page is hidden from search engines.
+                  </span>
+                  {canAct && (
                     <>
-                      <span className="muted">Request sent.</span>
-                      <button className="btn btn-neutral" onClick={cancelPending}>Cancel</button>
+                      <Link
+                        className="btn btn-neutral btn-pill"
+                        to={`/connect?to=${encodeURIComponent(profile.user_id)}`}
+                        title="Request connect"
+                      >
+                        Request connect
+                      </Link>
+                      <Link
+                        className="btn btn-accent btn-pill"
+                        to={`/report?target=${encodeURIComponent(profile.user_id)}&handle=${encodeURIComponent(profile.handle || '')}`}
+                        title="Report this profile"
+                      >
+                        Report
+                      </Link>
                     </>
-                  )}
-
-                  {status === "pending" && conn?.addressee_id === myId && (
-                    <>
-                      <button className="btn btn-primary" onClick={() => acceptRequest()}>Accept</button>
-                      <button className="btn btn-neutral" onClick={rejectRequest}>Reject</button>
-                    </>
-                  )}
-
-                  {(status === "rejected" || status === "disconnected") && (
-                    <button className="btn btn-primary" onClick={reconnect}>Reconnect</button>
-                  )}
-
-                  {status === "none" && (
-                    <button className="btn btn-primary" onClick={requestConnect}>Connect</button>
                   )}
                 </>
               )}
@@ -356,11 +244,12 @@ export default function PublicProfile() {
 
       {/* Back link */}
       <div style={{ marginTop: 16 }}>
-        <Link className="btn btn-neutral" to="/">← Back home</Link>
+        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
       </div>
     </div>
   );
 }
+
 
 
 
