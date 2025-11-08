@@ -26,17 +26,14 @@ async function fetchProfilesForIds(partnerIds) {
   if (ids.length === 0) return map
 
   // 1) Try by profiles.id
-  const { data: byId, error: e1 } = await supabase
+  const { data: byId } = await supabase
     .from('profiles')
     .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
     .in('id', ids)
 
-  if (!e1 && byId) {
-    for (const p of byId) {
-      // map both keys → same profile
-      if (p.id) map.set(p.id, p)
-      if (p.user_id) map.set(p.user_id, p)
-    }
+  for (const p of byId || []) {
+    if (p.id) map.set(p.id, p)
+    if (p.user_id) map.set(p.user_id, p)
   }
 
   // 2) For any remaining ids, try by profiles.user_id
@@ -68,8 +65,13 @@ export default function Connections() {
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState(null)
 
+  // REPORT (single source of truth)
   const [reportOpen, setReportOpen] = useState(false)
   const [reportTarget, setReportTarget] = useState({ id: '', label: '' })
+  const openReport = (id, label) => {
+    setReportTarget({ id, label })
+    setReportOpen(true)
+  }
 
   useEffect(() => {
     let alive = true
@@ -103,16 +105,12 @@ export default function Connections() {
     if (error) { console.error(error); setRows([]); return }
     if (!conns?.length) { setRows([]); return }
 
-    // Collect partner IDs from both columns relative to me
     const partnerIds = Array.from(new Set(conns.map((r) => otherPartyId(r, uid)).filter(Boolean)))
-
-    // Robust profile lookup by BOTH profiles.id and profiles.user_id
     const profileMap = await fetchProfilesForIds(partnerIds)
 
     const enriched = conns.map((c) => {
       const pid = otherPartyId(c, uid)
       const p = profileMap.get(pid) || {}
-      // Prefer display_name > full_name > handle; else short uuid
       const name =
         p.display_name ||
         p.full_name ||
@@ -130,17 +128,9 @@ export default function Connections() {
     if (!myId) return
     loadConnections(myId)
     loadBlocks(myId)
-
-    // light refresh to keep the list fresh
-    const id = setInterval(() => {
-      loadConnections(myId)
-      loadBlocks(myId)
-    }, 4000)
-
+    const id = setInterval(() => { loadConnections(myId); loadBlocks(myId) }, 4000)
     return () => clearInterval(id)
   }, [myId])
-
-  const goChat = (peerId) => nav(`/chat/${peerId}`)
 
   const disconnect = async (connId) => {
     setBusyId(connId)
@@ -225,10 +215,6 @@ export default function Connections() {
     disconnected: rows.filter((r) => r.status === STATUS.DISCONNECTED).length,
     blocked: rows.filter((r) => blockedSet.has(r._other_id)).length
   }), [rows, blockedSet])
-
-  const [reportOpenLocal, setReportOpenLocal] = useState(false)
-  const [reportTarget, setReportTarget] = useState({ id: '', label: '' })
-  const openReport = (id, label) => { setReportTarget({ id, label }); setReportOpenLocal(true) }
 
   return (
     <div className="container" style={{ padding: 20, maxWidth: 980 }}>
@@ -336,10 +322,9 @@ export default function Connections() {
 
                 {/* Right: actions */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  {/* Report is always available */}
                   <button
                     className="btn btn-neutral"
-                    onClick={() => setReportTarget({ id: otherId, label: other.name || other.handle || otherId }) || setReportOpen(true)}
+                    onClick={() => openReport(otherId, other.name || other.handle || otherId)}
                   >
                     Report
                   </button>
