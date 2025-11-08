@@ -4,65 +4,49 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 export default function PublicProfile() {
-  const { handle: rawHandle } = useParams();
-  const handle = (rawHandle || "").trim().replace(/^@/, "");
-
-  const [meId, setMeId] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState(null); // { id, handle, display_name, bio, avatar_url, is_public? }
-  const [errorText, setErrorText] = useState("");
+  const { handle } = useParams();
+  const [row, setRow] = useState(null);
+  const [err, setErr] = useState("");
 
   useEffect(() => {
     let alive = true;
+    (async () => {
+      setErr("");
+      setRow(null);
+      if (!handle) return;
 
-    async function run() {
-      setLoading(true);
-      setErrorText("");
+      // Read from the compatibility view
+      const { data, error } = await supabase
+        .from("profiles_v")
+        .select("id, user_id, handle, display_name, bio, is_public, avatar_url")
+        .eq("handle", handle)
+        .maybeSingle();
 
-      // who am I (for button logic)
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (!alive) return;
-        setMeId(data?.user?.id || null);
-      } catch {
-        /* ignore */
-      }
-
-      // load public profile by handle — IMPORTANT: alias user_id → id
-      try {
-        const { data, error, status } = await supabase
-          .from("profiles")
-          .select("id:user_id, handle, display_name, bio, avatar_url, is_public")
-          .eq("handle", handle)
-          .maybeSingle();
-
-        if (!alive) return;
-
-        if (error && status !== 406) {
-          setErrorText(error.message || "Failed to load profile.");
-          setProfile(null);
-        } else if (!data) {
-          setErrorText("That profile was not found.");
-          setProfile(null);
-        } else {
-          setProfile(data);
-        }
-      } catch (err) {
-        if (!alive) return;
-        setErrorText(err.message || "Failed to load profile.");
-        setProfile(null);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    if (handle) run();
+      if (!alive) return;
+      if (error) setErr(error.message || "Failed to load profile");
+      else if (!data) setErr("No such profile");
+      else setRow(data);
+    })();
     return () => {
       alive = false;
     };
   }, [handle]);
 
-  if (loading) {
+  if (err) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
+        <div className="card" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12 }}>
+          <div style={{ color: "#b91c1c", fontWeight: 700, marginBottom: 8 }}>Error</div>
+          <div className="muted">{err}</div>
+          <div style={{ marginTop: 12 }}>
+            <Link className="btn btn-neutral" to="/">Back home</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!row) {
     return (
       <div className="container" style={{ padding: 24 }}>
         <div className="muted">Loading…</div>
@@ -70,125 +54,38 @@ export default function PublicProfile() {
     );
   }
 
-  if (errorText) {
-    return (
-      <div className="container" style={{ padding: 24 }}>
-        <div
-          style={{
-            border: "1px solid var(--border)",
-            background: "#fff1f2",
-            color: "#7f1d1d",
-            borderRadius: 12,
-            padding: 16,
-            maxWidth: 680,
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Error</div>
-          <div>{errorText}</div>
-          <div style={{ marginTop: 12 }}>
-            <Link className="btn btn-neutral" to="/">
-              Back home
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!profile) {
-    return (
-      <div className="container" style={{ padding: 24 }}>
-        <div className="muted">Profile not found.</div>
-      </div>
-    );
-  }
-
-  const isMe = meId && profile.id && meId === profile.id;
+  const avatar = row.avatar_url || "";
+  const name = row.display_name || row.handle || "Profile";
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 860 }}>
-      <div
-        className="card"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          background: "#fff",
-          padding: 18,
-        }}
-      >
-        {/* Header */}
+    <div className="container" style={{ padding: 24, maxWidth: 720 }}>
+      <div className="card" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12 }}>
         <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <div
-            aria-hidden
-            style={{
-              width: 88,
-              height: 88,
-              borderRadius: "50%",
-              overflow: "hidden",
-              border: "1px solid var(--border)",
-              background: "#f8fafc",
-              display: "grid",
-              placeItems: "center",
-              flexShrink: 0,
-            }}
-          >
-            {profile.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={profile.display_name || profile.handle}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            ) : (
-              <span style={{ fontSize: 28, opacity: 0.6 }}>
-                {profile.display_name?.[0]?.toUpperCase() ||
-                  profile.handle?.[0]?.toUpperCase() ||
-                  "😊"}
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: "grid", gap: 2 }}>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>
-              {profile.display_name || profile.handle}
-            </div>
-            <div className="muted">@{profile.handle}</div>
+          <img
+            src={avatar || "/avatar-fallback.png"}
+            alt={name}
+            style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: "1px solid var(--border)" }}
+            onError={(e) => { e.currentTarget.src = "/avatar-fallback.png"; }}
+          />
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{name}</div>
+            <div className="muted">@{row.handle}</div>
           </div>
         </div>
 
-        {/* Bio */}
-        {profile.bio && (
-          <div style={{ marginTop: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
-            {profile.bio}
+        {row.bio && (
+          <div style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>{row.bio}</div>
+        )}
+
+        {!row.is_public && (
+          <div className="muted" style={{ marginTop: 12 }}>
+            This profile is private.
           </div>
         )}
 
-        {/* Actions */}
-        <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {isMe ? (
-            <>
-              <Link className="btn btn-primary" to="/profile">
-                Edit my profile
-              </Link>
-              <Link className="btn btn-neutral" to="/invite">
-                My Invite QR
-              </Link>
-            </>
-          ) : (
-            <>
-              {/* Use connect flow; this triggers the Accept/Reject UI in chat */}
-              <Link className="btn btn-primary" to={`/connect?u=${profile.id}`}>
-                Request connect
-              </Link>
-              <Link className="btn btn-neutral" to={`/chat/handle/${profile.handle}`}>
-                Open messages
-              </Link>
-            </>
-          )}
-        </div>
-
-        {/* Small helper */}
-        <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-          Share your invite via QR and connect only with people you’ve actually met.
+        <div style={{ marginTop: 16 }}>
+          <Link className="btn btn-primary" to={`/chat/handle/${row.handle}`}>Message</Link>
+          <Link className="btn btn-neutral" to="/" style={{ marginLeft: 8 }}>Back home</Link>
         </div>
       </div>
     </div>
