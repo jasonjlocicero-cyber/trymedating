@@ -4,126 +4,92 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ReportModal from '../components/ReportModal'
 
-/* ---------- helpers ---------- */
-const toId = (v) => (typeof v === 'string' ? v : v?.id ? String(v.id) : '')
-const STATUS = { ACCEPTED: 'accepted', PENDING: 'pending', REJECTED: 'rejected', DISCONNECTED: 'disconnected' }
+const STATUS = {
+  ACCEPTED: 'accepted',
+  PENDING: 'pending',
+  REJECTED: 'rejected',
+  DISCONNECTED: 'disconnected',
+}
+
 const pill = (txt, bg) => (
   <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: bg, color: '#111' }}>
     {txt}
   </span>
 )
-const otherPartyId = (row, myId) => (row?.requester_id === myId ? row?.addressee_id : row?.requester_id)
-
-/**
- * Fetch profiles for a set of partner IDs, handling both possible schemas:
- * - connections.* holds profiles.id
- * - OR connections.* holds profiles.user_id (auth UID)
- * We return a Map keyed by BOTH p.id and p.user_id so lookups always succeed.
- */
-async function fetchProfilesForIds(partnerIds) {
-  const ids = Array.from(new Set((partnerIds || []).filter(Boolean)))
-  const map = new Map()
-  if (ids.length === 0) return map
-
-  // 1) Try by profiles.id
-  const { data: byId } = await supabase
-    .from('profiles')
-    .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
-    .in('id', ids)
-
-  for (const p of byId || []) {
-    if (p.id) map.set(p.id, p)
-    if (p.user_id) map.set(p.user_id, p)
-  }
-
-  // 2) For any remaining ids, try by profiles.user_id
-  const remaining = ids.filter((x) => !map.has(x))
-  if (remaining.length) {
-    const { data: byUserId } = await supabase
-      .from('profiles')
-      .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
-      .in('user_id', remaining)
-
-    for (const p of byUserId || []) {
-      if (p.id) map.set(p.id, p)
-      if (p.user_id) map.set(p.user_id, p)
-    }
-  }
-
-  return map
-}
 
 export default function Connections() {
   const nav = useNavigate()
 
+  // auth
   const [me, setMe] = useState(null)
-  const myId = toId(me?.id)
+  const myId = me?.id || null
 
+  // data
   const [rows, setRows] = useState([])
   const [blockedSet, setBlockedSet] = useState(new Set())
+
+  // ui
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState(null)
 
-  // REPORT (single source of truth)
+  // report modal (single source of truth)
   const [reportOpen, setReportOpen] = useState(false)
   const [reportTarget, setReportTarget] = useState({ id: '', label: '' })
-  const openReport = (id, label) => {
-    setReportTarget({ id, label })
-    setReportOpen(true)
-  }
+  const openReport = (id, label) => { setReportTarget({ id, label }); setReportOpen(true) }
 
+  /* auth bootstrap */
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const { data } = await supabase.auth.getUser()
-      if (alive) setMe(data?.user ?? null)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (alive) setMe(user ?? null)
     })()
     return () => { alive = false }
   }, [])
 
+  /* load blocks */
   const loadBlocks = async (uid) => {
     if (!uid) return
-    const { data, error } = await supabase
-      .from('blocks')
-      .select('blocked')
-      .eq('blocker', uid)
-
+    const { data, error } = await supabase.from('blocks').select('blocked').eq('blocker', uid)
     if (!error && data) setBlockedSet(new Set(data.map((r) => r.blocked)))
   }
 
+  /* load connections — via RPC that already joins to profiles */
   const loadConnections = async (uid) => {
     if (!uid) { setRows([]); return }
-
-    const { data: conns, error } = await supabase
-      .from('connections')
-      .select('*')
-      .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
-      .order('updated_at', { ascending: false })
-      .limit(200)
-
-    if (error) { console.error(error); setRows([]); return }
-    if (!conns?.length) { setRows([]); return }
-
-    const partnerIds = Array.from(new Set(conns.map((r) => otherPartyId(r, uid)).filter(Boolean)))
-    const profileMap = await fetchProfilesForIds(partnerIds)
-
-    const enriched = conns.map((c) => {
-      const pid = otherPartyId(c, uid)
-      const p = profileMap.get(pid) || {}
+    const { data, error } = await supabase.rpc('connections_for', { viewer: uid })
+    if (error) {
+      console.error('connections_for error:', error)
+      setRows([])
+      return
+    }
+    const enriched = (data || []).map((r) => {
       const name =
-        p.display_name ||
-        p.full_name ||
-        p.handle ||
-        (pid ? `${String(pid).slice(0, 4)}…${String(pid).slice(-4)}` : 'Unknown')
-      const avatar = p.avatar_url || p.photo_url || ''
-      const handle = p.handle || ''
-      return { ...c, _other_id: pid, _other_profile: { name, handle, avatar } }
-    })
+        r.other_display_name ||
+        r.other_full_name ||
+        r.other_handle ||
+        (r.other_id ? `${String(r.other_id).slice(0, 4)}…${String(r.other_id).slice(-4)}` : 'Unknown')
 
+      return {
+        id: r.id,
+        requester_id: r.requester_id,
+        addressee_id: r.addressee_id,
+        status: r.status,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        _other_id: r.other_id,
+        _other_profile: {
+          name,
+          handle: r.other_handle || '',
+          avatar: r.other_avatar_url || '',
+        },
+      }
+    })
     setRows(enriched)
   }
 
+  /* poll a little to keep fresh */
   useEffect(() => {
     if (!myId) return
     loadConnections(myId)
@@ -132,6 +98,7 @@ export default function Connections() {
     return () => clearInterval(id)
   }, [myId])
 
+  /* actions */
   const disconnect = async (connId) => {
     setBusyId(connId)
     try {
@@ -176,11 +143,7 @@ export default function Connections() {
     if (!window.confirm('Delete this conversation for you? This cannot be undone.')) return
     setBusyId(connId)
     try {
-      await supabase
-        .from('messages')
-        .delete()
-        .eq('connection_id', connId)
-        .or(`sender.eq.${myId},recipient.eq.${myId}`)
+      await supabase.from('messages').delete().eq('connection_id', connId).or(`sender.eq.${myId},recipient.eq.${myId}`)
       await supabase
         .from('connections')
         .update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() })
@@ -189,6 +152,7 @@ export default function Connections() {
     } finally { setBusyId(null) }
   }
 
+  /* filters, counts */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
@@ -213,9 +177,10 @@ export default function Connections() {
     pending: rows.filter((r) => r.status === STATUS.PENDING).length,
     rejected: rows.filter((r) => r.status === STATUS.REJECTED).length,
     disconnected: rows.filter((r) => r.status === STATUS.DISCONNECTED).length,
-    blocked: rows.filter((r) => blockedSet.has(r._other_id)).length
+    blocked: rows.filter((r) => blockedSet.has(r._other_id)).length,
   }), [rows, blockedSet])
 
+  /* ui */
   return (
     <div className="container" style={{ padding: 20, maxWidth: 980 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -226,7 +191,6 @@ export default function Connections() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14, marginBottom: 10 }}>
         {[
           ['all', `All ${counts.all}`],
@@ -240,11 +204,7 @@ export default function Connections() {
             key={key}
             onClick={() => setFilter(key)}
             className="btn btn-pill"
-            style={{
-              border: '1px solid var(--border)',
-              background: filter === key ? '#d1fae5' : '#fff',
-              fontWeight: 700
-            }}
+            style={{ border: '1px solid var(--border)', background: filter === key ? '#d1fae5' : '#fff', fontWeight: 700 }}
           >
             {label}
           </button>
@@ -253,17 +213,10 @@ export default function Connections() {
           placeholder="Search by handle or name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{
-            marginLeft: 'auto',
-            border: '1px solid var(--border)',
-            borderRadius: 999,
-            padding: '10px 14px',
-            minWidth: 260
-          }}
+          style={{ marginLeft: 'auto', border: '1px solid var(--border)', borderRadius: 999, padding: '10px 14px', minWidth: 260 }}
         />
       </div>
 
-      {/* List */}
       <div style={{ borderTop: '1px solid var(--border)', marginTop: 6 }}>
         {filtered.length === 0 ? (
           <div className="muted" style={{ padding: 18 }}>No matches. Try a different filter or search.</div>
@@ -283,16 +236,15 @@ export default function Connections() {
                   alignItems: 'center',
                   gap: 12,
                   padding: '12px 0',
-                  borderBottom: '1px solid var(--border)'
+                  borderBottom: '1px solid var(--border)',
                 }}
               >
-                {/* Left: avatar + name/handle + status pills */}
+                {/* Left */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                   <div
                     style={{
-                      width: 40, height: 40, borderRadius: '50%',
-                      border: '1px solid var(--border)', overflow: 'hidden',
-                      display: 'grid', placeItems: 'center', background: '#fff', flex: '0 0 auto'
+                      width: 40, height: 40, borderRadius: '50%', border: '1px solid var(--border)',
+                      overflow: 'hidden', display: 'grid', placeItems: 'center', background: '#fff', flex: '0 0 auto',
                     }}
                   >
                     {other.avatar ? (
@@ -320,41 +272,26 @@ export default function Connections() {
                   </div>
                 </div>
 
-                {/* Right: actions */}
+                {/* Right actions */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <button
-                    className="btn btn-neutral"
-                    onClick={() => openReport(otherId, other.name || other.handle || otherId)}
-                  >
+                  <button className="btn btn-neutral" onClick={() => openReport(otherId, other.name || other.handle || otherId)}>
                     Report
                   </button>
 
                   {isAccepted ? (
                     <>
-                      <button className="btn btn-primary" onClick={() => nav(`/chat/${otherId}`)} disabled={busyId === r.id}>
-                        Message
-                      </button>
-                      <button className="btn btn-danger" onClick={() => disconnect(r.id)} disabled={busyId === r.id}>
-                        Disconnect
-                      </button>
+                      <button className="btn btn-primary" onClick={() => nav(`/chat/${otherId}`)} disabled={busyId === r.id}>Message</button>
+                      <button className="btn btn-danger" onClick={() => disconnect(r.id)} disabled={busyId === r.id}>Disconnect</button>
                     </>
                   ) : (
-                    <>
-                      <button className="btn btn-neutral" onClick={() => reconnect(r.id)} disabled={busyId === r.id}>
-                        Reconnect
-                      </button>
-                    </>
+                    <button className="btn btn-neutral" onClick={() => reconnect(r.id)} disabled={busyId === r.id}>Reconnect</button>
                   )}
 
                   {!isBlocked ? (
-                    <button className="btn btn-neutral" onClick={() => block(otherId)} disabled={busyId === otherId}>
-                      Block
-                    </button>
+                    <button className="btn btn-neutral" onClick={() => block(otherId)} disabled={busyId === otherId}>Block</button>
                   ) : (
                     <>
-                      <button className="btn btn-neutral" onClick={() => unblock(otherId)} disabled={busyId === otherId}>
-                        Unblock
-                      </button>
+                      <button className="btn btn-neutral" onClick={() => unblock(otherId)} disabled={busyId === otherId}>Unblock</button>
                       <button
                         className="btn btn-danger"
                         onClick={() => deleteConversation(r.id, otherId)}
@@ -372,7 +309,6 @@ export default function Connections() {
         )}
       </div>
 
-      {/* Report Modal */}
       <ReportModal
         open={reportOpen}
         onClose={() => setReportOpen(false)}
