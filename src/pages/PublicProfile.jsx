@@ -2,262 +2,195 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import ReportModal from "../components/ReportModal";
 
-/**
- * PublicProfile
- * - Loads a profile by handle from /u/:handle
- * - If profile.is_public === false, injects <meta name="robots" content="noindex">
- * - Shows basic profile info with Message / Connect actions + Report
- */
 export default function PublicProfile() {
-  const { handle = "" } = useParams();
-  const cleanHandle = (handle || "").replace(/^@/, "").trim();
+  const { handle: rawHandle } = useParams();
+  const handle = (rawHandle || "").trim().replace(/^@/, "");
 
-  const [profile, setProfile] = useState(null);
+  const [meId, setMeId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [me, setMe] = useState(null);
-  const [error, setError] = useState("");
+  const [profile, setProfile] = useState(null); // { id, handle, display_name, bio, avatar_url, is_public? }
+  const [errorText, setErrorText] = useState("");
 
-  const [reportOpen, setReportOpen] = useState(false);
-
-  // Load viewer (me)
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setMe(user || null);
-    })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      setMe(session?.user || null);
-    });
-    return () => sub?.subscription?.unsubscribe?.();
-  }, []);
-
-  // Fetch profile by handle
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError("");
-    setProfile(null);
 
-    (async () => {
+    async function run() {
+      setLoading(true);
+      setErrorText("");
+
+      // who am I (for button logic)
       try {
-        if (!cleanHandle) {
-          throw new Error("No handle provided.");
-        }
-        const { data, error } = await supabase
+        const { data } = await supabase.auth.getUser();
+        if (!alive) return;
+        setMeId(data?.user?.id || null);
+      } catch {
+        /* ignore */
+      }
+
+      // load public profile by handle — IMPORTANT: alias user_id → id
+      try {
+        const { data, error, status } = await supabase
           .from("profiles")
-          .select("id, user_id, display_name, handle, bio, avatar_url, photo_url, is_public, created_at")
-          .eq("handle", cleanHandle)
+          .select("id:user_id, handle, display_name, bio, avatar_url, is_public")
+          .eq("handle", handle)
           .maybeSingle();
 
-        if (error) throw error;
-        if (!data) throw new Error("Profile not found.");
         if (!alive) return;
-        // normalize ids
-        const pid = data.id ?? data.user_id;
-        setProfile({ ...data, _pid: pid });
-      } catch (e) {
+
+        if (error && status !== 406) {
+          setErrorText(error.message || "Failed to load profile.");
+          setProfile(null);
+        } else if (!data) {
+          setErrorText("That profile was not found.");
+          setProfile(null);
+        } else {
+          setProfile(data);
+        }
+      } catch (err) {
         if (!alive) return;
-        setError(e.message || "Failed to load profile.");
+        setErrorText(err.message || "Failed to load profile.");
+        setProfile(null);
       } finally {
         if (alive) setLoading(false);
       }
-    })();
+    }
 
+    if (handle) run();
     return () => {
       alive = false;
     };
-  }, [cleanHandle]);
+  }, [handle]);
 
-  // Inject <meta name="robots" content="noindex"> when the profile is private
-  useEffect(() => {
-    let tag;
-    if (profile && profile.is_public === false) {
-      tag = document.createElement("meta");
-      tag.setAttribute("name", "robots");
-      tag.setAttribute("content", "noindex");
-      document.head.appendChild(tag);
-    }
-    return () => {
-      if (tag) document.head.removeChild(tag);
-    };
-  }, [profile?.is_public]);
+  if (loading) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
+        <div className="muted">Loading…</div>
+      </div>
+    );
+  }
 
-  const avatar = profile?.avatar_url || profile?.photo_url || "/logo-mark.png";
-  const title = profile?.display_name || `@${cleanHandle}`;
-
-  // Actions
-  const canAct = !!(me?.id && profile?._pid && me.id !== profile._pid);
-
-  const openChat = () => {
-    if (!canAct) return;
-    const detail = {
-      partnerId: profile._pid,
-      partnerName: profile.display_name || `@${profile.handle || cleanHandle}`,
-    };
-    window.dispatchEvent(new CustomEvent("open-chat", { detail }));
-  };
-
-  return (
-    <div className="container" style={{ maxWidth: 900, padding: "24px 12px" }}>
-      {loading && <div className="muted">Loading profile…</div>}
-      {!loading && error && (
+  if (errorText) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
         <div
           style={{
             border: "1px solid var(--border)",
+            background: "#fff1f2",
+            color: "#7f1d1d",
             borderRadius: 12,
             padding: 16,
-            background: "#fff5f5",
+            maxWidth: 680,
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
-          <div className="helper-error">{error}</div>
-          <div style={{ marginTop: 10 }}>
-            <Link className="btn btn-neutral" to="/">Back home</Link>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Error</div>
+          <div>{errorText}</div>
+          <div style={{ marginTop: 12 }}>
+            <Link className="btn btn-neutral" to="/">
+              Back home
+            </Link>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {!loading && !error && profile && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "96px 1fr",
-            gap: 16,
-            alignItems: "center",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: 16,
-            background: "#fff",
-          }}
-        >
-          {/* Avatar */}
+  if (!profile) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
+        <div className="muted">Profile not found.</div>
+      </div>
+    );
+  }
+
+  const isMe = meId && profile.id && meId === profile.id;
+
+  return (
+    <div className="container" style={{ padding: 24, maxWidth: 860 }}>
+      <div
+        className="card"
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 16,
+          background: "#fff",
+          padding: 18,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
           <div
+            aria-hidden
             style={{
-              width: 96,
-              height: 96,
+              width: 88,
+              height: 88,
               borderRadius: "50%",
               overflow: "hidden",
               border: "1px solid var(--border)",
               background: "#f8fafc",
               display: "grid",
               placeItems: "center",
+              flexShrink: 0,
             }}
           >
-            <img
-              src={avatar}
-              alt={`${title} avatar`}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
+            {profile.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt={profile.display_name || profile.handle}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <span style={{ fontSize: 28, opacity: 0.6 }}>
+                {profile.display_name?.[0]?.toUpperCase() ||
+                  profile.handle?.[0]?.toUpperCase() ||
+                  "😊"}
+              </span>
+            )}
           </div>
 
-          {/* Main */}
-          <div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
-              {profile?.handle && (
-                <span className="muted" style={{ fontSize: 14 }}>
-                  @{profile.handle}
-                </span>
-              )}
+          <div style={{ display: "grid", gap: 2 }}>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>
+              {profile.display_name || profile.handle}
             </div>
-
-            <div style={{ marginTop: 8, color: "#374151", lineHeight: 1.5 }}>
-              {profile?.bio || <span className="muted">No bio yet.</span>}
-            </div>
-
-            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-              {profile?.is_public ? (
-                <>
-                  {canAct && (
-                    <>
-                      <button
-                        className="btn btn-primary"
-                        type="button"
-                        onClick={openChat}
-                        title="Open chat"
-                      >
-                        Message
-                      </button>
-                      <Link
-                        className="btn btn-neutral"
-                        to={`/connect?to=${profile._pid}`}
-                        title="Send connection request"
-                      >
-                        Connect
-                      </Link>
-                      <button
-                        className="btn btn-neutral"
-                        type="button"
-                        onClick={() => setReportOpen(true)}
-                        title="Report this user"
-                      >
-                        Report
-                      </button>
-                    </>
-                  )}
-                  {!canAct && (
-                    <span className="helper-muted">This is your profile or you’re not signed in.</span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <span
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      background: "#fde68a",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      border: "1px solid var(--border)",
-                    }}
-                  >
-                    Private profile
-                  </span>
-                  <span className="helper-muted" style={{ fontSize: 13 }}>
-                    This page is hidden from search engines.
-                  </span>
-                  {canAct && (
-                    <>
-                      <Link
-                        className="btn btn-neutral"
-                        to={`/connect?to=${profile._pid}`}
-                        title="Send connection request"
-                      >
-                        Request connect
-                      </Link>
-                      <button
-                        className="btn btn-neutral"
-                        type="button"
-                        onClick={() => setReportOpen(true)}
-                        title="Report this user"
-                      >
-                        Report
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
+            <div className="muted">@{profile.handle}</div>
           </div>
         </div>
-      )}
 
-      {/* Back link */}
-      <div style={{ marginTop: 16 }}>
-        <Link className="btn btn-neutral" to="/">← Back home</Link>
+        {/* Bio */}
+        {profile.bio && (
+          <div style={{ marginTop: 14, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+            {profile.bio}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {isMe ? (
+            <>
+              <Link className="btn btn-primary" to="/profile">
+                Edit my profile
+              </Link>
+              <Link className="btn btn-neutral" to="/invite">
+                My Invite QR
+              </Link>
+            </>
+          ) : (
+            <>
+              {/* Use connect flow; this triggers the Accept/Reject UI in chat */}
+              <Link className="btn btn-primary" to={`/connect?u=${profile.id}`}>
+                Request connect
+              </Link>
+              <Link className="btn btn-neutral" to={`/chat/handle/${profile.handle}`}>
+                Open messages
+              </Link>
+            </>
+          )}
+        </div>
+
+        {/* Small helper */}
+        <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+          Share your invite via QR and connect only with people you’ve actually met.
+        </div>
       </div>
-
-      {/* Report modal */}
-      <ReportModal
-        open={reportOpen}
-        onClose={() => setReportOpen(false)}
-        targetId={profile?._pid || ''}
-        targetLabel={profile?.display_name || `@${profile?.handle || cleanHandle}`}
-      />
     </div>
   );
 }
