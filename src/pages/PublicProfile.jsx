@@ -2,12 +2,13 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import ReportModal from "../components/ReportModal";
 
 /**
  * PublicProfile
  * - Loads a profile by handle from /u/:handle
  * - If profile.is_public === false, injects <meta name="robots" content="noindex">
- * - Shows basic profile info with Connect / Message / Report actions
+ * - Shows basic profile info with Message / Connect actions + Report
  */
 export default function PublicProfile() {
   const { handle = "" } = useParams();
@@ -18,13 +19,13 @@ export default function PublicProfile() {
   const [me, setMe] = useState(null);
   const [error, setError] = useState("");
 
+  const [reportOpen, setReportOpen] = useState(false);
+
   // Load viewer (me)
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!mounted) return;
       setMe(user || null);
     })();
@@ -48,16 +49,16 @@ export default function PublicProfile() {
         }
         const { data, error } = await supabase
           .from("profiles")
-          .select(
-            "user_id, display_name, handle, bio, avatar_url, is_public, created_at"
-          )
+          .select("id, user_id, display_name, handle, bio, avatar_url, photo_url, is_public, created_at")
           .eq("handle", cleanHandle)
           .maybeSingle();
 
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
         if (!alive) return;
-        setProfile(data);
+        // normalize ids
+        const pid = data.id ?? data.user_id;
+        setProfile({ ...data, _pid: pid });
       } catch (e) {
         if (!alive) return;
         setError(e.message || "Failed to load profile.");
@@ -71,7 +72,7 @@ export default function PublicProfile() {
     };
   }, [cleanHandle]);
 
-  // Inject noindex for private profiles
+  // Inject <meta name="robots" content="noindex"> when the profile is private
   useEffect(() => {
     let tag;
     if (profile && profile.is_public === false) {
@@ -85,17 +86,16 @@ export default function PublicProfile() {
     };
   }, [profile?.is_public]);
 
-  const avatar = profile?.avatar_url || "/logo-mark.png";
+  const avatar = profile?.avatar_url || profile?.photo_url || "/logo-mark.png";
   const title = profile?.display_name || `@${cleanHandle}`;
 
   // Actions
-  const canAct =
-    !!(me?.id && profile?.user_id && me.id !== profile.user_id) || false;
+  const canAct = !!(me?.id && profile?._pid && me.id !== profile._pid);
 
   const openChat = () => {
     if (!canAct) return;
     const detail = {
-      partnerId: profile.user_id,
+      partnerId: profile._pid,
       partnerName: profile.display_name || `@${profile.handle || cleanHandle}`,
     };
     window.dispatchEvent(new CustomEvent("open-chat", { detail }));
@@ -116,9 +116,7 @@ export default function PublicProfile() {
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Error</div>
           <div className="helper-error">{error}</div>
           <div style={{ marginTop: 10 }}>
-            <Link className="btn btn-neutral btn-pill" to="/">
-              Back home
-            </Link>
+            <Link className="btn btn-neutral" to="/">Back home</Link>
           </div>
         </div>
       )}
@@ -153,25 +151,13 @@ export default function PublicProfile() {
               src={avatar}
               alt={`${title} avatar`}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              onError={(e) => {
-                e.currentTarget.src = "/logo-mark.png";
-              }}
             />
           </div>
 
           {/* Main */}
           <div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>
-                {profile?.display_name || `@${cleanHandle}`}
-              </h1>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
               {profile?.handle && (
                 <span className="muted" style={{ fontSize: 14 }}>
                   @{profile.handle}
@@ -183,20 +169,13 @@ export default function PublicProfile() {
               {profile?.bio || <span className="muted">No bio yet.</span>}
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                marginTop: 14,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
               {profile?.is_public ? (
                 <>
-                  {canAct ? (
+                  {canAct && (
                     <>
                       <button
-                        className="btn btn-primary btn-pill"
+                        className="btn btn-primary"
                         type="button"
                         onClick={openChat}
                         title="Open chat"
@@ -204,30 +183,24 @@ export default function PublicProfile() {
                         Message
                       </button>
                       <Link
-                        className="btn btn-accent btn-pill"
-                        to={`/connect?to=${encodeURIComponent(
-                          profile.user_id
-                        )}`}
+                        className="btn btn-neutral"
+                        to={`/connect?to=${profile._pid}`}
                         title="Send connection request"
                       >
                         Connect
                       </Link>
-                      <Link
-                        className="btn btn-accent btn-pill"
-                        to={`/report?target=${encodeURIComponent(
-                          profile.user_id
-                        )}&handle=${encodeURIComponent(
-                          profile.handle || ""
-                        )}`}
-                        title="Report this profile"
+                      <button
+                        className="btn btn-neutral"
+                        type="button"
+                        onClick={() => setReportOpen(true)}
+                        title="Report this user"
                       >
                         Report
-                      </Link>
+                      </button>
                     </>
-                  ) : (
-                    <span className="helper-muted">
-                      This is your profile or you’re not signed in.
-                    </span>
+                  )}
+                  {!canAct && (
+                    <span className="helper-muted">This is your profile or you’re not signed in.</span>
                   )}
                 </>
               ) : (
@@ -250,25 +223,20 @@ export default function PublicProfile() {
                   {canAct && (
                     <>
                       <Link
-                        className="btn btn-neutral btn-pill"
-                        to={`/connect?to=${encodeURIComponent(
-                          profile.user_id
-                        )}`}
-                        title="Request connect"
+                        className="btn btn-neutral"
+                        to={`/connect?to=${profile._pid}`}
+                        title="Send connection request"
                       >
                         Request connect
                       </Link>
-                      <Link
-                        className="btn btn-accent btn-pill"
-                        to={`/report?target=${encodeURIComponent(
-                          profile.user_id
-                        )}&handle=${encodeURIComponent(
-                          profile.handle || ""
-                        )}`}
-                        title="Report this profile"
+                      <button
+                        className="btn btn-neutral"
+                        type="button"
+                        onClick={() => setReportOpen(true)}
+                        title="Report this user"
                       >
                         Report
-                      </Link>
+                      </button>
                     </>
                   )}
                 </>
@@ -280,13 +248,20 @@ export default function PublicProfile() {
 
       {/* Back link */}
       <div style={{ marginTop: 16 }}>
-        <Link className="btn btn-neutral btn-pill" to="/">
-          ← Back home
-        </Link>
+        <Link className="btn btn-neutral" to="/">← Back home</Link>
       </div>
+
+      {/* Report modal */}
+      <ReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetId={profile?._pid || ''}
+        targetLabel={profile?.display_name || `@${profile?.handle || cleanHandle}`}
+      />
     </div>
   );
 }
+
 
 
 
