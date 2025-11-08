@@ -2,8 +2,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import ReportModal from '../components/ReportModal'
 
-/** Helpers */
 const toId = (v) => (typeof v === 'string' ? v : v?.id ? String(v.id) : '')
 const STATUS = { ACCEPTED: 'accepted', PENDING: 'pending', REJECTED: 'rejected', DISCONNECTED: 'disconnected' }
 const pill = (txt, bg) => (
@@ -13,27 +13,21 @@ const pill = (txt, bg) => (
 )
 const otherPartyId = (row, myId) => (row?.requester_id === myId ? row?.addressee_id : row?.requester_id)
 
-/**
- * We assume:
- *   - connections(id, requester_id, addressee_id, status, created_at, updated_at)
- *   - profiles(id or user_id, handle, display_name, avatar_url/photo_url)
- *   - blocks(blocker uuid, blocked uuid, created_at)
- *
- * If your profiles PK is user_id (not id), switch joins to .eq('user_id', uid).
- */
 export default function Connections() {
   const nav = useNavigate()
 
   const [me, setMe] = useState(null)
   const myId = toId(me?.id)
 
-  const [rows, setRows] = useState([])           // enriched connections
-  const [blockedSet, setBlockedSet] = useState(new Set()) // who I blocked
+  const [rows, setRows] = useState([])
+  const [blockedSet, setBlockedSet] = useState(new Set())
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [busyId, setBusyId] = useState(null)
 
-  // auth
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportTarget, setReportTarget] = useState({ id: '', label: '' })
+
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -43,7 +37,6 @@ export default function Connections() {
     return () => { alive = false }
   }, [])
 
-  // load blocks (who I blocked)
   const loadBlocks = async (uid) => {
     if (!uid) return
     const { data, error } = await supabase
@@ -54,10 +47,8 @@ export default function Connections() {
     if (!error && data) setBlockedSet(new Set(data.map((r) => r.blocked)))
   }
 
-  // load connections and hydrate with profile fields for other party
   const loadConnections = async (uid) => {
     if (!uid) { setRows([]); return }
-    // 1) all connections where I’m involved
     const { data: conns, error } = await supabase
       .from('connections')
       .select('*')
@@ -68,21 +59,18 @@ export default function Connections() {
     if (error) { console.error(error); setRows([]); return }
     if (!conns?.length) { setRows([]); return }
 
-    // 2) collect “other party” ids
     const partnerIds = Array.from(new Set(conns.map((r) => otherPartyId(r, uid)).filter(Boolean)))
 
-    // 3) get profile fields (handle, display_name, avatar)
     const { data: profs } = await supabase
       .from('profiles')
       .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
-      .in('id', partnerIds)   // <- if your PK is user_id, replace with .in('user_id', partnerIds)
+      .in('id', partnerIds)
 
     const byId = new Map()
     for (const p of profs || []) {
       byId.set(p.id ?? p.user_id, p)
     }
 
-    // 4) merge
     const enriched = conns.map((c) => {
       const pid = otherPartyId(c, uid)
       const p = byId.get(pid) || {}
@@ -99,17 +87,14 @@ export default function Connections() {
     setRows(enriched)
   }
 
-  // boot
   useEffect(() => {
     if (!myId) return
     loadConnections(myId)
     loadBlocks(myId)
-    // light poll to keep fresh
     const id = setInterval(() => { loadConnections(myId); loadBlocks(myId) }, 4000)
     return () => clearInterval(id)
   }, [myId])
 
-  /** Actions */
   const goChat = (peerId) => nav(`/chat/${peerId}`)
 
   const disconnect = async (connId) => {
@@ -130,7 +115,6 @@ export default function Connections() {
   const block = async (otherId) => {
     setBusyId(otherId)
     try {
-      // idempotent-ish insert; ignore dup (23505)
       const { error } = await supabase.from('blocks').insert({ blocker: myId, blocked: otherId })
       if (error && error.code !== '23505') throw error
       await loadBlocks(myId)
@@ -144,38 +128,34 @@ export default function Connections() {
     } finally { setBusyId(null) }
   }
 
-  // Delete conversation is only shown when I have blocked the other user
   const deleteConversation = async (connId, otherId) => {
     if (!blockedSet.has(otherId)) return
     if (!window.confirm('Delete this conversation for you? This cannot be undone.')) return
     setBusyId(connId)
     try {
-      // If you installed the RPC delete function, call it here instead:
-      // await supabase.rpc('delete_conversation', { p_conn_id: connId })
       await supabase
         .from('messages')
         .delete()
         .eq('connection_id', connId)
         .or(`sender.eq.${myId},recipient.eq.${myId}`)
-
-      // Optional: also sever the connection row
       await supabase.from('connections').update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() }).eq('id', connId)
-
       await loadConnections(myId)
     } finally { setBusyId(null) }
   }
 
-  /** Filtering/search */
+  const openReport = (id, label) => {
+    setReportTarget({ id, label })
+    setReportOpen(true)
+  }
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
-      // tabs
       if (filter === 'accepted' && r.status !== STATUS.ACCEPTED) return false
       if (filter === 'pending' && r.status !== STATUS.PENDING) return false
       if (filter === 'rejected' && r.status !== STATUS.REJECTED) return false
       if (filter === 'disconnected' && r.status !== STATUS.DISCONNECTED) return false
       if (filter === 'blocked' && !blockedSet.has(r._other_id)) return false
-      // search
       if (!q) return true
       const { name, handle } = r._other_profile || {}
       return (
@@ -301,6 +281,11 @@ export default function Connections() {
 
                 {/* Right: actions */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  {/* Report is always available */}
+                  <button className="btn btn-neutral" onClick={() => openReport(otherId, other.name || other.handle || otherId)}>
+                    Report
+                  </button>
+
                   {isAccepted ? (
                     <>
                       <button className="btn btn-primary" onClick={() => goChat(otherId)} disabled={busyId === r.id}>
@@ -343,6 +328,14 @@ export default function Connections() {
           })
         )}
       </div>
+
+      {/* Report Modal */}
+      <ReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        targetId={reportTarget.id}
+        targetLabel={reportTarget.label}
+      />
     </div>
   )
 }
