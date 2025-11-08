@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ReportModal from '../components/ReportModal'
 
+/* ---------- helpers ---------- */
 const toId = (v) => (typeof v === 'string' ? v : v?.id ? String(v.id) : '')
 const STATUS = { ACCEPTED: 'accepted', PENDING: 'pending', REJECTED: 'rejected', DISCONNECTED: 'disconnected' }
 const pill = (txt, bg) => (
@@ -12,6 +13,48 @@ const pill = (txt, bg) => (
   </span>
 )
 const otherPartyId = (row, myId) => (row?.requester_id === myId ? row?.addressee_id : row?.requester_id)
+
+/**
+ * Fetch profiles for a set of partner IDs, handling both possible schemas:
+ * - connections.* holds profiles.id
+ * - OR connections.* holds profiles.user_id (auth UID)
+ * We return a Map keyed by BOTH p.id and p.user_id so lookups always succeed.
+ */
+async function fetchProfilesForIds(partnerIds) {
+  const ids = Array.from(new Set((partnerIds || []).filter(Boolean)))
+  const map = new Map()
+  if (ids.length === 0) return map
+
+  // 1) Try by profiles.id
+  const { data: byId, error: e1 } = await supabase
+    .from('profiles')
+    .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
+    .in('id', ids)
+
+  if (!e1 && byId) {
+    for (const p of byId) {
+      // map both keys → same profile
+      if (p.id) map.set(p.id, p)
+      if (p.user_id) map.set(p.user_id, p)
+    }
+  }
+
+  // 2) For any remaining ids, try by profiles.user_id
+  const remaining = ids.filter((x) => !map.has(x))
+  if (remaining.length) {
+    const { data: byUserId } = await supabase
+      .from('profiles')
+      .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
+      .in('user_id', remaining)
+
+    for (const p of byUserId || []) {
+      if (p.id) map.set(p.id, p)
+      if (p.user_id) map.set(p.user_id, p)
+    }
+  }
+
+  return map
+}
 
 export default function Connections() {
   const nav = useNavigate()
@@ -49,6 +92,7 @@ export default function Connections() {
 
   const loadConnections = async (uid) => {
     if (!uid) { setRows([]); return }
+
     const { data: conns, error } = await supabase
       .from('connections')
       .select('*')
@@ -59,21 +103,16 @@ export default function Connections() {
     if (error) { console.error(error); setRows([]); return }
     if (!conns?.length) { setRows([]); return }
 
+    // Collect partner IDs from both columns relative to me
     const partnerIds = Array.from(new Set(conns.map((r) => otherPartyId(r, uid)).filter(Boolean)))
 
-    const { data: profs } = await supabase
-      .from('profiles')
-      .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
-      .in('id', partnerIds)
-
-    const byId = new Map()
-    for (const p of profs || []) {
-      byId.set(p.id ?? p.user_id, p)
-    }
+    // Robust profile lookup by BOTH profiles.id and profiles.user_id
+    const profileMap = await fetchProfilesForIds(partnerIds)
 
     const enriched = conns.map((c) => {
       const pid = otherPartyId(c, uid)
-      const p = byId.get(pid) || {}
+      const p = profileMap.get(pid) || {}
+      // Prefer display_name > full_name > handle; else short uuid
       const name =
         p.display_name ||
         p.full_name ||
@@ -91,7 +130,13 @@ export default function Connections() {
     if (!myId) return
     loadConnections(myId)
     loadBlocks(myId)
-    const id = setInterval(() => { loadConnections(myId); loadBlocks(myId) }, 4000)
+
+    // light refresh to keep the list fresh
+    const id = setInterval(() => {
+      loadConnections(myId)
+      loadBlocks(myId)
+    }, 4000)
+
     return () => clearInterval(id)
   }, [myId])
 
@@ -100,14 +145,21 @@ export default function Connections() {
   const disconnect = async (connId) => {
     setBusyId(connId)
     try {
-      await supabase.from('connections').update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() }).eq('id', connId)
+      await supabase
+        .from('connections')
+        .update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() })
+        .eq('id', connId)
       await loadConnections(myId)
     } finally { setBusyId(null) }
   }
+
   const reconnect = async (connId) => {
     setBusyId(connId)
     try {
-      await supabase.from('connections').update({ status: STATUS.PENDING, updated_at: new Date().toISOString() }).eq('id', connId)
+      await supabase
+        .from('connections')
+        .update({ status: STATUS.PENDING, updated_at: new Date().toISOString() })
+        .eq('id', connId)
       await loadConnections(myId)
     } finally { setBusyId(null) }
   }
@@ -120,6 +172,7 @@ export default function Connections() {
       await loadBlocks(myId)
     } finally { setBusyId(null) }
   }
+
   const unblock = async (otherId) => {
     setBusyId(otherId)
     try {
@@ -138,14 +191,12 @@ export default function Connections() {
         .delete()
         .eq('connection_id', connId)
         .or(`sender.eq.${myId},recipient.eq.${myId}`)
-      await supabase.from('connections').update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() }).eq('id', connId)
+      await supabase
+        .from('connections')
+        .update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() })
+        .eq('id', connId)
       await loadConnections(myId)
     } finally { setBusyId(null) }
-  }
-
-  const openReport = (id, label) => {
-    setReportTarget({ id, label })
-    setReportOpen(true)
   }
 
   const filtered = useMemo(() => {
@@ -174,6 +225,10 @@ export default function Connections() {
     disconnected: rows.filter((r) => r.status === STATUS.DISCONNECTED).length,
     blocked: rows.filter((r) => blockedSet.has(r._other_id)).length
   }), [rows, blockedSet])
+
+  const [reportOpenLocal, setReportOpenLocal] = useState(false)
+  const [reportTarget, setReportTarget] = useState({ id: '', label: '' })
+  const openReport = (id, label) => { setReportTarget({ id, label }); setReportOpenLocal(true) }
 
   return (
     <div className="container" style={{ padding: 20, maxWidth: 980 }}>
@@ -282,13 +337,16 @@ export default function Connections() {
                 {/* Right: actions */}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   {/* Report is always available */}
-                  <button className="btn btn-neutral" onClick={() => openReport(otherId, other.name || other.handle || otherId)}>
+                  <button
+                    className="btn btn-neutral"
+                    onClick={() => setReportTarget({ id: otherId, label: other.name || other.handle || otherId }) || setReportOpen(true)}
+                  >
                     Report
                   </button>
 
                   {isAccepted ? (
                     <>
-                      <button className="btn btn-primary" onClick={() => goChat(otherId)} disabled={busyId === r.id}>
+                      <button className="btn btn-primary" onClick={() => nav(`/chat/${otherId}`)} disabled={busyId === r.id}>
                         Message
                       </button>
                       <button className="btn btn-danger" onClick={() => disconnect(r.id)} disabled={busyId === r.id}>
@@ -339,6 +397,7 @@ export default function Connections() {
     </div>
   )
 }
+
 
 
 
