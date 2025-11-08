@@ -1,367 +1,352 @@
 // src/pages/Connections.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase } from "../lib/supabaseClient";
+import React, { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { supabase } from '../lib/supabaseClient'
 
-const ACCEPTED = new Set(["accepted", "connected", "approved"]);
-const STATUS_BADGE = {
-  pending: { label: "Pending", bg: "#fde68a" },
-  accepted: { label: "Connected", bg: "#bbf7d0" },
-  connected: { label: "Connected", bg: "#bbf7d0" },
-  approved: { label: "Connected", bg: "#bbf7d0" },
-  rejected: { label: "Rejected", bg: "#fecaca" },
-  disconnected: { label: "Disconnected", bg: "#e5e7eb" },
-  blocked: { label: "Blocked", bg: "#fca5a5" },
-};
-const toId = (v) => (typeof v === "string" ? v : v?.id ? String(v.id) : v ? String(v) : "");
+/** Helpers */
+const toId = (v) => (typeof v === 'string' ? v : v?.id ? String(v.id) : '')
+const STATUS = { ACCEPTED: 'accepted', PENDING: 'pending', REJECTED: 'rejected', DISCONNECTED: 'disconnected' }
+const pill = (txt, bg) => (
+  <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: bg, color: '#111' }}>
+    {txt}
+  </span>
+)
+const otherPartyId = (row, myId) => (row?.requester_id === myId ? row?.addressee_id : row?.requester_id)
 
-function Badge({ status }) {
-  const meta = STATUS_BADGE[status] || { label: status, bg: "#f3f4f6" };
-  return (
-    <span
-      style={{
-        padding: "2px 10px",
-        borderRadius: 999,
-        background: meta.bg,
-        fontSize: 12,
-        fontWeight: 800,
-        border: "1px solid var(--border)",
-      }}
-    >
-      {meta.label}
-    </span>
-  );
-}
-
+/**
+ * We assume:
+ *   - connections(id, requester_id, addressee_id, status, created_at, updated_at)
+ *   - profiles(id or user_id, handle, display_name, avatar_url/photo_url)
+ *   - blocks(blocker uuid, blocked uuid, created_at)
+ *
+ * If your profiles PK is user_id (not id), switch joins to .eq('user_id', uid).
+ */
 export default function Connections() {
-  const [me, setMe] = useState(null);
-  const myId = toId(me?.id);
+  const nav = useNavigate()
 
-  const [rows, setRows] = useState([]);
-  const [profilesByUserId, setProfilesByUserId] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("all"); // all | pending | connected | blocked | disconnected
+  const [me, setMe] = useState(null)
+  const myId = toId(me?.id)
 
-  // Load auth
+  const [rows, setRows] = useState([])           // enriched connections
+  const [blockedSet, setBlockedSet] = useState(new Set()) // who I blocked
+  const [filter, setFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [busyId, setBusyId] = useState(null)
+
+  // auth
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!mounted) return;
-      setMe(user || null);
-    })();
-    return () => { mounted = false; };
-  }, []);
+    let alive = true
+    ;(async () => {
+      const { data } = await supabase.auth.getUser()
+      if (alive) setMe(data?.user ?? null)
+    })()
+    return () => { alive = false }
+  }, [])
 
-  const refresh = useCallback(async () => {
-    if (!myId) return;
-    setLoading(true);
-    try {
-      // 1) Get all my connection rows (either side)
-      const { data: cons, error } = await supabase
-        .from("connections")
-        .select("id, requester_id, addressee_id, status, blocked_by, created_at, updated_at")
-        .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`)
-        .order("updated_at", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false });
+  // load blocks (who I blocked)
+  const loadBlocks = async (uid) => {
+    if (!uid) return
+    const { data, error } = await supabase
+      .from('blocks')
+      .select('blocked')
+      .eq('blocker', uid)
 
-      if (error) throw error;
-
-      setRows(cons || []);
-
-      // 2) Fetch peer profiles in bulk by user_id for avatars/names/handles
-      const peerIds = new Set();
-      (cons || []).forEach((r) => {
-        const peer =
-          r.requester_id === myId ? r.addressee_id : r.requester_id;
-        if (peer) peerIds.add(peer);
-      });
-
-      if (peerIds.size) {
-        const { data: profs, error: pErr } = await supabase
-          .from("profiles")
-          .select("user_id, display_name, handle, avatar_url")
-          .in("user_id", Array.from(peerIds));
-        if (pErr) throw pErr;
-
-        const map = {};
-        (profs || []).forEach((p) => { map[p.user_id] = p; });
-        setProfilesByUserId(map);
-      } else {
-        setProfilesByUserId({});
-      }
-    } catch (e) {
-      alert(e.message || "Failed to load connections.");
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, [myId]);
-
-  useEffect(() => {
-    if (!myId) return;
-    refresh();
-  }, [myId, refresh]);
-
-  // Action helpers
-  const openChat = (peerId, displayNameOrHandle = "") => {
-    if (!peerId) return;
-    // ChatLauncher listens to this to open the dock
-    if (window.openChat) {
-      window.openChat(peerId, displayNameOrHandle);
-    } else {
-      window.dispatchEvent(new CustomEvent("open-chat", {
-        detail: { partnerId: peerId, partnerName: displayNameOrHandle },
-      }));
-    }
-  };
-
-  const updateConn = async (id, patch) => {
-    const { error } = await supabase
-      .from("connections")
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) throw error;
-    await refresh();
-  };
-
-  const accept = async (row) => updateConn(row.id, { status: "accepted" });
-  const reject = async (row) => updateConn(row.id, { status: "rejected" });
-  const disconnect = async (row) => updateConn(row.id, { status: "disconnected" });
-  const reconnect = async (row) => updateConn(row.id, { status: "pending" });
-
-  const cancelPending = async (row) => updateConn(row.id, { status: "disconnected" });
-
-  const blockConn = async (row) => {
-    if (!myId) return;
-    await updateConn(row.id, { status: "blocked", blocked_by: myId });
-  };
-
-  const unblockConn = async (row) => {
-    // Only the blocker should see this button in the first place
-    await updateConn(row.id, { status: "disconnected", blocked_by: null });
-  };
-
-  // Optional: full purge via RPC if present; otherwise fallback to deleting only MY messages
-  const deleteConversation = async (row) => {
-    if (!myId) return;
-    if (!(row.status === "blocked" && row.blocked_by === myId)) return;
-
-    const sure = window.confirm(
-      "Delete this conversation? (This will remove messages. If the server RPC isn’t installed yet, only YOUR messages will be deleted.)"
-    );
-    if (!sure) return;
-
-    try {
-      // Try RPC first (server-side function we can add later)
-      const { error: rpcErr } = await supabase.rpc("delete_conversation", { conn_id: row.id });
-      if (!rpcErr) {
-        await refresh();
-        return;
-      }
-
-      // Fallback: delete only *my* messages (works with typical RLS that allows delete_own)
-      await supabase
-        .from("messages")
-        .delete()
-        .eq("connection_id", row.id)
-        .eq("sender", myId);
-
-      await refresh();
-    } catch (e) {
-      alert(e.message || "Failed to delete conversation.");
-      console.error(e);
-    }
-  };
-
-  // Derived list per tab
-  const filtered = useMemo(() => {
-    if (tab === "all") return rows;
-    if (tab === "connected") return rows.filter((r) => ACCEPTED.has(r.status));
-    if (tab === "pending") return rows.filter((r) => r.status === "pending");
-    if (tab === "blocked") return rows.filter((r) => r.status === "blocked");
-    if (tab === "disconnected") return rows.filter((r) => r.status === "disconnected" || r.status === "rejected");
-    return rows;
-  }, [rows, tab]);
-
-  // Render one row
-  const Row = ({ row }) => {
-    const peerId = row.requester_id === myId ? row.addressee_id : row.requester_id;
-    const p = profilesByUserId[peerId] || null;
-    const title = p?.display_name || (p?.handle ? `@${p.handle}` : peerId.slice(0, 8));
-    const sub = p?.handle ? `@${p.handle}` : peerId;
-    const avatar = p?.avatar_url || "/logo-mark.png";
-    const iAmRequester = row.requester_id === myId;
-
-    const canUnblock = row.status === "blocked" && row.blocked_by === myId;
-    const blockedByOther = row.status === "blocked" && row.blocked_by && row.blocked_by !== myId;
-
-    return (
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1fr auto",
-          gap: 12,
-          alignItems: "center",
-          padding: 12,
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
-        {/* Avatar */}
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: "50%",
-            overflow: "hidden",
-            border: "1px solid var(--border)",
-            background: "#f8fafc",
-            display: "grid",
-            placeItems: "center",
-          }}
-        >
-          <img
-            src={avatar}
-            alt={`${title} avatar`}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        </div>
-
-        {/* Name + status */}
-        <div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <strong>{title}</strong>
-            <span className="muted" style={{ fontSize: 12 }}>{sub}</span>
-          </div>
-          <div style={{ marginTop: 6 }}>
-            <Badge status={row.status} />
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {/* Open chat (only useful when not blocked) */}
-          {row.status !== "blocked" && (
-            <button
-              className="btn btn-primary btn-pill"
-              onClick={() => openChat(peerId, title)}
-              title="Open chat"
-            >
-              Message
-            </button>
-          )}
-
-          {/* Pending states */}
-          {row.status === "pending" && iAmRequester && (
-            <button className="btn btn-neutral btn-pill" onClick={() => cancelPending(row)}>
-              Cancel
-            </button>
-          )}
-          {row.status === "pending" && !iAmRequester && (
-            <>
-              <button className="btn btn-primary btn-pill" onClick={() => accept(row)}>
-                Accept
-              </button>
-              <button className="btn btn-neutral btn-pill" onClick={() => reject(row)}>
-                Reject
-              </button>
-            </>
-          )}
-
-          {/* Connected */}
-          {ACCEPTED.has(row.status) && (
-            <>
-              <button className="btn btn-neutral btn-pill" onClick={() => disconnect(row)}>
-                Disconnect
-              </button>
-              <button className="btn btn-neutral btn-pill" onClick={() => blockConn(row)}>
-                Block
-              </button>
-            </>
-          )}
-
-          {/* Blocked */}
-          {canUnblock && (
-            <>
-              <button className="btn btn-primary btn-pill" onClick={() => unblockConn(row)}>
-                Unblock
-              </button>
-              <button className="btn btn-neutral btn-pill" onClick={() => deleteConversation(row)}>
-                Delete conversation
-              </button>
-            </>
-          )}
-          {blockedByOther && (
-            <button className="btn btn-neutral btn-pill" disabled>
-              Blocked
-            </button>
-          )}
-
-          {/* Disconnected / Rejected */}
-          {(row.status === "disconnected" || row.status === "rejected") && (
-            <button className="btn btn-primary btn-pill" onClick={() => reconnect(row)}>
-              Reconnect
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  if (!me) {
-    return (
-      <div className="container" style={{ padding: 24 }}>
-        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Connections</h1>
-        <div className="muted">Please sign in to view your connections.</div>
-      </div>
-    );
+    if (!error && data) setBlockedSet(new Set(data.map((r) => r.blocked)))
   }
 
+  // load connections and hydrate with profile fields for other party
+  const loadConnections = async (uid) => {
+    if (!uid) { setRows([]); return }
+    // 1) all connections where I’m involved
+    const { data: conns, error } = await supabase
+      .from('connections')
+      .select('*')
+      .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`)
+      .order('updated_at', { ascending: false })
+      .limit(200)
+
+    if (error) { console.error(error); setRows([]); return }
+    if (!conns?.length) { setRows([]); return }
+
+    // 2) collect “other party” ids
+    const partnerIds = Array.from(new Set(conns.map((r) => otherPartyId(r, uid)).filter(Boolean)))
+
+    // 3) get profile fields (handle, display_name, avatar)
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, user_id, handle, display_name, full_name, avatar_url, photo_url')
+      .in('id', partnerIds)   // <- if your PK is user_id, replace with .in('user_id', partnerIds)
+
+    const byId = new Map()
+    for (const p of profs || []) {
+      byId.set(p.id ?? p.user_id, p)
+    }
+
+    // 4) merge
+    const enriched = conns.map((c) => {
+      const pid = otherPartyId(c, uid)
+      const p = byId.get(pid) || {}
+      const name =
+        p.display_name ||
+        p.full_name ||
+        p.handle ||
+        (pid ? `${String(pid).slice(0, 4)}…${String(pid).slice(-4)}` : 'Unknown')
+      const avatar = p.avatar_url || p.photo_url || ''
+      const handle = p.handle || ''
+      return { ...c, _other_id: pid, _other_profile: { name, handle, avatar } }
+    })
+
+    setRows(enriched)
+  }
+
+  // boot
+  useEffect(() => {
+    if (!myId) return
+    loadConnections(myId)
+    loadBlocks(myId)
+    // light poll to keep fresh
+    const id = setInterval(() => { loadConnections(myId); loadBlocks(myId) }, 4000)
+    return () => clearInterval(id)
+  }, [myId])
+
+  /** Actions */
+  const goChat = (peerId) => nav(`/chat/${peerId}`)
+
+  const disconnect = async (connId) => {
+    setBusyId(connId)
+    try {
+      await supabase.from('connections').update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() }).eq('id', connId)
+      await loadConnections(myId)
+    } finally { setBusyId(null) }
+  }
+  const reconnect = async (connId) => {
+    setBusyId(connId)
+    try {
+      await supabase.from('connections').update({ status: STATUS.PENDING, updated_at: new Date().toISOString() }).eq('id', connId)
+      await loadConnections(myId)
+    } finally { setBusyId(null) }
+  }
+
+  const block = async (otherId) => {
+    setBusyId(otherId)
+    try {
+      // idempotent-ish insert; ignore dup (23505)
+      const { error } = await supabase.from('blocks').insert({ blocker: myId, blocked: otherId })
+      if (error && error.code !== '23505') throw error
+      await loadBlocks(myId)
+    } finally { setBusyId(null) }
+  }
+  const unblock = async (otherId) => {
+    setBusyId(otherId)
+    try {
+      await supabase.from('blocks').delete().eq('blocker', myId).eq('blocked', otherId)
+      await loadBlocks(myId)
+    } finally { setBusyId(null) }
+  }
+
+  // Delete conversation is only shown when I have blocked the other user
+  const deleteConversation = async (connId, otherId) => {
+    if (!blockedSet.has(otherId)) return
+    if (!window.confirm('Delete this conversation for you? This cannot be undone.')) return
+    setBusyId(connId)
+    try {
+      // If you installed the RPC delete function, call it here instead:
+      // await supabase.rpc('delete_conversation', { p_conn_id: connId })
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('connection_id', connId)
+        .or(`sender.eq.${myId},recipient.eq.${myId}`)
+
+      // Optional: also sever the connection row
+      await supabase.from('connections').update({ status: STATUS.DISCONNECTED, updated_at: new Date().toISOString() }).eq('id', connId)
+
+      await loadConnections(myId)
+    } finally { setBusyId(null) }
+  }
+
+  /** Filtering/search */
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return rows.filter((r) => {
+      // tabs
+      if (filter === 'accepted' && r.status !== STATUS.ACCEPTED) return false
+      if (filter === 'pending' && r.status !== STATUS.PENDING) return false
+      if (filter === 'rejected' && r.status !== STATUS.REJECTED) return false
+      if (filter === 'disconnected' && r.status !== STATUS.DISCONNECTED) return false
+      if (filter === 'blocked' && !blockedSet.has(r._other_id)) return false
+      // search
+      if (!q) return true
+      const { name, handle } = r._other_profile || {}
+      return (
+        (name && name.toLowerCase().includes(q)) ||
+        (handle && handle.toLowerCase().includes(q)) ||
+        (r._other_id && String(r._other_id).toLowerCase().includes(q))
+      )
+    })
+  }, [rows, filter, search, blockedSet])
+
+  const counts = useMemo(() => ({
+    all: rows.length,
+    accepted: rows.filter((r) => r.status === STATUS.ACCEPTED).length,
+    pending: rows.filter((r) => r.status === STATUS.PENDING).length,
+    rejected: rows.filter((r) => r.status === STATUS.REJECTED).length,
+    disconnected: rows.filter((r) => r.status === STATUS.DISCONNECTED).length,
+    blocked: rows.filter((r) => blockedSet.has(r._other_id)).length
+  }), [rows, blockedSet])
+
   return (
-    <div className="container" style={{ padding: "24px 0", maxWidth: 900 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 14,
-        }}
-      >
+    <div className="container" style={{ padding: 20, maxWidth: 980 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h1 style={{ fontWeight: 900, margin: 0 }}>Connections</h1>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {["all", "connected", "pending", "blocked", "disconnected"].map((t) => (
-            <button
-              key={t}
-              className={`btn btn-pill ${tab === t ? "btn-primary" : "btn-neutral"}`}
-              onClick={() => setTab(t)}
-            >
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <Link className="btn btn-neutral" to="/invite">My Invite QR</Link>
+          <Link className="btn btn-primary" to="/chat">Open Messages</Link>
         </div>
       </div>
 
-      {loading && <div className="muted">Loading…</div>}
-
-      {!loading && filtered.length === 0 && (
-        <div className="muted">No connections in this view.</div>
-      )}
-
-      <div style={{ display: "grid", gap: 10 }}>
-        {filtered.map((r) => (
-          <Row key={r.id} row={r} />
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14, marginBottom: 10 }}>
+        {[
+          ['all', `All ${counts.all}`],
+          ['accepted', `Accepted ${counts.accepted}`],
+          ['pending', `Pending ${counts.pending}`],
+          ['rejected', `Rejected ${counts.rejected}`],
+          ['disconnected', `Disconnected ${counts.disconnected}`],
+          ['blocked', `Blocked ${counts.blocked}`],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setFilter(key)}
+            className="btn btn-pill"
+            style={{
+              border: '1px solid var(--border)',
+              background: filter === key ? '#d1fae5' : '#fff',
+              fontWeight: 700
+            }}
+          >
+            {label}
+          </button>
         ))}
+        <input
+          placeholder="Search by handle or name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            marginLeft: 'auto',
+            border: '1px solid var(--border)',
+            borderRadius: 999,
+            padding: '10px 14px',
+            minWidth: 260
+          }}
+        />
       </div>
 
-      <div className="helper-muted" style={{ marginTop: 12 }}>
-        Tip: You can <b>Unblock</b> only if you were the one who blocked. After unblocking,
-        the status returns to <b>Disconnected</b>.
+      {/* List */}
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 6 }}>
+        {filtered.length === 0 ? (
+          <div className="muted" style={{ padding: 18 }}>No matches. Try a different filter or search.</div>
+        ) : (
+          filtered.map((r) => {
+            const other = r._other_profile || {}
+            const otherId = r._other_id
+            const isBlocked = blockedSet.has(otherId)
+            const isAccepted = r.status === STATUS.ACCEPTED
+
+            return (
+              <div
+                key={r.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(220px, 1fr) auto',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '12px 0',
+                  borderBottom: '1px solid var(--border)'
+                }}
+              >
+                {/* Left: avatar + name/handle + status pills */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: 40, height: 40, borderRadius: '50%',
+                      border: '1px solid var(--border)', overflow: 'hidden',
+                      display: 'grid', placeItems: 'center', background: '#fff', flex: '0 0 auto'
+                    }}
+                  >
+                    {other.avatar ? (
+                      <img src={other.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <div style={{ fontWeight: 800, color: '#065f46' }}>
+                        {(other.name || other.handle || 'U').slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {other.name}
+                    </div>
+                    <div className="muted" style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {other.handle ? `@${other.handle}` : otherId}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
+                    {r.status === STATUS.ACCEPTED && pill('Accepted', '#bbf7d0')}
+                    {r.status === STATUS.PENDING && pill('Pending', '#fde68a')}
+                    {r.status === STATUS.REJECTED && pill('Rejected', '#fecaca')}
+                    {r.status === STATUS.DISCONNECTED && pill('Disconnected', '#e5e7eb')}
+                    {isBlocked && pill('Blocked by you', '#fee2e2')}
+                  </div>
+                </div>
+
+                {/* Right: actions */}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  {isAccepted ? (
+                    <>
+                      <button className="btn btn-primary" onClick={() => goChat(otherId)} disabled={busyId === r.id}>
+                        Message
+                      </button>
+                      <button className="btn btn-danger" onClick={() => disconnect(r.id)} disabled={busyId === r.id}>
+                        Disconnect
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn btn-neutral" onClick={() => reconnect(r.id)} disabled={busyId === r.id}>
+                        Reconnect
+                      </button>
+                    </>
+                  )}
+
+                  {!isBlocked ? (
+                    <button className="btn btn-neutral" onClick={() => block(otherId)} disabled={busyId === otherId}>
+                      Block
+                    </button>
+                  ) : (
+                    <>
+                      <button className="btn btn-neutral" onClick={() => unblock(otherId)} disabled={busyId === otherId}>
+                        Unblock
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => deleteConversation(r.id, otherId)}
+                        disabled={busyId === r.id}
+                        title="Shown only when you've blocked this person"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })
+        )}
       </div>
     </div>
-  );
+  )
 }
+
 
 
 
