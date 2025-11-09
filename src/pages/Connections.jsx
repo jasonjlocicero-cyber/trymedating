@@ -50,6 +50,13 @@ export default function Connections() {
   const [rows, setRows] = useState([]);
   const [filter, setFilter] = useState("all"); // all | accepted | pending | blocked
 
+  // Report modal state
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState(null); // { otherId, otherName }
+  const [reportReason, setReportReason] = useState("spam");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reporting, setReporting] = useState(false);
+
   // bootstrap auth
   useEffect(() => {
     let alive = true;
@@ -95,9 +102,9 @@ export default function Connections() {
           )
         );
 
-        // Nothing yet
         if (!peers.length) {
           if (!cancelled) setRows(conns || []);
+          setLoading(false);
           return;
         }
 
@@ -264,6 +271,38 @@ export default function Connections() {
       setRows((prev) => prev.filter((r) => r.id !== connId));
     } catch (e) {
       alert(e.message || "Failed to delete conversation.");
+    }
+  }
+
+  // Report modal helpers
+  function openReport(targetRow) {
+    setReportTarget({ otherId: targetRow.otherId, otherName: targetRow.otherName });
+    setReportReason("spam");
+    setReportDetails("");
+    setReportOpen(true);
+  }
+  function closeReport() {
+    setReportOpen(false);
+    setReportTarget(null);
+    setReportDetails("");
+  }
+  async function submitReport() {
+    if (!myId || !reportTarget?.otherId) return;
+    setReporting(true);
+    try {
+      const { error } = await supabase.from("reports").insert({
+        reporter: myId,
+        reported: reportTarget.otherId,
+        reason: reportReason,
+        details: reportDetails || null,
+      });
+      if (error) throw error;
+      alert("Thanks — your report was submitted.");
+      closeReport();
+    } catch (e) {
+      alert(e.message || "Failed to submit report.");
+    } finally {
+      setReporting(false);
     }
   }
 
@@ -439,10 +478,17 @@ export default function Connections() {
                       >
                         Block
                       </button>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        onClick={() => openReport(r)}
+                        title="Report user"
+                      >
+                        Report
+                      </button>
                     </>
                   )}
 
-                  {/* If I blocked: allow Unblock + Delete chat */}
+                  {/* If I blocked: allow Unblock + Delete chat + Report */}
                   {r.i_blocked && (
                     <>
                       <button
@@ -459,18 +505,34 @@ export default function Connections() {
                       >
                         Delete chat
                       </button>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        onClick={() => openReport(r)}
+                        title="Report user"
+                      >
+                        Report
+                      </button>
                     </>
                   )}
 
-                  {/* If they blocked me: no chat; allow me to block (or do nothing) */}
+                  {/* If they blocked me: no chat; allow me to block or report */}
                   {!r.i_blocked && r.they_blocked && (
-                    <button
-                      className="btn btn-neutral btn-pill"
-                      onClick={() => blockUser(r.otherId)}
-                      title="Block back"
-                    >
-                      Block
-                    </button>
+                    <>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        onClick={() => blockUser(r.otherId)}
+                        title="Block back"
+                      >
+                        Block
+                      </button>
+                      <button
+                        className="btn btn-neutral btn-pill"
+                        onClick={() => openReport(r)}
+                        title="Report user"
+                      >
+                        Report
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -478,9 +540,111 @@ export default function Connections() {
           })}
         </div>
       )}
+
+      {/* Report modal */}
+      {reportOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            zIndex: 50,
+          }}
+          onClick={closeReport}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "#fff",
+              borderRadius: 12,
+              border: "1px solid var(--border)",
+              padding: 16,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <h3 style={{ margin: 0, fontWeight: 900 }}>
+                Report {reportTarget?.otherName || "user"}
+              </h3>
+              <button
+                aria-label="Close"
+                onClick={closeReport}
+                className="btn btn-neutral btn-pill"
+                style={{ padding: "4px 10px" }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="muted" style={{ marginTop: 6, marginBottom: 10 }}>
+              Choose a reason and (optionally) add details to help us review.
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                {[
+                  ["spam", "Spam or scam"],
+                  ["harassment", "Harassment or hate"],
+                  ["impostor", "Impersonation / fake profile"],
+                  ["safety", "Safety concern"],
+                  ["other", "Other"],
+                ].map(([val, label]) => (
+                  <label key={val} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="radio"
+                      name="report-reason"
+                      value={val}
+                      checked={reportReason === val}
+                      onChange={() => setReportReason(val)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Details (optional)</div>
+                <textarea
+                  rows={3}
+                  value={reportDetails}
+                  onChange={(e) => setReportDetails(e.target.value)}
+                  placeholder="Add any relevant context…"
+                  style={{
+                    width: "100%",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    padding: 10,
+                    resize: "vertical",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button className="btn btn-neutral btn-pill" onClick={closeReport}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary btn-pill"
+                  onClick={submitReport}
+                  disabled={reporting}
+                >
+                  {reporting ? "Submitting…" : "Submit report"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 
 
