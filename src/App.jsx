@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link } from 'react-router-dom'
+import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom' // ⬅️ added useLocation
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
 
@@ -168,8 +168,7 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* IMPORTANT: We do NOT render any “continue/edit profile/open connections” strip here.
-         Please keep this area empty to avoid reintroducing that UI. */}
+      {/* IMPORTANT: keep this area empty */}
     </div>
   )
 }
@@ -216,9 +215,11 @@ function FeatureCard({ title, text, icon }) {
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
+  const [unread, setUnread] = useState(0) // unread count for messaging badge
 
-  // unread count for messaging badge (used by Header via ChatLauncher)
-  const [unread, setUnread] = useState(0)
+  // ⬇️ HIDE the floating ChatLauncher when on any /chat* route to prevent “double chat”
+  const { pathname } = useLocation()
+  const showChatLauncher = !pathname.startsWith('/chat')
 
   // Safe auth bootstrap with fallback timer
   useEffect(() => {
@@ -334,11 +335,14 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble (render once) */}
-      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
+      {/* Bottom-right chat bubble (render once, but NOT on /chat*) */}
+      {showChatLauncher && (
+        <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
+      )}
     </ChatProvider>
   )
 }
+
 
 
 
