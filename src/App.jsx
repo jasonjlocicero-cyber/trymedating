@@ -1,349 +1,189 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link } from 'react-router-dom'
-import { supabase } from './lib/supabaseClient'
-import { ChatProvider } from './chat/ChatContext'
+import React from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Link,
+  useLocation,
+  useNavigate,
+  Navigate,
+} from "react-router-dom";
+import { supabase } from "./lib/supabaseClient";
 
-// Layout
-import Header from './components/Header'
-import Footer from './components/Footer'
-import ChatLauncher from './components/ChatLauncher'
+/* Pages */
+import Home from "./pages/Home";
+import Profile from "./pages/Profile";
+import PublicProfile from "./pages/PublicProfile";
+import InviteQR from "./pages/InviteQR";
+import Connections from "./pages/Connections";
+import ChatDockPage from "./pages/ChatDockPage";
+import Connect from "./routes/Connect";
 
-// Pages
-import AuthPage from './pages/AuthPage'
-import ProfilePage from './pages/ProfilePage'
-import SettingsPage from './pages/SettingsPage'
-import PublicProfile from './pages/PublicProfile'
-import Contact from './pages/Contact'
-import Terms from './pages/Terms'
-import Privacy from './pages/Privacy'
-import ChatDockPage from './pages/ChatDockPage'
-import InviteQR from './pages/InviteQR'
-import DebugQR from './pages/DebugQR'
-import Connections from './pages/Connections'
-import Report from './pages/Report' // if not present, remove this import
-import AdminReports from './pages/AdminReports'
+/* Global chat bubble that opens the overlay ChatDock */
+import ChatLauncher from "./components/ChatLauncher";
 
-// Components/Routes
-import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect'
+/* ---------- Header / Footer ---------- */
 
-/** --------------------------
- * Home (hero + features)
- * ------------------------- */
-function Home({ me }) {
-  const authed = !!me?.id
+function Header() {
+  const nav = useNavigate();
+  const { pathname } = useLocation();
 
-  return (
-    <div style={{ background: '#fff' }}>
-      {/* HERO */}
-      <section style={{ padding: '52px 0 36px', borderBottom: '1px solid var(--border)' }}>
-        <div
-          className="container"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gap: 18,
-            textAlign: 'center',
-            maxWidth: 920
-          }}
-        >
-          <h1
-            style={{
-              fontWeight: 900,
-              fontSize: 44,
-              lineHeight: 1.1,
-              margin: '0 auto'
-            }}
-          >
-            Welcome to{' '}
-            <span style={{ color: 'var(--brand-teal)' }}>Try</span>
-            <span style={{ color: 'var(--brand-teal)' }}>Me</span>
-            <span style={{ color: 'var(--brand-coral)' }}>Dating</span>
-          </h1>
-
-          <p className="muted" style={{ margin: '0 auto', maxWidth: 760, fontSize: 16 }}>
-            Meet intentionally. Share your invite with a QR code and connect only with people
-            you’ve actually met. No endless swiping—just real conversations with people you trust.
-          </p>
-
-          {/* Primary CTAs (only hero buttons — no “continue” strip anywhere) */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginTop: 4
-            }}
-          >
-            {!authed ? (
-              <>
-                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
-                <a className="btn btn-neutral btn-pill" href="#how-it-works">How it works</a>
-              </>
-            ) : (
-              <>
-                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
-                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
-              </>
-            )}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              marginTop: 8
-            }}
-          >
-            <div className="helper-muted">Private 1:1 messages</div>
-            <div className="helper-muted">You control who can find you</div>
-            <div className="helper-muted">No public browsing of strangers</div>
-          </div>
-        </div>
-      </section>
-
-      {/* HOW IT WORKS */}
-      <section id="how-it-works" style={{ padding: '28px 0' }}>
-        <div className="container" style={{ maxWidth: 960 }}>
-          <h2 style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 16
-            }}
-          >
-            <FeatureCard
-              title="Create"
-              text="Set up a simple profile with your name and a short intro. Choose if it’s public."
-              icon="🧩"
-            />
-            <FeatureCard
-              title="Share"
-              text="Show your personal QR code to people you’ve met in real life to invite them."
-              icon="🔗"
-            />
-            <FeatureCard
-              title="Match"
-              text="You both must accept—this isn’t a browse-everyone app; it’s about real connections."
-              icon="🤝"
-            />
-            <FeatureCard
-              title="Message"
-              text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)."
-              icon="💬"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* SAFETY / PRIVACY STRIP */}
-      <section
-        style={{
-          padding: '18px 0',
-          borderTop: '1px solid var(--border)',
-          borderBottom: '1px solid var(--border)',
-          background: '#fbfbfb'
-        }}
-      >
-        <div
-          className="container"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 14,
-            flexWrap: 'wrap',
-            textAlign: 'center'
-          }}
-        >
-          <span style={{ fontWeight: 700 }}>Your pace. Your privacy.</span>
-          <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
-        </div>
-      </section>
-
-      {/* IMPORTANT: We do NOT render any “continue/edit profile/open connections” strip here.
-         Please keep this area empty to avoid reintroducing that UI. */}
-    </div>
-  )
-}
-
-/** Presentational card for features */
-function FeatureCard({ title, text, icon }) {
-  return (
-    <div
-      className="card"
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: 16,
-        background: '#fff',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            display: 'grid',
-            placeItems: 'center',
-            background: '#f8fafc',
-            border: '1px solid var(--border)',
-            fontSize: 16
-          }}
-          aria-hidden
-        >
-          <span>{icon}</span>
-        </div>
-        <div style={{ fontWeight: 800 }}>{title}</div>
-      </div>
-      <div className="muted" style={{ lineHeight: 1.55 }}>{text}</div>
-    </div>
-  )
-}
-
-/** --------------------------
- * App Root
- * ------------------------- */
-export default function App() {
-  const [me, setMe] = useState(null)
-  const [loadingAuth, setLoadingAuth] = useState(true)
-
-  // unread count for messaging badge (used by Header via ChatLauncher)
-  const [unread, setUnread] = useState(0)
-
-  // Safe auth bootstrap with fallback timer
-  useEffect(() => {
-    let alive = true
-    const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
-
-    ;(async () => {
-      try {
-        const res = await supabase.auth.getUser()
-        if (!alive) return
-        setMe(res?.data?.user || null)
-      } catch (err) {
-        console.error('[auth.getUser] failed:', err)
-      } finally {
-        if (alive) setLoadingAuth(false)
-      }
-    })()
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      if (!alive) return
-      setMe(session?.user || null)
-    })
-
-    return () => {
-      alive = false
-      clearTimeout(safety)
-      sub?.subscription?.unsubscribe?.()
+  async function signOut() {
+    try {
+      await supabase.auth.signOut();
+    } catch (_) {
+      // ignore
+    } finally {
+      nav("/");
     }
-  }, [])
-
-  async function handleSignOut() {
-    await supabase.auth.signOut()
   }
 
   return (
-    <ChatProvider renderDock={false}>
-      <Header me={me} unread={unread} onSignOut={handleSignOut} />
+    <header className="site-header" style={{ borderBottom: "1px solid var(--border)" }}>
+      <div
+        className="container"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          padding: "10px 16px",
+        }}
+      >
+        <Link to="/" className="logo" aria-label="TryMeDating" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
+          {/* Brand mark (heart/wristband) + wordmark */}
+          <img
+            src="/logo-mark.png"
+            alt=""
+            style={{ width: 28, height: 28 }}
+            draggable={false}
+          />
+          <span style={{ fontWeight: 900, letterSpacing: 0.2 }}>
+            Try<span style={{ color: "#14b8a6" }}>Me</span>Dating
+          </span>
+        </Link>
 
-      {/* Global toast for inbound connection requests (Accept/Reject) */}
-      {me?.id && <ConnectionToast me={me} />}
+        <nav className="site-nav" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Link
+            to="/"
+            className="btn btn-neutral btn-pill"
+            aria-current={pathname === "/" ? "page" : undefined}
+          >
+            Home
+          </Link>
 
-      <main style={{ minHeight: '60vh' }}>
-        {loadingAuth ? (
-          <div style={{ padding: 24, display: 'grid', placeItems: 'center' }}>
-            <div className="muted">Loading…</div>
-          </div>
-        ) : (
-          <Routes>
-            <Route path="/" element={<Home me={me} />} />
+          {/* “Messages” points to the Connections list */}
+          <Link
+            to="/connections"
+            className="btn btn-neutral btn-pill"
+            aria-current={pathname.startsWith("/connections") ? "page" : undefined}
+          >
+            Messages
+          </Link>
 
-            {/* Auth */}
-            <Route path="/auth" element={<AuthPage />} />
+          {/* My Invite QR in header, per latest direction */}
+          <Link
+            to="/invite"
+            className="btn btn-primary btn-pill"
+            aria-current={pathname.startsWith("/invite") ? "page" : undefined}
+          >
+            My Invite QR
+          </Link>
 
-            {/* Private routes (basic guard) */}
-            <Route
-              path="/profile"
-              element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/settings"
-              element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/connections"
-              element={me ? <Connections /> : <Navigate to="/auth" replace />}
-            />
+          <button className="btn btn-danger btn-pill" onClick={signOut}>Sign out</button>
+        </nav>
+      </div>
+    </header>
+  );
+}
 
-            {/* Optional report page (guarded). If you don’t have Report.jsx yet, delete these two lines. */}
-            <Route
-              path="/report/:peerId"
-              element={me ? <Report /> : <Navigate to="/auth" replace />}
-            />
+function Footer() {
+  return (
+    <footer className="site-footer" style={{ borderTop: "1px solid var(--border)", marginTop: 16 }}>
+      <div
+        className="container"
+        style={{ display: "flex", gap: 8, justifyContent: "center", padding: 16, flexWrap: "wrap" }}
+      >
+        <Link className="btn btn-neutral btn-pill" to="/terms">Terms</Link>
+        <Link className="btn btn-neutral btn-pill" to="/privacy">Privacy</Link>
+        <Link className="btn btn-neutral btn-pill" to="/contact">Contact</Link>
+        <Link className="btn btn-neutral btn-pill" to="/feedback">Feedback</Link>
+      </div>
+      <div className="helper-muted" style={{ textAlign: "center", fontSize: 12, paddingBottom: 12 }}>
+        © {new Date().getFullYear()} TryMeDating. All rights reserved.
+      </div>
+    </footer>
+  );
+}
 
-            <Route
-              path="/admin/reports"
-              element={me ? <AdminReports /> : <Navigate to="/auth" replace />}
-            />
-            
-            {/* Public profile */}
-            <Route path="/u/:handle" element={<PublicProfile />} />
+/* ---------- App Shell (suppresses overlay chat on full-page chat routes) ---------- */
 
-            {/* Static pages */}
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
+function Shell() {
+  const { pathname } = useLocation();
 
-            {/* Direct chat routes */}
-            <Route
-              path="/chat/:peerId"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat/handle/:handle"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
+  // IMPORTANT: do not render the global chat overlay when already on full-page chat
+  const showChatOverlay = !pathname.startsWith("/chat");
 
-            {/* Invite QR */}
-            <Route
-              path="/invite"
-              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
-            />
+  return (
+    <>
+      <Header />
 
-            {/* QR Smoke Test */}
-            <Route path="/debug-qr" element={<DebugQR />} />
+      <main className="site-main">
+        <Routes>
+          {/* Home & core pages */}
+          <Route path="/" element={<Home />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/u/:handle" element={<PublicProfile />} />
 
-            {/* QR scan route to create a pending connection request */}
-            <Route path="/connect" element={<Connect me={me} />} />
+          {/* Invite QR */}
+          <Route path="/invite" element={<InviteQR />} />
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        )}
+          {/* Connections (messages list + actions) */}
+          <Route path="/connections" element={<Connections />} />
+
+          {/* Full-page chat by peerId or by handle */}
+          <Route path="/chat/:peerId" element={<ChatDockPage />} />
+          <Route path="/chat/h/:handle" element={<ChatDockPage />} />
+
+          {/* Connect QR handler: /connect?to=... | /connect/:token */}
+          <Route path="/connect">
+            <Route index element={<Connect />} />
+            <Route path=":token" element={<Connect />} />
+          </Route>
+
+          {/* Minimal 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </main>
 
       <Footer />
 
-      {/* Bottom-right chat bubble (render once) */}
-      <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
-    </ChatProvider>
-  )
+      {showChatOverlay && <ChatLauncher />}
+    </>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="container" style={{ padding: 24, maxWidth: 720 }}>
+      <h2 style={{ fontWeight: 900, marginBottom: 8 }}>Page not found</h2>
+      <p className="muted">We couldn’t find that page. Try going back home.</p>
+      <div style={{ marginTop: 10 }}>
+        <Link className="btn btn-primary btn-pill" to="/">← Back home</Link>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- App Root ---------- */
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Shell />
+    </BrowserRouter>
+  );
 }
 
 
