@@ -7,7 +7,6 @@ import {
   Link,
   useLocation,
   useNavigate,
-  Navigate,
 } from "react-router-dom";
 import { supabase } from "./lib/supabaseClient";
 
@@ -32,7 +31,7 @@ function Header() {
   async function signOut() {
     try {
       await supabase.auth.signOut();
-    } catch (_) {
+    } catch {
       // ignore
     } finally {
       nav("/");
@@ -51,11 +50,15 @@ function Header() {
           padding: "10px 16px",
         }}
       >
-        <Link to="/" className="logo" aria-label="TryMeDating" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}>
-          {/* Brand mark (heart/wristband) + wordmark */}
+        <Link
+          to="/"
+          className="logo"
+          aria-label="TryMeDating"
+          style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "inherit" }}
+        >
           <img
             src="/logo-mark.png"
-            alt=""
+            alt="TryMeDating logo"
             style={{ width: 28, height: 28 }}
             draggable={false}
           />
@@ -82,7 +85,7 @@ function Header() {
             Messages
           </Link>
 
-          {/* My Invite QR in header, per latest direction */}
+          {/* My Invite QR in header */}
           <Link
             to="/invite"
             className="btn btn-primary btn-pill"
@@ -122,7 +125,7 @@ function Footer() {
 function Shell() {
   const { pathname } = useLocation();
 
-  // IMPORTANT: do not render the global chat overlay when already on full-page chat
+  // Do not render the global chat overlay when already on full-page chat
   const showChatOverlay = !pathname.startsWith("/chat");
 
   return (
@@ -146,11 +149,9 @@ function Shell() {
           <Route path="/chat/:peerId" element={<ChatDockPage />} />
           <Route path="/chat/h/:handle" element={<ChatDockPage />} />
 
-          {/* Connect QR handler: /connect?to=... | /connect/:token */}
-          <Route path="/connect">
-            <Route index element={<Connect />} />
-            <Route path=":token" element={<Connect />} />
-          </Route>
+          {/* Connect QR handler: support both /connect and /connect/:token */}
+          <Route path="/connect" element={<Connect />} />
+          <Route path="/connect/:token" element={<Connect />} />
 
           {/* Minimal 404 */}
           <Route path="*" element={<NotFound />} />
