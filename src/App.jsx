@@ -12,7 +12,7 @@ import { supabase } from "./lib/supabaseClient";
 
 /* Pages */
 import Home from "./pages/Home";
-import Profile from "./pages/Profile";
+import ProfilePage from "./pages/ProfilePage";          // ⬅️ renamed to match your file
 import PublicProfile from "./pages/PublicProfile";
 import InviteQR from "./pages/InviteQR";
 import Connections from "./pages/Connections";
@@ -136,7 +136,7 @@ function Shell() {
         <Routes>
           {/* Home & core pages */}
           <Route path="/" element={<Home />} />
-          <Route path="/profile" element={<Profile />} />
+          <Route path="/profile" element={<ProfilePage />} />   {/* ⬅️ updated component */}
           <Route path="/u/:handle" element={<PublicProfile />} />
 
           {/* Invite QR */}
