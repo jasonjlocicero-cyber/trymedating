@@ -1,11 +1,11 @@
 // functions/redeem_invite.ts
-// Verify the token (JWT), enforce one-time use via jti insert, and return pid (target user).
-// Requires table:
+// Verify invite JWT and enforce one-time redemption using a JTI ledger.
 //
-// create table if not exists invite_used_jti (
-//   jti text primary key,
-//   used_at timestamptz default now()
-// );
+// ENV required: INVITE_JWT_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+// Notes:
+// - Works for signed-in OR anonymous callers.
+// - Returns { issuer } on success.
+// - CORS aligned with your mint_invite.
 
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -17,40 +17,87 @@ const cors = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
 }
 
+type RedeemBody = { token?: string | null }
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
   try {
-    const { token } = await req.json()
+    const { token } = (await req.json().catch(() => ({}))) as RedeemBody
     if (!token) {
-      return new Response(JSON.stringify({ error: 'Missing token' }), { status: 400, headers: { ...cors, 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({ error: 'Missing token' }), {
+        status: 400,
+        headers: { ...cors, 'content-type': 'application/json' }
+      })
     }
 
-    const jwtSecret = Deno.env.get('INVITE_JWT_SECRET')!
-    if (!jwtSecret) throw new Error('Missing INVITE_JWT_SECRET')
+    const jwtSecret = Deno.env.get('INVITE_JWT_SECRET')
+    if (!jwtSecret) {
+      return new Response(JSON.stringify({ error: 'Server misconfigured: INVITE_JWT_SECRET' }), {
+        status: 500,
+        headers: { ...cors, 'content-type': 'application/json' }
+      })
+    }
 
-    const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(jwtSecret))
-    // payload: { t:'tmdv1', pid: <user_id>, sub, jti, exp }
-    const jti = String(payload?.jti || '')
-    const pid = String((payload as any)?.pid || '')
-    if (!jti || !pid) throw new Error('Invalid token payload')
+    // Verify JWT signature + exp
+    const secret = new TextEncoder().encode(jwtSecret)
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
 
+    // Expected claims from your mint_invite: { t: 'tmdv1', pid: <issuer uuid> }
+    const jti = (payload as any)?.jti as string | undefined
+    const pid = (payload as any)?.pid as string | undefined
+    const typ = (payload as any)?.t as string | undefined
+
+    if (!jti || !pid || typ !== 'tmdv1') {
+      return new Response(JSON.stringify({ error: 'Invalid token payload' }), {
+        status: 400,
+        headers: { ...cors, 'content-type': 'application/json' }
+      })
+    }
+
+    // We’ll attempt to stamp used_at for this jti exactly once.
     const url = Deno.env.get('SUPABASE_URL')!
-    const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')! // needs row insert bypass
-    const supabase = createClient(url, service)
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const sb = createClient(url, serviceKey)
 
-    // one-time use: try to insert the jti; on conflict -> already used
-    const { error: insErr } = await supabase
-      .from('invite_used_jti')
-      .insert({ jti })
-    if (insErr) {
-      // 23505 = unique violation -> already used
-      return new Response(JSON.stringify({ error: 'Token already used' }), { status: 409, headers: { ...cors, 'content-type': 'application/json' } })
+    // Make sure the row exists (idempotent upsert of JTI)
+    await sb.from('invite_jti_ledger').upsert({ jti, issuer: pid }, { onConflict: 'jti' })
+
+    // Now set used_at only if not already used/revoked
+    const { data: updated, error: updErr } = await sb
+      .from('invite_jti_ledger')
+      .update({ used_at: new Date().toISOString() })
+      .eq('jti', jti)
+      .is('used_at', null)
+      .is('revoked_at', null)
+      .select('jti, issuer, used_at')
+      .maybeSingle()
+
+    if (updErr) {
+      return new Response(JSON.stringify({ error: updErr.message }), {
+        status: 500,
+        headers: { ...cors, 'content-type': 'application/json' }
+      })
     }
 
-    return new Response(JSON.stringify({ ok: true, pid }), { headers: { ...cors, 'content-type': 'application/json' } })
+    if (!updated) {
+      // Already used or revoked — surface a clean error
+      return new Response(JSON.stringify({ error: 'Token already used or revoked' }), {
+        status: 400,
+        headers: { ...cors, 'content-type': 'application/json' }
+      })
+    }
+
+    // Success: return the issuer (the person being connected to)
+    return new Response(JSON.stringify({ issuer: pid }), {
+      headers: { ...cors, 'content-type': 'application/json' }
+    })
   } catch (e) {
-    // Expired tokens or bad signature will land here
-    return new Response(JSON.stringify({ error: e?.message || 'redeem failed' }), { status: 400, headers: { ...cors, 'content-type': 'application/json' } })
+    const msg = e?.message || 'redeem failed'
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500,
+      headers: { ...cors, 'content-type': 'application/json' }
+    })
   }
 })
+
