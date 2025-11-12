@@ -1,52 +1,69 @@
 // src/pages/PublicProfile.jsx
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
 export default function PublicProfile() {
   const { handle } = useParams();
-  const [row, setRow] = useState(null);
-  const [err, setErr] = useState("");
+  const nav = useNavigate();
 
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [profile, setProfile] = useState(null);
+
+  // Load viewer
   useEffect(() => {
     let alive = true;
     (async () => {
-      setErr("");
-      setRow(null);
-      if (!handle) return;
-
-      // Read from the compatibility view
-      const { data, error } = await supabase
-        .from("profiles_v")
-        .select("id, user_id, handle, display_name, bio, is_public, avatar_url")
-        .eq("handle", handle)
-        .maybeSingle();
-
-      if (!alive) return;
-      if (error) setErr(error.message || "Failed to load profile");
-      else if (!data) setErr("No such profile");
-      else setRow(data);
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (alive) setMe(data?.user || null);
+      } catch {
+        if (alive) setMe(null);
+      }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
+  }, []);
+
+  // Load public profile by handle
+  useEffect(() => {
+    let alive = true;
+    if (!handle) return;
+    setLoading(true); setErr("");
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("user_id, handle, display_name, bio, avatar_url, is_public")
+          .eq("handle", handle.toLowerCase())
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) throw new Error("Profile not found.");
+        if (!data.is_public) {
+          // show minimal “private” state but still render card without Message
+          setProfile({ ...data, is_public: false });
+        } else {
+          setProfile(data);
+        }
+      } catch (e) {
+        setErr(e.message || "Failed to load profile.");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
   }, [handle]);
 
-  if (err) {
-    return (
-      <div className="container" style={{ padding: 24 }}>
-        <div className="card" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12 }}>
-          <div style={{ color: "#b91c1c", fontWeight: 700, marginBottom: 8 }}>Error</div>
-          <div className="muted">{err}</div>
-          <div style={{ marginTop: 12 }}>
-            <Link className="btn btn-neutral" to="/">Back home</Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const isSelf = !!(me?.id && profile?.user_id && me.id === profile.user_id);
 
-  if (!row) {
+  const openChat = () => {
+    if (!profile?.user_id) return;
+    // Chat routes are already auth-guarded in App.jsx; unauth users will be redirected to /auth.
+    nav(`/chat/${profile.user_id}`);
+  };
+
+  if (loading) {
     return (
       <div className="container" style={{ padding: 24 }}>
         <div className="muted">Loading…</div>
@@ -54,38 +71,86 @@ export default function PublicProfile() {
     );
   }
 
-  const avatar = row.avatar_url || "";
-  const name = row.display_name || row.handle || "Profile";
+  if (err || !profile) {
+    return (
+      <div className="container" style={{ padding: 24, maxWidth: 820 }}>
+        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
+        <div className="helper-error" style={{ marginBottom: 12 }}>{err || "Profile not found."}</div>
+        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 720 }}>
-      <div className="card" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 12 }}>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <img
-            src={avatar || "/avatar-fallback.png"}
-            alt={name}
-            style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: "1px solid var(--border)" }}
-            onError={(e) => { e.currentTarget.src = "/avatar-fallback.png"; }}
-          />
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>{name}</div>
-            <div className="muted">@{row.handle}</div>
+    <div className="container" style={{ padding: 24, maxWidth: 820 }}>
+      <div
+        className="card"
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          background: "#fff",
+          padding: 18
+        }}
+      >
+        {/* Header row */}
+        <div style={{ display: "grid", gridTemplateColumns: "52px 1fr", gap: 12, alignItems: "center" }}>
+          {/* Avatar */}
+          <div
+            style={{
+              width: 52, height: 52, borderRadius: "50%",
+              overflow: "hidden", border: "1px solid var(--border)",
+              display: "grid", placeItems: "center", background: "#fff"
+            }}
+          >
+            {profile.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt={`${profile.display_name || profile.handle} avatar`}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                draggable={false}
+              />
+            ) : (
+              <img
+                src="/logo-mark.png"
+                alt=""
+                style={{ width: 32, height: 32, opacity: 0.9 }}
+                draggable={false}
+              />
+            )}
+          </div>
+
+          {/* Name / handle */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 900 }}>{profile.display_name || profile.handle}</div>
+            <div className="muted">@{profile.handle}</div>
           </div>
         </div>
 
-        {row.bio && (
-          <div style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>{row.bio}</div>
+        {/* Bio */}
+        {profile.bio && (
+          <div style={{ marginTop: 12, color: "#111" }}>
+            {profile.bio}
+          </div>
         )}
 
-        {!row.is_public && (
-          <div className="muted" style={{ marginTop: 12 }}>
+        {!profile.is_public && (
+          <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
             This profile is private.
           </div>
         )}
 
-        <div style={{ marginTop: 16 }}>
-          <Link className="btn btn-primary" to={`/chat/handle/${row.handle}`}>Message</Link>
-          <Link className="btn btn-neutral" to="/" style={{ marginLeft: 8 }}>Back home</Link>
+        {/* Actions */}
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {!isSelf && (
+            <button
+              type="button"
+              className="btn btn-accent btn-pill"
+              onClick={openChat}
+            >
+              Message
+            </button>
+          )}
+          <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
         </div>
       </div>
     </div>
