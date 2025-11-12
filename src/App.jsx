@@ -22,6 +22,7 @@ import InviteQR from './pages/InviteQR'
 import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report' // if not present, remove this import
+import AdminReports from './pages/AdminReports'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -314,13 +315,16 @@ export default function App() {
               path="/chat/handle/:handle"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
-
+            
             {/* Invite QR */}
             <Route
               path="/invite"
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
-
+            <Route 
+              path="/admin/reports" 
+              element={<AdminReports />} 
+            />
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
