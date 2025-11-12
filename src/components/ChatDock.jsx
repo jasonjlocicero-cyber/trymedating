@@ -394,9 +394,6 @@ export default function ChatDock({ peerId: peerIdProp }) {
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
 
-  // NEW: delete-my-last-message busy flag
-  const [deletingMine, setDeletingMine] = useState(false);
-
   // sessions count (for banner)
   const [sessionCount, setSessionCount] = useState(1);
 
@@ -407,6 +404,7 @@ export default function ChatDock({ peerId: peerIdProp }) {
   const [autoTried, setAutoTried] = useState(false);
 
   // TYPING: state/refs
+  theTyping:
   const [peerTyping, setPeerTyping] = useState(false);
   const typingTimeoutRef = useRef(null);
   const typingChannelRef = useRef(null);
@@ -887,35 +885,23 @@ export default function ChatDock({ peerId: peerIdProp }) {
     }
   };
 
-  /* --------------------------- delete last message --------------------------- */
-  // Find the latest *text* message authored by me in current items
-  const lastMineTextMessage = useMemo(() => {
-    const mine = items.filter(isMine);
-    for (let i = mine.length - 1; i >= 0; i--) {
-      const m = mine[i];
-      if (!getAttachmentMeta(m.body) && !isDeletedAttachment(m.body)) return m;
-    }
-    return null;
-  }, [items, myId]);
+  /* ---------- NEW: Delete my last (non-attachment) message ---------- */
+  const lastDeletableMine = useMemo(() => {
+    const mine = items.filter((m) => isMine(m) && !getAttachmentMeta(m.body));
+    return mine.length ? mine[mine.length - 1] : null;
+  }, [items, me?.id]);
 
-  const deleteMyLastMessage = async () => {
-    if (!lastMineTextMessage) {
-      alert("No text message to delete. (Use the 🗑 on the attachment card for files.)");
-      return;
-    }
-    if (!confirm("Delete your last message?")) return;
-
-    setDeletingMine(true);
+  const deleteLastMessage = async () => {
+    if (!conn?.id || !lastDeletableMine) return;
+    setBusy(true);
     try {
-      const { error } = await supabase.from("messages").delete().eq("id", lastMineTextMessage.id);
+      const { error } = await supabase.rpc("tmd_delete_last_message", { p_conn: conn.id });
       if (error) throw error;
-      // Optimistic UI: remove it locally
-      setItems((prev) => prev.filter((m) => m.id !== lastMineTextMessage.id));
+      await fetchMessages();
     } catch (e) {
-      alert(e.message || "Failed to delete your last message.");
-      console.error(e);
+      alert(e.message || "Failed to delete last message");
     } finally {
-      setDeletingMine(false);
+      setBusy(false);
     }
   };
 
@@ -1182,9 +1168,10 @@ export default function ChatDock({ peerId: peerIdProp }) {
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
+              style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
             >
               <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
+
               <textarea
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
@@ -1212,6 +1199,30 @@ export default function ChatDock({ peerId: peerIdProp }) {
                   overflowY: "auto",
                 }}
               />
+
+              {/* NEW: Delete last message (non-attachment) */}
+              <button
+                type="button"
+                onClick={deleteLastMessage}
+                disabled={!lastDeletableMine || busy || uploading || sending}
+                title={
+                  lastDeletableMine
+                    ? "Delete your most recent non-attachment message"
+                    : "Nothing to delete (last message may be an attachment)"
+                }
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 12,
+                  background: !lastDeletableMine || busy || uploading || sending ? "#cbd5e1" : "#ef4444",
+                  color: "#fff",
+                  border: "none",
+                  cursor: !lastDeletableMine || busy || uploading || sending ? "not-allowed" : "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                Delete last
+              </button>
+
               <button
                 type="submit"
                 disabled={!canSend || uploading}
@@ -1226,23 +1237,6 @@ export default function ChatDock({ peerId: peerIdProp }) {
                 }}
               >
                 Send
-              </button>
-              <button
-                type="button"
-                disabled={deletingMine || !lastMineTextMessage}
-                onClick={deleteMyLastMessage}
-                title="Delete your last text message"
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  background: deletingMine || !lastMineTextMessage ? "#cbd5e1" : "#ef4444",
-                  color: "#fff",
-                  border: "none",
-                  cursor: deletingMine || !lastMineTextMessage ? "not-allowed" : "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                {deletingMine ? "Deleting…" : "Delete last"}
               </button>
             </form>
 
