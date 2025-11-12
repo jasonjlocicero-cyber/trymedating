@@ -269,7 +269,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     };
   }, [meta?.path, meta?.url, refreshTick]);
 
-  const handleImgError = () => setRefreshTick((n) => n + 1));
+  const handleImgError = () => setRefreshTick((n) => n + 1);
   const canDelete = !!meta?.path && !!onDelete;
 
   const isPDF =
@@ -1257,6 +1257,7 @@ export default function ChatDock({ peerId: peerIdProp }) {
     </div>
   );
 }
+
 
 
 
