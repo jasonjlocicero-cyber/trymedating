@@ -78,7 +78,7 @@ export default function Connect({ me }) {
     return true;
   }
 
-  // Load a friendly name/handle for UI
+  // Load a friendly name/handle for chat bubble title (not shown on this page)
   async function loadRecipientHandle(uid) {
     try {
       const { data: prof } = await supabase
@@ -102,14 +102,8 @@ export default function Connect({ me }) {
       if (token) {
         const { data, error } = await supabase.rpc("tmd_redeem_qr_token", { p_token: token });
         if (cancelled) return;
-        if (error) {
+        if (error || !data) {
           console.warn("[redeem token]", error);
-          setStatus("invalid");
-          setErrorText("This invite has expired or is invalid.");
-          setRecipientId("");
-          return;
-        }
-        if (!data) {
           setStatus("invalid");
           setErrorText("This invite has expired or is invalid.");
           setRecipientId("");
@@ -141,7 +135,7 @@ export default function Connect({ me }) {
     async function bootstrap() {
       if (!hasRecipient) return;
 
-      // show who you're connecting with
+      // fetch a friendly name for the chat header (not displayed here)
       loadRecipientHandle(recipientId);
 
       if (!authed) {
@@ -243,12 +237,6 @@ export default function Connect({ me }) {
     <div className="container" style={{ padding: 24, maxWidth: 680 }}>
       <h2 style={{ fontWeight: 800, marginBottom: 8 }}>Connect</h2>
 
-      {recipientHandle && (
-        <div className="muted" style={{ marginBottom: 8 }}>
-          You’re connecting with <strong>{recipientHandle}</strong>.
-        </div>
-      )}
-
       {status === "invalid" && (
         <div className="muted" style={{ marginTop: 8 }}>
           This invite is invalid or expired.
@@ -326,11 +314,6 @@ export default function Connect({ me }) {
             )}
           </>
         ) : null}
-      </div>
-
-      <div className="muted" style={{ marginTop: 16 }}>
-        After you send a request, the other person will see a popup to <strong>Accept</strong> or <strong>Decline</strong>.
-        The chat bubble will open automatically so you can decide right away.
       </div>
     </div>
   );
