@@ -269,7 +269,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
     };
   }, [meta?.path, meta?.url, refreshTick]);
 
-  const handleImgError = () => setRefreshTick((n) => n + 1);
+  const handleImgError = () => setRefreshTick((n) => n + 1));
   const canDelete = !!meta?.path && !!onDelete;
 
   const isPDF =
@@ -393,6 +393,9 @@ export default function ChatDock({ peerId: peerIdProp }) {
   const [uploading, setUploading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [deletingPaths, setDeletingPaths] = useState(() => new Set());
+
+  // NEW: delete-my-last-message busy flag
+  const [deletingMine, setDeletingMine] = useState(false);
 
   // sessions count (for banner)
   const [sessionCount, setSessionCount] = useState(1);
@@ -884,6 +887,38 @@ export default function ChatDock({ peerId: peerIdProp }) {
     }
   };
 
+  /* --------------------------- delete last message --------------------------- */
+  // Find the latest *text* message authored by me in current items
+  const lastMineTextMessage = useMemo(() => {
+    const mine = items.filter(isMine);
+    for (let i = mine.length - 1; i >= 0; i--) {
+      const m = mine[i];
+      if (!getAttachmentMeta(m.body) && !isDeletedAttachment(m.body)) return m;
+    }
+    return null;
+  }, [items, myId]);
+
+  const deleteMyLastMessage = async () => {
+    if (!lastMineTextMessage) {
+      alert("No text message to delete. (Use the 🗑 on the attachment card for files.)");
+      return;
+    }
+    if (!confirm("Delete your last message?")) return;
+
+    setDeletingMine(true);
+    try {
+      const { error } = await supabase.from("messages").delete().eq("id", lastMineTextMessage.id);
+      if (error) throw error;
+      // Optimistic UI: remove it locally
+      setItems((prev) => prev.filter((m) => m.id !== lastMineTextMessage.id));
+    } catch (e) {
+      alert(e.message || "Failed to delete your last message.");
+      console.error(e);
+    } finally {
+      setDeletingMine(false);
+    }
+  };
+
   /* connection controls (AFTER actions) */
   const connControls = (
     <div style={{ marginBottom: 10 }}>
@@ -1191,6 +1226,23 @@ export default function ChatDock({ peerId: peerIdProp }) {
                 }}
               >
                 Send
+              </button>
+              <button
+                type="button"
+                disabled={deletingMine || !lastMineTextMessage}
+                onClick={deleteMyLastMessage}
+                title="Delete your last text message"
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: deletingMine || !lastMineTextMessage ? "#cbd5e1" : "#ef4444",
+                  color: "#fff",
+                  border: "none",
+                  cursor: deletingMine || !lastMineTextMessage ? "not-allowed" : "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                {deletingMine ? "Deleting…" : "Delete last"}
               </button>
             </form>
 
