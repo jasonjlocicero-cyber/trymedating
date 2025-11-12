@@ -14,6 +14,7 @@ const C = {
 };
 
 const PAGE_SIZE = 10;
+
 const otherIdOf = (row, myId) =>
   row?.[C.requester] === myId ? row?.[C.addressee] : row?.[C.requester];
 
@@ -55,6 +56,7 @@ export default function Connections() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [total, setTotal] = useState(null); // exact count (if available)
 
   useEffect(() => {
     let alive = true;
@@ -66,7 +68,7 @@ export default function Connections() {
   }, []);
 
   const openChat = useCallback((peerId) => {
-    // IMPORTANT: navigate only — do NOT fire the global open-chat event here
+    // navigate only — do NOT trigger any global open-chat event here
     nav(`/chat/${peerId}`);
   }, [nav]);
 
@@ -79,9 +81,10 @@ export default function Connections() {
       const from = pageIndex * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
 
+      // Pull connections (prefer exact count for better paging UX)
       let q = supabase
         .from(CONN_TABLE)
-        .select("*")
+        .select("*", { count: "exact" })
         .or(`${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`)
         .order(C.updatedAt, { ascending: false })
         .order(C.createdAt, { ascending: false })
@@ -89,45 +92,62 @@ export default function Connections() {
 
       if (statusFilter !== "all") q = q.eq(C.status, statusFilter);
 
-      const { data: rows, error: rowsErr } = await q;
+      const { data: rows, error: rowsErr, count } = await q;
       if (rowsErr) throw rowsErr;
 
+      if (typeof count === "number") setTotal(count);
+
       if (!rows?.length) {
-        if (reset) { setItems([]); setDone(true); setPage(0); }
-        else setDone(true);
+        if (reset) {
+          setItems([]); setDone(true); setPage(0);
+        } else {
+          setDone(true);
+        }
         setLoading(false);
         return;
       }
 
+      // Collect connection ids + other peer ids
       const connIds = rows.map(r => r.id);
       const otherIds = rows.map(r => otherIdOf(r, myId)).filter(Boolean);
 
+      // Hydrate peer profiles (stable avatar/name)
       const profMap = new Map();
       if (otherIds.length) {
-        const { data: profs } = await supabase
+        const { data: profs, error: profErr } = await supabase
           .from("profiles")
           .select("user_id, handle, display_name, avatar_url")
           .in("user_id", otherIds);
-        for (const p of (profs || [])) profMap.set(p.user_id, p);
+        if (!profErr) {
+          for (const p of (profs || [])) profMap.set(p.user_id, p);
+        }
       }
 
+      // Latest message per connection (we fetch all recent and take first per connection client-side)
       const latestMap = new Map();
       if (connIds.length) {
-        const { data: msgs } = await supabase
+        const { data: msgs, error: msgErr } = await supabase
           .from("messages")
           .select("connection_id, body, created_at")
           .in("connection_id", connIds)
           .order("created_at", { ascending: false });
-        for (const m of (msgs || [])) if (!latestMap.has(m.connection_id)) latestMap.set(m.connection_id, m);
+        if (!msgErr) {
+          for (const m of (msgs || [])) {
+            if (!latestMap.has(m.connection_id)) latestMap.set(m.connection_id, m);
+          }
+        }
       }
 
+      // Normalize rows
       const normalized = rows.map((r) => {
         const otherId = otherIdOf(r, myId);
         const prof = otherId ? profMap.get(otherId) : null;
         const latest = latestMap.get(r.id) || null;
         const lastAt = latest?.created_at || r?.[C.updatedAt] || r?.[C.createdAt] || null;
-        let snippet = "";
+
+        // Build a short, safe snippet
         const b = latest?.body || "";
+        let snippet = "";
         if (b.startsWith("[[file:")) snippet = "📎 Attachment";
         else if (b.startsWith("[[deleted:")) snippet = "🗑 Attachment deleted";
         else snippet = (b || "").replace(/\s+/g, " ").slice(0, 120);
@@ -144,22 +164,37 @@ export default function Connections() {
         };
       });
 
+      // Sort by last activity (desc)
       normalized.sort((a, b) => {
         const ta = a.lastAt ? new Date(a.lastAt).getTime() : 0;
         const tb = b.lastAt ? new Date(b.lastAt).getTime() : 0;
         return tb - ta;
       });
 
-      if (reset) { setItems(normalized); setPage(1); setDone(normalized.length < PAGE_SIZE); }
-      else { setItems(prev => [...prev, ...normalized]); setPage(pageIndex + 1); if (normalized.length < PAGE_SIZE) setDone(true); }
+      if (reset) {
+        setItems(normalized);
+        setPage(1);
+        setDone(normalized.length < PAGE_SIZE || (typeof total === "number" && normalized.length >= total));
+      } else {
+        setItems(prev => [...prev, ...normalized]);
+        setPage(pageIndex + 1);
+        const reachedTotal = typeof total === "number" ? (from + normalized.length) >= total : false;
+        if (normalized.length < PAGE_SIZE || reachedTotal) setDone(true);
+      }
     } catch (e) {
       setError(e.message || "Failed to load connections.");
     } finally {
       setLoading(false);
     }
-  }, [myId, page, loading, done, statusFilter]);
+  }, [myId, page, loading, done, statusFilter, total]);
 
+  // On auth or filter changes, reset and load
   useEffect(() => { if (myId) loadPage(true); }, [myId, statusFilter]); // eslint-disable-line
+
+  const totalPages = useMemo(() => {
+    if (typeof total !== "number" || total === 0) return 1;
+    return Math.max(1, Math.ceil(total / PAGE_SIZE));
+  }, [total]);
 
   if (!me) {
     return (
@@ -172,7 +207,15 @@ export default function Connections() {
 
   return (
     <div className="container" style={{ padding: 24, maxWidth: 820 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <div>
           <h1 style={{ fontWeight: 900, marginBottom: 4 }}>Connections</h1>
           <div className="muted" style={{ fontSize: 13 }}>
@@ -183,7 +226,12 @@ export default function Connections() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", fontWeight: 700 }}
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: "6px 10px",
+              fontWeight: 700,
+            }}
             aria-label="Filter by status"
           >
             <option value="all">All statuses</option>
@@ -192,14 +240,28 @@ export default function Connections() {
             <option value="rejected">Rejected</option>
             <option value="disconnected">Disconnected</option>
           </select>
-          <button className="btn btn-neutral btn-pill" onClick={() => loadPage(true)} disabled={loading}>
+          <button
+            className="btn btn-neutral btn-pill"
+            onClick={() => loadPage(true)}
+            disabled={loading}
+          >
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </div>
 
       {error && (
-        <div style={{ marginTop: 12, border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "#fff5f5", color: "#7f1d1d" }}>
+        <div
+          role="alert"
+          style={{
+            marginTop: 12,
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: 12,
+            background: "#fff5f5",
+            color: "#7f1d1d",
+          }}
+        >
           {error}
         </div>
       )}
@@ -226,54 +288,115 @@ export default function Connections() {
                 background: "#fff",
                 cursor: "pointer",
               }}
+              aria-label={`Open chat with ${title}`}
             >
               {avatar ? (
                 <img
                   src={avatar}
-                  alt={`${title} avatar`}
-                  style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", border: "1px solid var(--border)" }}
+                  alt=""
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    border: "1px solid var(--border)",
+                  }}
                 />
               ) : (
-                <div style={{ width: 44, height: 44, borderRadius: "50%", border: "1px solid var(--border)", display: "grid", placeItems: "center" }}>TM</div>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: "50%",
+                    border: "1px solid var(--border)",
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                  aria-hidden
+                >
+                  TM
+                </div>
               )}
 
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {title}
                   </div>
                   <StatusPill status={it.status} />
                 </div>
                 <div className="muted" style={{ marginTop: 4, display: "flex", gap: 8, fontSize: 12 }}>
                   {sub && <span>{sub}</span>}
-                  {it.lastAt && <span title={new Date(it.lastAt).toLocaleString()}>• {new Date(it.lastAt).toLocaleDateString()}</span>}
+                  {it.lastAt && (
+                    <span title={new Date(it.lastAt).toLocaleString()}>
+                      • {new Date(it.lastAt).toLocaleDateString()}
+                    </span>
+                  )}
                 </div>
                 {it.snippet && (
-                  <div className="muted" style={{ marginTop: 4, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={it.snippet}>
+                  <div
+                    className="muted"
+                    style={{
+                      marginTop: 4,
+                      fontSize: 13,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={it.snippet}
+                  >
                     {it.snippet}
                   </div>
                 )}
               </div>
 
-              <div><span className="btn btn-primary btn-pill">Open chat</span></div>
+              <div>
+                <span className="btn btn-primary btn-pill">Open chat</span>
+              </div>
             </button>
           );
         })}
 
         {!items.length && !loading && (
-          <div className="muted" style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "#fff" }}>
+          <div
+            className="muted"
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: 12,
+              background: "#fff",
+            }}
+          >
             No connections to show yet.
           </div>
         )}
       </div>
 
-      <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
+      <div style={{ marginTop: 14, display: "flex", justifyContent: "center", alignItems: "center", gap: 12 }}>
         {!done ? (
-          <button className="btn btn-neutral btn-pill" onClick={() => loadPage(false)} disabled={loading}>
+          <button
+            className="btn btn-neutral btn-pill"
+            onClick={() => loadPage(false)}
+            disabled={loading}
+            aria-label="Load more connections"
+          >
             {loading ? "Loading…" : "Load more"}
           </button>
         ) : (
-          items.length > 0 && <div className="helper-muted">End of list</div>
+          items.length > 0 && (
+            <div className="helper-muted">
+              End of list
+              {typeof total === "number" ? ` • ${items.length}/${total}` : ""}
+              {typeof total === "number" && totalPages > 1 ? ` • Page ${page}/${totalPages}` : ""}
+            </div>
+          )
         )}
       </div>
 
