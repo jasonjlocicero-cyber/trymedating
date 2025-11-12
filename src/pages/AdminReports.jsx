@@ -1,206 +1,122 @@
+// src/pages/AdminReports.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-function Badge({ text, bg = "#f3f4f6", fg = "#111827", title }) {
-  return (
-    <span
-      title={title}
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 800,
-        background: bg,
-        color: fg,
-        border: "1px solid var(--border)",
-      }}
-    >
-      {text}
-    </span>
-  );
-}
-
-function statusTint(status) {
-  switch ((status || "").toLowerCase()) {
-    case "open":
-      return { text: "Open", bg: "#fee2e2", fg: "#7f1d1d" };
-    case "in_review":
-      return { text: "In review", bg: "#fde68a", fg: "#7c2d12" };
-    case "resolved":
-      return { text: "Resolved", bg: "#bbf7d0", fg: "#065f46" };
-    default:
-      return { text: "—", bg: "#f3f4f6", fg: "#111827" };
-  }
+function toCSV(rows) {
+  if (!rows?.length) return "";
+  const cols = ["id","created_at","reporter","reporter_handle","target","target_handle","connection_id","category","status","details"];
+  const esc = (v) => {
+    const s = (v ?? "").toString().replaceAll('"', '""');
+    return `"${s}"`;
+  };
+  const header = cols.join(",");
+  const lines = rows.map(r => cols.map(c => esc(r[c])).join(","));
+  return [header, ...lines].join("\n");
 }
 
 export default function AdminReports() {
   const [me, setMe] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
-
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([]);
-  const [tab, setTab] = useState("open"); // open | in_review | resolved | all
+  const [err, setErr] = useState("");
   const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
-  // resolve dialog
-  const [resolving, setResolving] = useState(null); // report row
-  const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  // auth bootstrap
   useEffect(() => {
     let alive = true;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } = {} } = await supabase.auth.getUser();
       if (!alive) return;
-      setMe(user || null);
-      if (user?.id) {
-        const { data } = await supabase
-          .from("admin_users")
-          .select("user_id")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        setIsAdmin(!!data);
-      }
+      setMe(user ?? null);
+      if (!user) { setLoading(false); return; }
+      const { data: adminRow } = await supabase
+        .from("app_admins")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      setIsAdmin(!!adminRow?.user_id);
     })();
     return () => { alive = false; };
   }, []);
 
-  // data load
-  useEffect(() => {
-    if (!isAdmin) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
+  const load = async () => {
+    if (!isAdmin) { setLoading(false); return; }
+    setLoading(true); setErr("");
+    try {
+      const { data: rows, error } = await supabase
+        .from("reports")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
 
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      try {
-        // Fetch raw reports first (works regardless of helper view)
-        const { data: base, error } = await supabase
-          .from("reports")
-          .select("id, reporter, reported, reason, details, status, created_at, reviewed_by, reviewed_at, resolution_notes")
-          .order("created_at", { ascending: false });
-        if (error) throw error;
-
-        const reporters = Array.from(new Set((base || []).map(r => r.reporter).filter(Boolean)));
-        const reporteds = Array.from(new Set((base || []).map(r => r.reported).filter(Boolean)));
-        const ids = Array.from(new Set([...reporters, ...reporteds]));
-        let profMap = new Map();
-        if (ids.length) {
-          const { data: profs } = await supabase
-            .from("profiles")
-            .select("user_id, display_name, handle, avatar_url")
-            .in("user_id", ids);
-          profMap = new Map((profs || []).map(p => [p.user_id, p]));
+      // Enrich handles
+      const ids = Array.from(new Set(rows.flatMap(r => [r.reporter, r.target].filter(Boolean))));
+      let handles = new Map();
+      if (ids.length) {
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("user_id, handle, display_name")
+          .in("user_id", ids);
+        for (const p of (profs || [])) {
+          handles.set(p.user_id, p.display_name || p.handle || p.user_id);
         }
-
-        const shaped = (base || []).map(r => {
-          const rep  = profMap.get(r.reporter) || {};
-          const targ = profMap.get(r.reported) || {};
-          return {
-            ...r,
-            reporter_name:  rep.display_name || (rep.handle ? `@${rep.handle}` : r.reporter?.slice(0,8) || "reporter"),
-            reporter_handle: rep.handle || null,
-            reporter_avatar: rep.avatar_url || "/logo-mark.png",
-            reported_name:   targ.display_name || (targ.handle ? `@${targ.handle}` : r.reported?.slice(0,8) || "user"),
-            reported_handle: targ.handle || null,
-            reported_avatar: targ.avatar_url || "/logo-mark.png",
-          };
-        });
-
-        if (!cancelled) setRows(shaped);
-      } catch (e) {
-        console.error("[AdminReports] load failed:", e);
-        if (!cancelled) setRows([]);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
+      const out = rows.map(r => ({
+        ...r,
+        reporter_handle: handles.get(r.reporter) || r.reporter,
+        target_handle: handles.get(r.target) || r.target,
+      }));
+      setItems(out);
+    } catch (e) {
+      setErr(e.message || "Failed to load reports.");
+    } finally {
+      setLoading(false);
     }
+  };
 
-    load();
-
-    const ch = supabase
-      .channel("admin:reports")
-      .on("postgres_changes", { event: "*", schema: "public", table: "reports" }, load)
-      .subscribe();
-
-    return () => supabase.removeChannel(ch);
-  }, [isAdmin]);
+  useEffect(() => { if (isAdmin) load(); }, [isAdmin]); // eslint-disable-line
 
   const filtered = useMemo(() => {
-    let out = rows;
-    if (tab !== "all") out = out.filter(r => (r.status || "open") === tab);
-    if (q.trim()) {
-      const s = q.trim().toLowerCase();
-      out = out.filter(r =>
-        (r.reason || "").toLowerCase().includes(s) ||
-        (r.details || "").toLowerCase().includes(s) ||
-        (r.reporter_name || "").toLowerCase().includes(s) ||
-        (r.reported_name || "").toLowerCase().includes(s) ||
-        (r.reporter_handle || "").toLowerCase().includes(s) ||
-        (r.reported_handle || "").toLowerCase().includes(s)
-      );
-    }
-    return out;
-  }, [rows, tab, q]);
+    const s = (q || "").toLowerCase();
+    return items.filter(r => {
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (!s) return true;
+      const hay = `${r.category} ${r.details} ${r.reporter_handle} ${r.target_handle} ${r.id}`.toLowerCase();
+      return hay.includes(s);
+    });
+  }, [items, q, statusFilter]);
 
-  async function setStatus(row, newStatus) {
-    if (!isAdmin || !row?.id) return;
-    try {
-      const payload = {
-        status: newStatus,
-        reviewed_by: me?.id || null,
-        reviewed_at: new Date().toISOString(),
-      };
-      const { error } = await supabase
-        .from("reports")
-        .update(payload)
-        .eq("id", row.id);
-      if (error) throw error;
-    } catch (e) {
-      alert(e.message || "Failed to update status.");
+  const updateStatus = async (id, status) => {
+    const prev = items.slice();
+    setItems(items.map(r => r.id === id ? { ...r, status } : r));
+    const { error } = await supabase
+      .from("reports")
+      .update({ status })
+      .eq("id", id);
+    if (error) {
+      setItems(prev);
+      alert(error.message || "Update failed");
     }
-  }
+  };
 
-  function openResolve(row) {
-    setResolving(row);
-    setNotes(row?.resolution_notes || "");
-  }
-  function closeResolve() {
-    setResolving(null);
-    setNotes("");
-    setSaving(false);
-  }
-  async function doResolve() {
-    if (!resolving?.id) return;
-    setSaving(true);
-    try {
-      const { error } = await supabase
-        .from("reports")
-        .update({
-          status: "resolved",
-          resolution_notes: notes || null,
-          reviewed_by: me?.id || null,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", resolving.id);
-      if (error) throw error;
-      closeResolve();
-    } catch (e) {
-      alert(e.message || "Failed to resolve.");
-      setSaving(false);
-    }
-  }
+  const exportCSV = () => {
+    const csv = toCSV(filtered);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reports_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   if (!me) {
     return (
       <div className="container" style={{ padding: 24 }}>
-        <h2 style={{ fontWeight: 900, marginBottom: 8 }}>Admin: Reports</h2>
         <div className="muted">Please sign in.</div>
       </div>
     );
@@ -208,189 +124,93 @@ export default function AdminReports() {
   if (!isAdmin) {
     return (
       <div className="container" style={{ padding: 24 }}>
-        <h2 style={{ fontWeight: 900, marginBottom: 8 }}>Admin: Reports</h2>
+        <h2 style={{ fontWeight: 800, marginBottom: 8 }}>Admin Reports</h2>
         <div className="muted">You don’t have access to this page.</div>
+        <div style={{ marginTop: 12 }}>
+          <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 980 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-        <h2 style={{ fontWeight: 900, margin: 0 }}>Reports</h2>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-          {[
-            ["open", "Open"],
-            ["in_review", "In review"],
-            ["resolved", "Resolved"],
-            ["all", "All"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              className={`btn btn-pill ${tab === key ? "btn-primary" : "btn-neutral"}`}
-              onClick={() => setTab(key)}
-              style={{ padding: "6px 12px" }}
-            >
-              {label}
-            </button>
-          ))}
+    <div className="container" style={{ padding: 24, maxWidth: 1000 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={{ fontWeight: 800, marginBottom: 4 }}>Admin Reports</h2>
+          <div className="muted">Newest first. Update status or export to CSV.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
           <input
+            className="input"
+            placeholder="Search text/handles/id…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search reason / names / handles"
-            style={{ border: "1px solid var(--border)", borderRadius: 999, padding: "8px 12px", minWidth: 220 }}
+            style={{ minWidth: 220 }}
           />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", fontWeight: 700 }}
+          >
+            <option value="all">All</option>
+            <option value="open">Open</option>
+            <option value="reviewing">Reviewing</option>
+            <option value="resolved">Resolved</option>
+            <option value="ignored">Ignored</option>
+          </select>
+          <button className="btn btn-neutral btn-pill" onClick={exportCSV} disabled={!filtered.length}>Export CSV</button>
+          <button className="btn btn-primary btn-pill" onClick={load} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
       </div>
 
-      {loading ? (
-        <div className="muted">Loading…</div>
-      ) : filtered.length === 0 ? (
-        <div className="muted">No reports.</div>
-      ) : (
-        <div style={{ display: "grid", gap: 10 }}>
-          {filtered.map((r) => {
-            const tint = statusTint(r.status);
-            return (
-              <div
-                key={r.id}
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  background: "#fff",
-                  padding: 12,
-                  display: "grid",
-                  gridTemplateColumns: "minmax(260px, 1fr) minmax(260px, 1fr) auto",
-                  gap: 12,
-                  alignItems: "center",
-                }}
-              >
-                {/* Reporter */}
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", border: "1px solid var(--border)" }}>
-                    <img src={r.reporter_avatar || "/logo-mark.png"} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.reporter_name}
-                    </div>
-                    {r.reporter_handle && (
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        @{r.reporter_handle}
-                      </div>
-                    )}
-                    <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      Reason: <b>{r.reason}</b>
-                    </div>
-                  </div>
-                </div>
+      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
 
-                {/* Reported */}
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", border: "1px solid var(--border)" }}>
-                    <img src={r.reported_avatar || "/logo-mark.png"} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.reported_name}
-                    </div>
-                    {r.reported_handle && (
-                      <div className="muted" style={{ fontSize: 12 }}>
-                        @{r.reported_handle}
-                      </div>
-                    )}
-                    {r.details && (
-                      <div className="muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap" }}>
-                        {r.details}
-                      </div>
-                    )}
-                  </div>
+      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+        {filtered.map(r => (
+          <div key={r.id} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "#fff", padding: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontWeight: 800 }}>
+                  {r.category} <span className="muted" style={{ fontWeight: 400 }}>• {new Date(r.created_at).toLocaleString()}</span>
                 </div>
-
-                {/* Controls */}
-                <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
-                  <Badge text={tint.text} bg={tint.bg} fg={tint.fg} title={`Status: ${tint.text}`} />
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    {r.status !== "in_review" && r.status !== "resolved" && (
-                      <button className="btn btn-neutral btn-pill" onClick={() => setStatus(r, "in_review")}>
-                        Start review
-                      </button>
-                    )}
-                    {r.status !== "resolved" && (
-                      <button className="btn btn-primary btn-pill" onClick={() => openResolve(r)}>
-                        Resolve…
-                      </button>
-                    )}
-                    {r.status === "resolved" && (
-                      <button className="btn btn-neutral btn-pill" onClick={() => setStatus(r, "open")}>
-                        Reopen
-                      </button>
-                    )}
-                  </div>
-                  {r.resolution_notes && (
-                    <div className="muted" style={{ fontSize: 12, maxWidth: 320, textAlign: "right" }}>
-                      <b>Notes:</b> {r.resolution_notes}
-                    </div>
-                  )}
+                <div className="muted" style={{ fontSize: 13 }}>
+                  From <b>{r.reporter_handle}</b> → <b>{r.target_handle}</b> {r.connection_id ? <> • <code>{r.connection_id.slice(0,8)}</code></> : null}
                 </div>
+                {r.details && (
+                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{r.details}</div>
+                )}
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Resolve dialog */}
-      {resolving && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "grid",
-            placeItems: "center",
-            padding: 16,
-            zIndex: 50,
-          }}
-          onClick={closeResolve}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: 520,
-              background: "#fff",
-              borderRadius: 12,
-              border: "1px solid var(--border)",
-              padding: 16,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <h3 style={{ margin: 0, fontWeight: 900 }}>Resolve report</h3>
-              <button className="btn btn-neutral btn-pill" onClick={closeResolve} style={{ padding: "4px 10px" }}>
-                ×
-              </button>
-            </div>
-            <div className="muted" style={{ marginTop: 6, marginBottom: 10 }}>
-              Add optional notes (visible to admins only).
-            </div>
-            <textarea
-              rows={4}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Resolution notes…"
-              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: 10, padding: 10 }}
-            />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
-              <button className="btn btn-neutral btn-pill" onClick={closeResolve}>Cancel</button>
-              <button className="btn btn-primary btn-pill" onClick={doResolve} disabled={saving}>
-                {saving ? "Saving…" : "Mark resolved"}
-              </button>
+              <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
+                <select
+                  value={r.status}
+                  onChange={(e) => updateStatus(r.id, e.target.value)}
+                  style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", fontWeight: 700 }}
+                >
+                  <option value="open">Open</option>
+                  <option value="reviewing">Reviewing</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="ignored">Ignored</option>
+                </select>
+                <Link className="btn btn-neutral btn-pill" to={`/chat/${r.target}`}>Open chat</Link>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ))}
+
+        {!filtered.length && !loading && (
+          <div className="muted" style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "#fff" }}>
+            No reports{statusFilter !== "all" ? ` with status "${statusFilter}"` : ""}.
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
+      </div>
     </div>
   );
 }
+
