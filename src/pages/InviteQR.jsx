@@ -12,7 +12,6 @@ export default function InviteQR() {
   const [expiresAt, setExpiresAt] = useState(null); // Date or null
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [note, setNote] = useState(""); // hint about static fallback, etc.
   const [ttl] = useState(DEFAULT_TTL);
   const [mode] = useState(import.meta.env.VITE_QR_MODE ?? "auto"); // 'static' | 'auto'
 
@@ -54,8 +53,6 @@ export default function InviteQR() {
   const mintNew = async () => {
     try {
       setLoading(true);
-      setNote("");
-      // Ensure current user (route is already authed/guarded, but be safe)
       const { data: { user } = {} } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
@@ -63,7 +60,6 @@ export default function InviteQR() {
       const { data, error } = await supabase.rpc("tmd_issue_qr_token", { ttl_seconds: ttl });
       if (error) throw error;
 
-      // Supabase RPC table-returns come as an array or single row depending on version
       const row = Array.isArray(data) ? data[0] : data;
       const token = row?.token;
       const exp = row?.expires_at;
@@ -73,10 +69,9 @@ export default function InviteQR() {
       setInviteUrl(url);
       setExpiresAt(exp);
       startTimer(exp);
-    } catch (e) {
-      // Graceful fallback to static if RPC not available
-      setNote("Using non-expiring beta code (secure tokens unavailable).");
-      void useStatic();
+    } catch {
+      // Graceful silent fallback to static if RPC not available
+      await useStatic();
     } finally {
       setLoading(false);
     }
@@ -121,7 +116,6 @@ export default function InviteQR() {
       await loadPublicUrl();
 
       if (mode === "static") {
-        setNote("Using non-expiring beta code (static mode).");
         await useStatic();
       } else {
         await mintNew();
@@ -154,12 +148,6 @@ export default function InviteQR() {
   return (
     <div className="container" style={{ padding: "24px 0", maxWidth: 760 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 12 }}>My Invite QR</h1>
-
-      {note && (
-        <div className="helper-muted" style={{ marginBottom: 12 }}>
-          {note}
-        </div>
-      )}
 
       <div style={{ display: "grid", placeItems: "center", gap: 12 }}>
         <div
