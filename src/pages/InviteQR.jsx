@@ -1,143 +1,123 @@
 // src/pages/InviteQR.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import { supabase } from "../lib/supabaseClient";
-
-// Configure default TTL via env or fallback to 5 minutes
-const DEFAULT_TTL = Number(import.meta.env.VITE_QR_TTL || 300);
 
 export default function InviteQR() {
   const [inviteUrl, setInviteUrl] = useState("");
   const [publicUrl, setPublicUrl] = useState("");
-  const [expiresAt, setExpiresAt] = useState(null); // Date or null
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [ttl] = useState(DEFAULT_TTL);
-  const [mode] = useState(import.meta.env.VITE_QR_MODE ?? "auto"); // 'static' | 'auto'
+  const [expUnix, setExpUnix] = useState(0); // seconds since epoch (from function)
+  const [refreshing, setRefreshing] = useState(false);
 
-  const tickRef = useRef(null);
+  // 'static' | 'auto' (auto = short-lived, rotating)
+  const mode = useMemo(() => import.meta.env.VITE_QR_MODE ?? "auto", []);
 
-  // Helper: format remaining seconds as mm:ss
-  const fmt = (s) => {
-    const m = Math.floor(s / 60);
-    const r = s % 60;
-    return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-  };
+  // helper: seconds remaining
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secsLeft = useMemo(() => Math.max(0, Math.floor(expUnix * 1000 - nowMs) / 1000 | 0), [expUnix, nowMs]);
 
-  // Stop any existing timer
-  const stopTimer = () => {
-    if (tickRef.current) {
-      clearInterval(tickRef.current);
-      tickRef.current = null;
-    }
-  };
+  // show mm:ss for countdown
+  const mmss = useMemo(() => {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }, [secsLeft]);
 
-  // Start a countdown to expiresAt
-  const startTimer = (exp) => {
-    stopTimer();
-    if (!exp) return;
-    const getLeft = () => Math.max(0, Math.floor((new Date(exp).getTime() - Date.now()) / 1000));
-    setSecondsLeft(getLeft());
-    tickRef.current = setInterval(() => {
-      const left = getLeft();
-      setSecondsLeft(left);
-      if (left <= 0) {
-        stopTimer();
-        // auto-refresh a new short-lived code
-        void mintNew();
-      }
-    }, 1000);
-  };
+  // throttle guard for manual refresh
+  const lastMintRef = useRef(0);
 
-  // Mint a short-lived token via RPC
-  const mintNew = async () => {
-    try {
-      setLoading(true);
-      const { data: { user } = {} } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      // RPC returns: [{ token, expires_at }]
-      const { data, error } = await supabase.rpc("tmd_issue_qr_token", { ttl_seconds: ttl });
-      if (error) throw error;
-
-      const row = Array.isArray(data) ? data[0] : data;
-      const token = row?.token;
-      const exp = row?.expires_at;
-      if (!token || !exp) throw new Error("Invalid token payload");
-
-      const url = `${location.origin}/connect?token=${encodeURIComponent(token)}`;
-      setInviteUrl(url);
-      setExpiresAt(exp);
-      startTimer(exp);
-    } catch {
-      // Graceful silent fallback to static if RPC not available
-      await useStatic();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Static, non-expiring code (beta fallback)
-  const useStatic = async () => {
-    try {
-      const { data: { user } = {} } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      const url = `${location.origin}/connect?u=${user.id}`;
-      setInviteUrl(url);
-      setExpiresAt(null);
-      stopTimer();
-      setSecondsLeft(0);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Load viewer handle for “Public profile”
-  const loadPublicUrl = async () => {
-    try {
-      const { data: { user } = {} } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("handle")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (prof?.handle) {
-        setPublicUrl(`${location.origin}/u/${prof.handle}`);
-      }
-    } catch {
-      /* ignore */
-    }
-  };
-
+  // load handle (for "Public profile" button)
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await loadPublicUrl();
-
-      if (mode === "static") {
-        await useStatic();
-      } else {
-        await mintNew();
-      }
-      if (cancelled) return;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+      try {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("handle")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!cancelled && prof?.handle) {
+          setPublicUrl(`${location.origin}/u/${prof.handle}`);
+        }
+      } catch {}
     })();
-    return () => {
-      cancelled = true;
-      stopTimer();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelled = true; };
+  }, []);
+
+  // STATIC fallback url (no backend)
+  async function loadStaticUrl() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setInviteUrl(`${location.origin}/connect?u=${user.id}`);
+    setExpUnix(0);
+  }
+
+  // Mint a short-lived token via Edge function (works with your mint_invite.ts)
+  async function mintShortLived() {
+    const since = Date.now();
+    if (since - lastMintRef.current < 1000) return; // soft throttle
+    lastMintRef.current = since;
+
+    setRefreshing(true);
+    try {
+      const base = import.meta.env.VITE_SUPA_FUNCTIONS_URL || "/functions/v1";
+      // Forward the user's JWT (your mint_invite expects Authorization)
+      const authToken =
+        JSON.parse(localStorage.getItem("sb-@supabase-auth-token") || "{}")?.currentSession?.access_token || "";
+
+      const res = await fetch(`${base}/mint_invite`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authToken ? `Bearer ${authToken}` : "",
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) throw new Error("Function unavailable");
+      const json = await res.json(); // { token, exp } or { url, exp }
+
+      // Build Connect URL (your Connect reads ?token= from search params)
+      const url =
+        json.url ||
+        (json.token ? `${location.origin}/connect?token=${json.token}` : null);
+      if (!url || !json.exp) throw new Error("Invalid mint payload");
+
+      setInviteUrl(url);
+      setExpUnix(Number(json.exp) || 0);
+    } catch (e) {
+      // Safe fallback to static (non-expiring)
+      await loadStaticUrl();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // initial load
+  useEffect(() => {
+    if (mode === "static") {
+      loadStaticUrl();
+      return;
+    }
+    mintShortLived();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteUrl || "");
-    } catch {
-      /* ignore */
+  // auto-refresh shortly before expiry (under 5s)
+  useEffect(() => {
+    if (mode === "static" || !expUnix) return;
+    if (secsLeft <= 5 && !refreshing) {
+      mintShortLived();
     }
-  };
+  }, [secsLeft, expUnix, mode, refreshing]);
 
-  if (loading || !inviteUrl) {
+  if (!inviteUrl) {
     return (
       <div className="container" style={{ padding: 24 }}>
         <div className="muted">Loading…</div>
@@ -149,7 +129,13 @@ export default function InviteQR() {
     <div className="container" style={{ padding: "24px 0", maxWidth: 760 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 12 }}>My Invite QR</h1>
 
-      <div style={{ display: "grid", placeItems: "center", gap: 12 }}>
+      {mode === "static" && (
+        <div className="helper-muted" style={{ marginBottom: 12 }}>
+          Beta mode: this code doesn’t expire yet. Rotating codes will be enabled later.
+        </div>
+      )}
+
+      <div style={{ display: "grid", placeItems: "center", gap: 10 }}>
         <div
           style={{
             padding: 12,
@@ -161,35 +147,38 @@ export default function InviteQR() {
           <QRCode value={inviteUrl} size={220} />
         </div>
 
-        {/* Expiry countdown when using short-lived tokens */}
-        {expiresAt && (
-          <div className="muted" style={{ fontWeight: 700 }}>
-            Expires in {fmt(secondsLeft)}
+        {/* Countdown + controls (auto mode only) */}
+        {mode !== "static" && expUnix > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            <span className="muted">Expires in <strong>{mmss}</strong></span>
+            <button
+              className="btn btn-neutral btn-pill"
+              onClick={mintShortLived}
+              disabled={refreshing}
+              title="Refresh code"
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              className="btn btn-neutral btn-pill"
+              onClick={() => navigator.clipboard.writeText(inviteUrl).catch(() => {})}
+              title="Copy link"
+            >
+              Copy link
+            </button>
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-          <button className="btn btn-neutral btn-pill" onClick={onCopy}>
-            Copy link
-          </button>
-          <button
-            className="btn btn-primary btn-pill"
-            onClick={mintNew}
-            disabled={mode === "static"}
-            title={mode === "static" ? "Static mode is non-expiring" : "Generate a new code"}
-          >
-            New code
-          </button>
-          {publicUrl && (
-            <a className="btn btn-accent btn-pill" href={publicUrl} target="_blank" rel="noreferrer">
-              Public profile
-            </a>
-          )}
-        </div>
+        {publicUrl && (
+          <a className="btn btn-primary btn-pill" href={publicUrl} target="_blank" rel="noreferrer">
+            Public profile
+          </a>
+        )}
       </div>
     </div>
   );
 }
+
 
 
 
