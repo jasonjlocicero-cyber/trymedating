@@ -34,17 +34,19 @@ export default function Header({ me, unread = 0, onSignOut }) {
             fontSize: 22,
             letterSpacing: "-0.2px",
             lineHeight: 1,
+            textDecoration: "none",
+            color: "inherit",
           }}
         >
-          {/* === Heart + wristband logo (closely matches your pasted mark) === */}
+          {/* Heart + wristband logo (inline SVG) */}
           <svg
             width="30"
             height="30"
             viewBox="0 0 64 64"
             aria-hidden="true"
+            focusable="false"
             style={{ display: "block", flex: "0 0 auto" }}
           >
-            {/* Heart outline */}
             <path
               d="M32 55
                  C29 52 21 46 16 42
@@ -62,8 +64,6 @@ export default function Header({ me, unread = 0, onSignOut }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             />
-
-            {/* Wristband (tilted ellipse) */}
             <g transform="rotate(-18 40 42)">
               <ellipse
                 cx="40"
@@ -75,17 +75,8 @@ export default function Header({ me, unread = 0, onSignOut }) {
                 strokeWidth="9"
                 strokeLinecap="round"
               />
-              {/* inner knock-out to make it look like a band, not a filled oval */}
-              <ellipse
-                cx="40"
-                cy="42"
-                rx="13"
-                ry="6.5"
-                fill="var(--bg-light)"
-              />
+              <ellipse cx="40" cy="42" rx="13" ry="6.5" fill="var(--bg-light)" />
             </g>
-
-            {/* Small notch to mimic the “gap” where the band crosses the heart */}
             <path
               d="M21 39 C23 40 25 42 27 44"
               fill="none"
@@ -95,7 +86,6 @@ export default function Header({ me, unread = 0, onSignOut }) {
             />
           </svg>
 
-          {/* Colored wordmark */}
           <span>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
             <span style={{ color: "var(--brand-teal)" }}>Me</span>
@@ -134,6 +124,8 @@ export default function Header({ me, unread = 0, onSignOut }) {
             Messages
             {unread > 0 && (
               <span
+                aria-live="polite"
+                aria-atomic="true"
                 aria-label={`${unread} unread`}
                 style={{
                   position: "absolute",
