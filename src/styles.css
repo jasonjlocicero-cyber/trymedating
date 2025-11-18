@@ -1,26 +1,71 @@
-:root{
-  --coral:#FF6B6B; --teal:#007A7A; --green:#3CCF4E; --sand:#F4EDE4; --charcoal:#2C2C2C; --white:#FFFFFF;
+/* src/styles/buttons.css */
+/* Assumes you already define:
+   --brand-teal, --brand-teal-700, --brand-coral, --border, --bg-light
+*/
+
+.btn {
+  -webkit-tap-highlight-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #111;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.1;
+  transition: transform .02s ease, box-shadow .12s ease, background .12s ease, color .12s ease, border-color .12s ease;
 }
-*{box-sizing:border-box}
-body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; color:var(--charcoal); background:var(--white)}
-a{color:inherit; text-decoration:none}
-.container{max-width:1200px;margin:0 auto;padding:0 24px}
-.shadow{box-shadow:0 8px 24px rgba(0,0,0,.06)}
-.card{border-radius:20px;border:1px solid var(--sand);background:#fff;padding:24px}
-.btn{border-radius:18px;font-weight:700;padding:12px 18px;border:0;cursor:pointer;transition:transform .1s ease}
-.btn:active{transform:translateY(2px)}
-.btn-primary{background:var(--green); color:var(--charcoal)}
-.btn-secondary{background:var(--teal); color:#fff}
-.btn-ghost{background:transparent; color:var(--teal); border:2px solid var(--teal)}
-header .bg{
-  background:
-    radial-gradient(1200px 450px at 20% -10%, rgba(255,107,107,.13), transparent),
-    radial-gradient(900px 400px at 85% -10%, rgba(0,122,122,.13), transparent);
+
+.btn:hover { box-shadow: 0 1px 5px rgba(0,0,0,.06); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: .55;
+  cursor: not-allowed;
 }
-.grid{display:grid; gap:24px}
-@media(min-width:900px){
-  .grid-2{grid-template-columns:1fr 1fr}
-  .grid-3{grid-template-columns:repeat(3, 1fr)}
+
+/* shapes */
+.btn-pill { border-radius: 999px; }
+
+/* variants */
+.btn-primary {
+  background: var(--brand-teal);
+  color: #fff;
+  border-color: var(--brand-teal-700);
 }
-details{border-radius:16px;border:1px solid var(--sand);padding:16px;background:#fff}
-footer{background:var(--sand);border-top:1px solid var(--sand)}
+.btn-primary:hover { filter: brightness(1.02); }
+.btn-primary:active { filter: brightness(.98); }
+
+.btn-accent {
+  background: #111827;
+  color: #fff;
+  border-color: #0f172a;
+}
+.btn-accent:hover { filter: brightness(1.02); }
+.btn-accent:active { filter: brightness(.98); }
+
+.btn-neutral {
+  background: #fff;
+  color: #111;
+  border-color: var(--border);
+}
+.btn-neutral:hover { background: #f8fafc; }
+.btn-neutral:active { background: #f3f4f6; }
+
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border-color: #dc2626;
+}
+.btn-danger:hover { filter: brightness(1.02); }
+.btn-danger:active { filter: brightness(.98); }
+
+/* small helper text styles (non-breaking) */
+.helper-muted { color: #6b7280; }
+.muted { color: #6b7280; }
