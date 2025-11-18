@@ -1,132 +1,164 @@
 // src/pages/AdminReports.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
-function toCSV(rows) {
-  if (!rows?.length) return "";
-  const cols = ["id","created_at","reporter","reporter_handle","target","target_handle","connection_id","category","status","details"];
-  const esc = (v) => {
-    const s = (v ?? "").toString().replaceAll('"', '""');
-    return `"${s}"`;
-  };
-  const header = cols.join(",");
-  const lines = rows.map(r => cols.map(c => esc(r[c])).join(","));
-  return [header, ...lines].join("\n");
+/**
+ * Optional access control:
+ * set VITE_ADMIN_EMAILS="owner@domain.com,moderator@domain.com"
+ * If unset, the page shows for any signed-in user (use DB RLS for true security).
+ */
+const ADMIN_EMAILS = (import.meta.env.VITE_ADMIN_EMAILS || "")
+  .split(",")
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean);
+
+const PAGE_SIZE = 20;
+
+function fmtDate(s) {
+  try { return new Date(s).toLocaleString(); } catch { return String(s || ""); }
+}
+
+function Tag({ children, tone = "muted" }) {
+  const bg =
+    tone === "ok" ? "#bbf7d0" :
+    tone === "warn" ? "#fde68a" :
+    tone === "bad" ? "#fecaca" :
+    "#f3f4f6";
+  const color =
+    tone === "ok" ? "#14532d" :
+    tone === "warn" ? "#7c2d12" :
+    tone === "bad" ? "#7f1d1d" :
+    "#111827";
+  return (
+    <span style={{
+      padding: "2px 8px",
+      borderRadius: 999,
+      fontSize: 12,
+      fontWeight: 800,
+      background: bg,
+      color
+    }}>
+      {children}
+    </span>
+  );
 }
 
 export default function AdminReports() {
   const [me, setMe] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
 
+  // data
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(0);
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // filters
+  const [q, setQ] = useState("");
+  const [category, setCategory] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [fromDate, setFromDate] = useState(""); // yyyy-mm-dd
+  const [toDate, setToDate] = useState("");     // yyyy-mm-dd
+
+  // bootstrap auth
   useEffect(() => {
     let alive = true;
     (async () => {
-      const { data: { user } = {} } = await supabase.auth.getUser();
-      if (!alive) return;
-      setMe(user ?? null);
-      if (!user) { setLoading(false); return; }
-      const { data: adminRow } = await supabase
-        .from("app_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      setIsAdmin(!!adminRow?.user_id);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (alive) setMe(user || null);
     })();
     return () => { alive = false; };
   }, []);
 
-  const load = async () => {
-    if (!isAdmin) { setLoading(false); return; }
-    setLoading(true); setErr("");
+  const isAllowed = useMemo(() => {
+    if (!me?.email) return false;
+    if (!ADMIN_EMAILS.length) return true; // open if not configured
+    return ADMIN_EMAILS.includes(String(me.email).toLowerCase());
+  }, [me?.email]);
+
+  const resetAndLoad = useCallback(() => loadPage(true), []); // eslint-disable-line
+  const more = useCallback(() => loadPage(false), []);        // eslint-disable-line
+
+  async function loadPage(reset = false) {
+    if (!me?.id || loading || (done && !reset)) return;
+    setLoading(true); setError("");
+
     try {
-      const { data: rows, error } = await supabase
+      const pageIndex = reset ? 0 : page;
+      const from = pageIndex * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      // Choose a wide set of columns; if some don't exist, Supabase will still return what it can.
+      let query = supabase
         .from("reports")
-        .select("*")
-        .order("created_at", { ascending: false });
+        .select("id, created_at, category, subcategory, status, notes, reporter, target_user, target_message")
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (category !== "all") query = query.eq("category", category);
+      if (status !== "all") query = query.eq("status", status);
+      if (fromDate) query = query.gte("created_at", `${fromDate}T00:00:00Z`);
+      if (toDate) query = query.lte("created_at", `${toDate}T23:59:59.999Z`);
+
+      // rudimentary "search" — try against notes and category; adapt as needed
+      if (q.trim()) {
+        const like = `%${q.trim()}%`;
+        query = query.or(`notes.ilike.${like},category.ilike.${like},subcategory.ilike.${like}`);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
-      // Enrich handles
-      const ids = Array.from(new Set(rows.flatMap(r => [r.reporter, r.target].filter(Boolean))));
-      let handles = new Map();
-      if (ids.length) {
-        const { data: profs } = await supabase
-          .from("profiles")
-          .select("user_id, handle, display_name")
-          .in("user_id", ids);
-        for (const p of (profs || [])) {
-          handles.set(p.user_id, p.display_name || p.handle || p.user_id);
-        }
+      const rows = data || [];
+      if (reset) {
+        setItems(rows);
+        setPage(1);
+        setDone(rows.length < PAGE_SIZE);
+      } else {
+        setItems(prev => [...prev, ...rows]);
+        setPage(pageIndex + 1);
+        if (rows.length < PAGE_SIZE) setDone(true);
       }
-      const out = rows.map(r => ({
-        ...r,
-        reporter_handle: handles.get(r.reporter) || r.reporter,
-        target_handle: handles.get(r.target) || r.target,
-      }));
-      setItems(out);
     } catch (e) {
-      setErr(e.message || "Failed to load reports.");
+      setError(e.message || "Failed to load reports.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  useEffect(() => { if (isAdmin) load(); }, [isAdmin]); // eslint-disable-line
+  // reload when filters change
+  useEffect(() => {
+    if (me?.id && isAllowed) loadPage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id, isAllowed, category, status, fromDate, toDate]);
 
-  const filtered = useMemo(() => {
-    const s = (q || "").toLowerCase();
-    return items.filter(r => {
-      if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (!s) return true;
-      const hay = `${r.category} ${r.details} ${r.reporter_handle} ${r.target_handle} ${r.id}`.toLowerCase();
-      return hay.includes(s);
-    });
-  }, [items, q, statusFilter]);
-
-  const updateStatus = async (id, status) => {
-    const prev = items.slice();
-    setItems(items.map(r => r.id === id ? { ...r, status } : r));
-    const { error } = await supabase
-      .from("reports")
-      .update({ status })
-      .eq("id", id);
-    if (error) {
-      setItems(prev);
-      alert(error.message || "Update failed");
-    }
-  };
-
-  const exportCSV = () => {
-    const csv = toCSV(filtered);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `reports_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
+  const csvUrl = useMemo(() => {
+    const base = (import.meta.env.VITE_SUPA_FUNCTIONS_URL || "/functions/v1") + "/export_reports_csv";
+    const params = new URLSearchParams();
+    if (fromDate) params.set("since", `${fromDate}T00:00:00Z`);
+    if (toDate) params.set("until", `${toDate}T23:59:59.999Z`);
+    const qs = params.toString();
+    return qs ? `${base}?${qs}` : base;
+  }, [fromDate, toDate]);
 
   if (!me) {
     return (
       <div className="container" style={{ padding: 24 }}>
+        <h1 style={{ fontWeight: 900 }}>Admin: Reports</h1>
         <div className="muted">Please sign in.</div>
       </div>
     );
   }
-  if (!isAdmin) {
+
+  if (!isAllowed) {
     return (
       <div className="container" style={{ padding: 24 }}>
-        <h2 style={{ fontWeight: 800, marginBottom: 8 }}>Admin Reports</h2>
-        <div className="muted">You don’t have access to this page.</div>
-        <div style={{ marginTop: 12 }}>
+        <h1 style={{ fontWeight: 900 }}>Admin: Reports</h1>
+        <div className="muted" style={{ marginTop: 8 }}>
+          Access restricted. Ask an owner to add your address to <code>VITE_ADMIN_EMAILS</code>.
+        </div>
+        <div style={{ marginTop: 16 }}>
           <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
         </div>
       </div>
@@ -134,76 +166,128 @@ export default function AdminReports() {
   }
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 1000 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+    <div className="container" style={{ padding: 24, maxWidth: 1040 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ fontWeight: 800, marginBottom: 4 }}>Admin Reports</h2>
-          <div className="muted">Newest first. Update status or export to CSV.</div>
+          <h1 style={{ fontWeight: 900, marginBottom: 6 }}>Admin: Reports</h1>
+          <div className="muted">Review user reports, filter, and export CSV.</div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            className="input"
-            placeholder="Search text/handles/id…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            style={{ minWidth: 220 }}
-          />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", fontWeight: 700 }}
-          >
-            <option value="all">All</option>
-            <option value="open">Open</option>
-            <option value="reviewing">Reviewing</option>
-            <option value="resolved">Resolved</option>
-            <option value="ignored">Ignored</option>
-          </select>
-          <button className="btn btn-neutral btn-pill" onClick={exportCSV} disabled={!filtered.length}>Export CSV</button>
-          <button className="btn btn-primary btn-pill" onClick={load} disabled={loading}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <a className="btn btn-primary btn-pill" href={csvUrl}>
+            Download CSV
+          </a>
+          <button className="btn btn-neutral btn-pill" onClick={resetAndLoad} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </div>
 
-      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
+      {/* filters */}
+      <div style={{
+        marginTop: 12,
+        padding: 12,
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        background: "#fff",
+        display: "grid",
+        gap: 10,
+        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))"
+      }}>
+        <input
+          className="input"
+          placeholder="Search (category / notes)"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") resetAndLoad(); }}
+        />
+        <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="all">All categories</option>
+          <option value="spam">Spam</option>
+          <option value="harassment">Harassment</option>
+          <option value="inappropriate">Inappropriate</option>
+          <option value="other">Other</option>
+        </select>
+        <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="open">Open</option>
+          <option value="under_review">Under review</option>
+          <option value="resolved">Resolved</option>
+          <option value="dismissed">Dismissed</option>
+        </select>
+        <input className="input" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        <input className="input" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        <button className="btn btn-neutral btn-pill" onClick={resetAndLoad} disabled={loading}>Apply</button>
+      </div>
 
-      <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-        {filtered.map(r => (
-          <div key={r.id} style={{ border: "1px solid var(--border)", borderRadius: 12, background: "#fff", padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ display: "grid", gap: 4 }}>
-                <div style={{ fontWeight: 800 }}>
-                  {r.category} <span className="muted" style={{ fontWeight: 400 }}>• {new Date(r.created_at).toLocaleString()}</span>
+      {error && (
+        <div style={{ marginTop: 12, border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "#fff5f5", color: "#7f1d1d" }}>
+          {error}
+        </div>
+      )}
+
+      {/* list */}
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {items.map((r) => {
+          const cat = (r.category || "other").toString();
+          const st = (r.status || "open").toString();
+          const tone =
+            st === "resolved" ? "ok" :
+            st === "dismissed" ? "bad" :
+            st === "under_review" ? "warn" : "muted";
+
+          return (
+            <div key={r.id} style={{
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              background: "#fff",
+              padding: 12,
+              display: "grid",
+              gap: 8
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <strong>Report</strong>
+                  <Tag>{cat}</Tag>
+                  <Tag tone={tone}>{st}</Tag>
                 </div>
-                <div className="muted" style={{ fontSize: 13 }}>
-                  From <b>{r.reporter_handle}</b> → <b>{r.target_handle}</b> {r.connection_id ? <> • <code>{r.connection_id.slice(0,8)}</code></> : null}
-                </div>
-                {r.details && (
-                  <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{r.details}</div>
-                )}
+                <div className="muted">{fmtDate(r.created_at)}</div>
               </div>
-              <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
-                <select
-                  value={r.status}
-                  onChange={(e) => updateStatus(r.id, e.target.value)}
-                  style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "6px 10px", fontWeight: 700 }}
-                >
-                  <option value="open">Open</option>
-                  <option value="reviewing">Reviewing</option>
-                  <option value="resolved">Resolved</option>
-                  <option value="ignored">Ignored</option>
-                </select>
-                <Link className="btn btn-neutral btn-pill" to={`/chat/${r.target}`}>Open chat</Link>
+
+              <div style={{ display: "grid", gap: 6 }}>
+                {r.subcategory && (
+                  <div className="muted"><strong>Subcategory:</strong> {r.subcategory}</div>
+                )}
+                {r.notes && (
+                  <div style={{ whiteSpace: "pre-wrap" }}>
+                    <strong>Notes:</strong> <span className="muted">{r.notes}</span>
+                  </div>
+                )}
+                <div className="muted" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {r.reporter && <span><strong>Reporter:</strong> {r.reporter}</span>}
+                  {r.target_user && <span><strong>Target user:</strong> {r.target_user}</span>}
+                  {r.target_message && <span><strong>Target message:</strong> {r.target_message}</span>}
+                  {r.id && <span title={r.id}><strong>ID:</strong> {String(r.id).slice(0, 8)}…</span>}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
-        {!filtered.length && !loading && (
+        {!items.length && !loading && (
           <div className="muted" style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "#fff" }}>
-            No reports{statusFilter !== "all" ? ` with status "${statusFilter}"` : ""}.
+            No reports found for the current filters.
           </div>
+        )}
+      </div>
+
+      {/* pager */}
+      <div style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
+        {!done ? (
+          <button className="btn btn-neutral btn-pill" onClick={more} disabled={loading}>
+            {loading ? "Loading…" : "Load more"}
+          </button>
+        ) : (
+          items.length > 0 && <div className="helper-muted">End of list</div>
         )}
       </div>
 
