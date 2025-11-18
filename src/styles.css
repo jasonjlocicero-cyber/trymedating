@@ -3,6 +3,7 @@
    --brand-teal, --brand-teal-700, --brand-coral, --border, --bg-light
 */
 
+/* ===== Base ===== */
 .btn {
   -webkit-tap-highlight-color: transparent;
   display: inline-flex;
@@ -19,7 +20,12 @@
   cursor: pointer;
   text-decoration: none;
   line-height: 1.1;
-  transition: transform .02s ease, box-shadow .12s ease, background .12s ease, color .12s ease, border-color .12s ease;
+  transition:
+    transform .02s ease,
+    box-shadow .12s ease,
+    background .12s ease,
+    color .12s ease,
+    border-color .12s ease;
 }
 
 .btn:hover { box-shadow: 0 1px 5px rgba(0,0,0,.06); }
@@ -30,10 +36,17 @@
   cursor: not-allowed;
 }
 
-/* shapes */
+/* Keyboard focus (a11y) — subtle teal ring, no visual change otherwise */
+.btn:focus { outline: none; }
+.btn:focus-visible {
+  border-color: var(--brand-teal-700);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.25);
+}
+
+/* ===== Shapes ===== */
 .btn-pill { border-radius: 999px; }
 
-/* variants */
+/* ===== Variants (unchanged visuals) ===== */
 .btn-primary {
   background: var(--brand-teal);
   color: #fff;
@@ -66,6 +79,59 @@
 .btn-danger:hover { filter: brightness(1.02); }
 .btn-danger:active { filter: brightness(.98); }
 
-/* small helper text styles (non-breaking) */
+/* ===== Small helpers already used around the app ===== */
 .helper-muted { color: #6b7280; }
 .muted { color: #6b7280; }
+
+/* ===== Optional utilities (non-breaking) ===== */
+
+/* Sizes */
+.btn-sm { padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+.btn-lg { padding: 12px 16px; border-radius: 12px; font-size: 16px; }
+
+/* Full-width */
+.btn-block { width: 100%; }
+
+/* Ghost (transparent) — useful for secondary actions in cards/toolbars */
+.btn-ghost {
+  background: transparent;
+  color: #111;
+  border-color: var(--border);
+}
+.btn-ghost:hover { background: #f8fafc; }
+.btn-ghost:active { background: #f3f4f6; }
+
+/* Outline (subtle bordered style) */
+.btn-outline {
+  background: transparent;
+  color: #111;
+  border-color: var(--brand-teal-700);
+}
+.btn-outline:hover { background: rgba(20, 184, 166, 0.06); }
+.btn-outline:active { background: rgba(20, 184, 166, 0.1); }
+
+/* Optional loading state (opt-in via .is-loading) */
+.btn.is-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: .9;
+}
+.btn.is-loading::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: tmd-spin .8s linear infinite;
+  margin-left: 6px;
+}
+@keyframes tmd-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced motion: tone down the tiny press movement */
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: box-shadow .12s ease, background .12s ease, color .12s ease, border-color .12s ease; }
+  .btn:active { transform: none; }
+}
