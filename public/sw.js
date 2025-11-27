@@ -28,7 +28,6 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
 
-  // Only handle GET
   if (req.method !== "GET") return;
 
   const isNavigation =
@@ -36,13 +35,9 @@ self.addEventListener("fetch", (event) => {
     (req.destination === "" && req.headers.get("accept")?.includes("text/html"));
 
   if (isNavigation) {
-    // Network-first for SPA routes, fallback to offline.html
     event.respondWith(
       fetch(req)
-        .then((res) => {
-          // Update cache copy of index.html implicitly via ASSETS if needed
-          return res;
-        })
+        .then((res) => res)
         .catch(async () => {
           const cache = await caches.open(CACHE);
           return cache.match("/offline.html");
@@ -51,19 +46,18 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // For same-origin static GETs: cache-first
   const url = new URL(req.url);
   if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(req).then((cached) =>
         cached ||
         fetch(req).then((res) => {
-          // Optionally cache new static responses
           const clone = res.clone();
           caches.open(CACHE).then((c) => c.put(req, clone)).catch(() => {});
           return res;
-        }).catch(() => cached) // fallback to cache if fetch fails
+        }).catch(() => cached)
       )
     );
   }
 });
+
