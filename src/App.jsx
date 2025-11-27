@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom' // ⬅️ added useLocation
+import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
 
@@ -21,7 +21,7 @@ import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'
 import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
-import Report from './pages/Report' // if not present, remove this import
+import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
 
 // Components/Routes
@@ -67,7 +67,7 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
-          {/* Primary CTAs (only hero buttons — no “continue” strip anywhere) */}
+          {/* Primary CTAs */}
           <div
             style={{
               display: 'flex',
@@ -80,14 +80,16 @@ function Home({ me }) {
           >
             {!authed ? (
               <>
-                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
+                {/* constant coral */}
+                <Link className="btn btn-coral btn-pill" to="/auth">Sign in / Sign up</Link>
                 <a className="btn btn-neutral btn-pill" href="#how-it-works">How it works</a>
               </>
             ) : (
               <>
-                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
-                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
+                {/* constant coral on all three */}
+                <Link className="btn btn-coral btn-pill" to="/profile">Go to Profile</Link>
+                <Link className="btn btn-coral btn-pill" to="/connections">Connections</Link>
+                <Link className="btn btn-coral btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
           </div>
@@ -216,9 +218,9 @@ function FeatureCard({ title, text, icon }) {
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [unread, setUnread] = useState(0) // unread count for messaging badge
+  const [unread, setUnread] = useState(0)
 
-  // ⬇️ HIDE the floating ChatLauncher when on any /chat* route to prevent “double chat”
+  // Hide floating ChatLauncher on /chat* routes
   const { pathname } = useLocation()
   const showChatLauncher = !pathname.startsWith('/chat')
 
@@ -288,7 +290,7 @@ export default function App() {
               element={me ? <Connections /> : <Navigate to="/auth" replace />}
             />
 
-            {/* Optional report page (guarded). If you don’t have Report.jsx yet, delete these two lines. */}
+            {/* Optional report page (guarded) */}
             <Route
               path="/report/:peerId"
               element={me ? <Report /> : <Navigate to="/auth" replace />}
@@ -315,16 +317,15 @@ export default function App() {
               path="/chat/handle/:handle"
               element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
             />
-            
+
             {/* Invite QR */}
             <Route
               path="/invite"
               element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
             />
-            <Route 
-              path="/admin/reports" 
-              element={<AdminReports />} 
-            />
+
+            <Route path="/admin/reports" element={<AdminReports />} />
+
             {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
 
