@@ -1,4 +1,44 @@
+# netlify.toml
+
+# (Optional) If you prefer being explicit:
+# [build]
+#   command = "npm run build"
+#   publish = "dist"
+
+# SPA fallback (keep your existing redirect)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Global security headers
+[[headers]]
+for = "/*"
+  [headers.values]
+  Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+  Content-Security-Policy = '''
+    default-src 'self';
+    connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in;
+    img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
+    media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in;
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    font-src 'self' data:;
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+    frame-ancestors 'none'
+  '''
+  Referrer-Policy = "no-referrer"
+  Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+  X-Content-Type-Options = "nosniff"
+  Cross-Origin-Resource-Policy = "same-origin"
+  Cross-Origin-Opener-Policy = "same-origin"
+  X-Frame-Options = "DENY"
+
+# If you serve a service worker
+[[headers]]
+for = "/service-worker.js"
+  [headers.values]
+  Service-Worker-Allowed = "/"
+  Cache-Control = "no-store"
