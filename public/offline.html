@@ -1,0 +1,94 @@
+<!-- public/offline.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TryMeDating — Offline</title>
+    <meta name="theme-color" content="#14b8a6" />
+    <style>
+      :root{
+        /* brand fallbacks for this standalone page */
+        --brand-teal:#14b8a6;
+        --brand-teal-700:#0d9488;
+        --brand-coral:#ef635f;
+        --border:#e5e7eb;
+        --bg:#ffffff;
+        --text:#111827;
+        --muted:#6b7280;
+      }
+      html,body{height:100%}
+      body{
+        margin:0;
+        background:var(--bg);
+        color:var(--text);
+        font:16px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+        -webkit-font-smoothing:antialiased;
+        -moz-osx-font-smoothing:grayscale;
+        padding: env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);
+      }
+      .wrap{min-height:100%;display:grid;place-items:center;padding:24px}
+      .card{
+        width:min(560px, 100%);
+        border:1px solid var(--border);
+        border-radius:16px;
+        padding:20px;
+        box-shadow:0 2px 16px rgba(0,0,0,.06);
+        background:#fff;
+        text-align:center;
+      }
+      .brand{display:flex;gap:10px;align-items:center;justify-content:center;margin-bottom:8px}
+      .brand span{font-weight:900;letter-spacing:-.2px;font-size:22px}
+      .muted{color:var(--muted)}
+      .btn{
+        display:inline-flex;align-items:center;justify-content:center;
+        padding:10px 14px;border-radius:999px;border:1px solid var(--brand-teal-700);
+        background:var(--brand-teal);color:#fff;font-weight:800;cursor:pointer;text-decoration:none
+      }
+      .btn:active{transform:translateY(1px)}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card" role="status" aria-live="polite">
+        <div class="brand" aria-label="TryMeDating">
+          <!-- inline logo mark, tuned to your header glyph -->
+          <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M32 55 C29 52 21 46 16 42 C9 36 6 31 6 25 C6 19 11 14 17 14 C21 14 25 16 28 20 C31 16 35 14 39 14 C45 14 50 19 50 25 C50 33 44 38 37 43 C35 45 33.5 46.1 32 47.2 Z"
+              fill="none" stroke="var(--brand-coral)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <g transform="rotate(-18 40 42)">
+              <ellipse cx="40" cy="42" rx="18" ry="9" fill="none" stroke="var(--brand-teal)" stroke-width="9" stroke-linecap="round"/>
+              <ellipse cx="40" cy="42" rx="13" ry="6.5" fill="#fff"/>
+            </g>
+            <path d="M21 39 C23 40 25 42 27 44" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+          </svg>
+          <span>
+            <span style="color:var(--brand-teal)">Try</span>
+            <span style="color:var(--brand-teal)">Me</span>
+            <span style="color:var(--brand-coral)">Dating</span>
+          </span>
+        </div>
+
+        <h1 style="margin:6px 0 4px;font-size:22px;font-weight:900">You’re offline</h1>
+        <p class="muted" style="margin:0 0 14px">
+          Looks like your connection dropped. You can still open the app shell, but live data
+          (auth, messages) needs a connection.
+        </p>
+
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn" onclick="location.reload()">Retry</button>
+          <a class="btn" style="background:#111827;border-color:#0f172a" href="/">Back home</a>
+        </div>
+
+        <p class="muted" style="margin-top:14px;font-size:13px">
+          Tip: once connected, the app will update itself automatically.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      // If network returns while on this page, try to auto return.
+      addEventListener('online', () => location.replace('/'));
+    </script>
+  </body>
+</html>
