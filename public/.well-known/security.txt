@@ -1,0 +1,6 @@
+Contact: mailto:security@trymedating.com
+Contact: https://trymedating.com/contact
+Policy: https://trymedating.com/terms
+Preferred-Languages: en
+Canonical: https://trymedating.com/.well-known/security.txt
+Expires: 2026-11-27T00:00:00Z
