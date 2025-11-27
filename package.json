@@ -30,7 +30,13 @@
   "optionalDependencies": {
     "sharp": "^0.33.3",
     "to-ico": "^1.4.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.2.0",
+    "vite-plugin-pwa": "^0.20.0"
   }
 }
+
 
 
