@@ -22,7 +22,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
           padding: "10px 0",
         }}
       >
-        {/* Brand (icon + wordmark) */}
+        {/* Brand (exact PNG mark + wordmark) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -38,54 +38,20 @@ export default function Header({ me, unread = 0, onSignOut }) {
             color: "inherit",
           }}
         >
-          {/* Heart + wristband logo (inline SVG) */}
-          <svg
+          <img
+            src="/logo-mark.png"          /* place your exact logo at public/logo-mark.png */
+            alt="TryMeDating logo"
             width="30"
             height="30"
-            viewBox="0 0 64 64"
-            aria-hidden="true"
-            focusable="false"
-            style={{ display: "block", flex: "0 0 auto" }}
-          >
-            <path
-              d="M32 55
-                 C29 52 21 46 16 42
-                 C9 36 6 31 6 25
-                 C6 19 11 14 17 14
-                 C21 14 25 16 28 20
-                 C31 16 35 14 39 14
-                 C45 14 50 19 50 25
-                 C50 33 44 38 37 43
-                 C35 45 33.5 46.1 32 47.2
-                 Z"
-              fill="none"
-              stroke="var(--brand-coral)"
-              strokeWidth="4.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <g transform="rotate(-18 40 42)">
-              <ellipse
-                cx="40"
-                cy="42"
-                rx="18"
-                ry="9"
-                fill="none"
-                stroke="var(--brand-teal)"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-              <ellipse cx="40" cy="42" rx="13" ry="6.5" fill="var(--bg-light)" />
-            </g>
-            <path
-              d="M21 39 C23 40 25 42 27 44"
-              fill="none"
-              stroke="var(--bg-light)"
-              strokeWidth="6"
-              strokeLinecap="round"
-            />
-          </svg>
-
+            decoding="async"
+            loading="eager"
+            style={{
+              display: "block",
+              flex: "0 0 auto",
+              transform: "translateY(1px)", // tiny baseline nudge for perfect alignment
+              imageRendering: "-webkit-optimize-contrast",
+            }}
+          />
           <span>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
             <span style={{ color: "var(--brand-teal)" }}>Me</span>
@@ -168,6 +134,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   );
 }
+
 
 
 
