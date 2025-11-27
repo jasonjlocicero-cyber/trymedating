@@ -218,7 +218,15 @@ button, .btn { min-height: 44px; }
 .btn-primary:hover { filter: brightness(1.02); }
 .btn-primary:active { filter: brightness(.98); }
 
-/* Dark accent (keep for "Sign out" etc.) */
+/* NEW: constant coral button (no black) */
+.btn-coral{
+  background: var(--brand-coral);
+  color: #fff;
+  border-color: var(--brand-coral);
+}
+.btn-coral:hover{ filter: brightness(1.02); }
+.btn-coral:active{ filter: brightness(.98); }
+
 .btn-accent {
   background: #111827;
   color: #fff;
@@ -226,15 +234,6 @@ button, .btn { min-height: 44px; }
 }
 .btn-accent:hover { filter: brightness(1.02); }
 .btn-accent:active { filter: brightness(.98); }
-
-/* NEW: Constant coral CTAs */
-.btn-coral {
-  background: var(--brand-coral);
-  color: #fff;
-  border-color: #e11d48; /* coral-700-ish */
-}
-.btn-coral:hover { filter: brightness(1.02); }
-.btn-coral:active { filter: brightness(.98); }
 
 .btn-neutral {
   background: #fff;
