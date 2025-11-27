@@ -1,0 +1,23 @@
+name: security-zap-baseline
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # every Monday 06:00 UTC
+  workflow_dispatch:       # allow manual runs
+
+jobs:
+  zap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ZAP Baseline Scan (production)
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: https://trymedating.com
+          cmd_options: >-
+            -a                      # fail only on medium/high alerts
+            -m 10                   # max 10 minutes (tweak as desired)
+            -x zap-report.html      # produce HTML report
+      - name: Upload ZAP HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-report.html
