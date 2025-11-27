@@ -1,4 +1,162 @@
-/* src/styles/buttons.css */
+/* ==========================================================================
+   TryMeDating – Global Styles (mobile-friendly, safe-area aware)
+   ========================================================================== */
+
+/* ---------- CSS Variables / Theme ---------- */
+:root {
+  --brand-teal: #14b8a6;
+  --brand-teal-700: #0f766e;
+  --brand-coral: #f43f5e;
+
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --bg-light: #ffffff;
+
+  /* iOS safe areas */
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* ---------- Base / Reset ---------- */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--text);
+  background: var(--bg-light);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* Links */
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Selection */
+::selection { background: rgba(20,184,166,.18); }
+
+/* Utility containers */
+.container {
+  width: min(100% - 24px, 1100px);
+  margin-inline: auto;
+}
+
+/* Visually hidden (a11y) */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0);
+  white-space: nowrap; border: 0;
+}
+
+/* ---------- Layout Chrome ---------- */
+.site-header {
+  background: var(--bg-light);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 4px rgba(0,0,0,.04);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  background: #fff;
+  padding: 16px 0 24px;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.site-main {
+  /* Prefer dynamic viewport to avoid iOS 100vh jumps */
+  min-height: 100dvh;
+}
+
+/* Cards */
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+
+/* ---------- Forms ---------- */
+.input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  transition: border-color .12s ease, box-shadow .12s ease, background .12s ease;
+}
+
+.input:focus {
+  border-color: var(--brand-teal-700);
+  box-shadow: 0 0 0 3px rgba(20,184,166,.25);
+}
+
+.form-label {
+  display: grid;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* Textarea consistent look */
+textarea.input {
+  resize: vertical;
+}
+
+/* ---------- Avatars (used by Profile/Connections) ---------- */
+.avatar-frame {
+  display: grid;
+  place-items: center;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #fff;
+  overflow: hidden;
+}
+
+.avatar-initials {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #111;
+  font-weight: 900;
+  font-size: 40px;
+  letter-spacing: .5px;
+}
+
+/* ---------- Helpers ---------- */
+.helper-muted { color: var(--muted); }
+.muted { color: var(--muted); }
+
+/* Tap target comfort for mobile */
+button, .btn { min-height: 44px; }
+
+/* ==========================================================================
+   BUTTONS (from your request; unchanged visuals w/ a11y focus ring)
+   ========================================================================== */
+
 /* Assumes you already define:
    --brand-teal, --brand-teal-700, --brand-coral, --border, --bg-light
 */
@@ -126,12 +284,43 @@
   animation: tmd-spin .8s linear infinite;
   margin-left: 6px;
 }
-@keyframes tmd-spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes tmd-spin { to { transform: rotate(360deg); } }
 
-/* Reduced motion: tone down the tiny press movement */
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .btn { transition: box-shadow .12s ease, background .12s ease, color .12s ease, border-color .12s ease; }
   .btn:active { transform: none; }
 }
+
+/* ==========================================================================
+   Small component bits that appear across pages
+   ========================================================================== */
+
+/* Status pill (Connections/Chat headers) */
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* QR container helper */
+.qr-frame {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* Scroll containers (e.g., message list) – mobile-friendly max-height */
+.scroll-area {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  max-height: min(60dvh, 520px);
+}
+
