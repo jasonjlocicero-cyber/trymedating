@@ -1,1 +1,8 @@
+public/icons/
+  logo-192.png
+  logo-512.png
+  maskable-192.png
+  maskable-512.png
+  apple-touch-icon.png   (180×180)
+public/favicon.ico       (16/32 px multi-size .ico)
 
