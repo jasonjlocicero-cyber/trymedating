@@ -28,15 +28,11 @@ import AdminReports from './pages/AdminReports'
 import ConnectionToast from './components/ConnectionToast'
 import Connect from './routes/Connect'
 
-/** --------------------------
- * Home (hero + features)
- * ------------------------- */
 function Home({ me }) {
   const authed = !!me?.id
 
   return (
     <div style={{ background: '#fff' }}>
-      {/* HERO */}
       <section style={{ padding: '52px 0 36px', borderBottom: '1px solid var(--border)' }}>
         <div
           className="container"
@@ -67,7 +63,7 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
-          {/* Primary CTAs */}
+          {/* ORIGINAL PALETTE */}
           <div
             style={{
               display: 'flex',
@@ -80,16 +76,16 @@ function Home({ me }) {
           >
             {!authed ? (
               <>
-                {/* constant coral */}
-                <Link className="btn btn-coral btn-pill" to="/auth">Sign in / Sign up</Link>
+                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
                 <a className="btn btn-neutral btn-pill" href="#how-it-works">How it works</a>
               </>
             ) : (
               <>
-                {/* constant coral on all three */}
-                <Link className="btn btn-coral btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-coral btn-pill" to="/connections">Connections</Link>
-                <Link className="btn btn-coral btn-pill" to="/invite">My Invite QR</Link>
+                {/* teal primary */}
+                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
+                {/* dark accent (black) */}
+                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
+                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
           </div>
@@ -110,11 +106,9 @@ function Home({ me }) {
         </div>
       </section>
 
-      {/* HOW IT WORKS */}
       <section id="how-it-works" style={{ padding: '28px 0' }}>
         <div className="container" style={{ maxWidth: 960 }}>
           <h2 style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
-
           <div
             style={{
               display: 'grid',
@@ -122,31 +116,14 @@ function Home({ me }) {
               gap: 16
             }}
           >
-            <FeatureCard
-              title="Create"
-              text="Set up a simple profile with your name and a short intro. Choose if it’s public."
-              icon="🧩"
-            />
-            <FeatureCard
-              title="Share"
-              text="Show your personal QR code to people you’ve met in real life to invite them."
-              icon="🔗"
-            />
-            <FeatureCard
-              title="Match"
-              text="You both must accept—this isn’t a browse-everyone app; it’s about real connections."
-              icon="🤝"
-            />
-            <FeatureCard
-              title="Message"
-              text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)."
-              icon="💬"
-            />
+            <FeatureCard title="Create" text="Set up a simple profile with your name and a short intro. Choose if it’s public." icon="🧩" />
+            <FeatureCard title="Share" text="Show your personal QR code to people you’ve met in real life to invite them." icon="🔗" />
+            <FeatureCard title="Match" text="You both must accept—this isn’t a browse-everyone app; it’s about real connections." icon="🤝" />
+            <FeatureCard title="Message" text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)." icon="💬" />
           </div>
         </div>
       </section>
 
-      {/* SAFETY / PRIVACY STRIP */}
       <section
         style={{
           padding: '18px 0',
@@ -170,39 +147,24 @@ function Home({ me }) {
           <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
         </div>
       </section>
-
-      {/* IMPORTANT: keep this area empty */}
     </div>
   )
 }
 
-/** Presentational card for features */
 function FeatureCard({ title, text, icon }) {
   return (
-    <div
-      className="card"
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 12,
-        padding: 16,
-        background: '#fff',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-      }}
-    >
+    <div className="card" style={{
+      border: '1px solid var(--border)',
+      borderRadius: 12,
+      padding: 16,
+      background: '#fff',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+    }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            display: 'grid',
-            placeItems: 'center',
-            background: '#f8fafc',
-            border: '1px solid var(--border)',
-            fontSize: 16
-          }}
-          aria-hidden
-        >
+        <div style={{
+          width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
+          background: '#f8fafc', border: '1px solid var(--border)', fontSize: 16
+        }} aria-hidden>
           <span>{icon}</span>
         </div>
         <div style={{ fontWeight: 800 }}>{title}</div>
@@ -212,19 +174,13 @@ function FeatureCard({ title, text, icon }) {
   )
 }
 
-/** --------------------------
- * App Root
- * ------------------------- */
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
-
-  // Hide floating ChatLauncher on /chat* routes
   const { pathname } = useLocation()
   const showChatLauncher = !pathname.startsWith('/chat')
 
-  // Safe auth bootstrap with fallback timer
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -260,8 +216,6 @@ export default function App() {
   return (
     <ChatProvider renderDock={false}>
       <Header me={me} unread={unread} onSignOut={handleSignOut} />
-
-      {/* Global toast for inbound connection requests (Accept/Reject) */}
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
@@ -272,67 +226,22 @@ export default function App() {
         ) : (
           <Routes>
             <Route path="/" element={<Home me={me} />} />
-
-            {/* Auth */}
             <Route path="/auth" element={<AuthPage />} />
-
-            {/* Private routes (basic guard) */}
-            <Route
-              path="/profile"
-              element={me ? <ProfilePage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/settings"
-              element={me ? <SettingsPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/connections"
-              element={me ? <Connections /> : <Navigate to="/auth" replace />}
-            />
-
-            {/* Optional report page (guarded) */}
-            <Route
-              path="/report/:peerId"
-              element={me ? <Report /> : <Navigate to="/auth" replace />}
-            />
-
-            {/* Public profile */}
+            <Route path="/profile" element={me ? <ProfilePage /> : <Navigate to="/auth" replace />} />
+            <Route path="/settings" element={me ? <SettingsPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/connections" element={me ? <Connections /> : <Navigate to="/auth" replace />} />
+            <Route path="/report/:peerId" element={me ? <Report /> : <Navigate to="/auth" replace />} />
             <Route path="/u/:handle" element={<PublicProfile />} />
-
-            {/* Static pages */}
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
-
-            {/* Direct chat routes */}
-            <Route
-              path="/chat/:peerId"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-            <Route
-              path="/chat/handle/:handle"
-              element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />}
-            />
-
-            {/* Invite QR */}
-            <Route
-              path="/invite"
-              element={me ? <InviteQR /> : <Navigate to="/auth" replace />}
-            />
-
+            <Route path="/chat/:peerId" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/chat" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/chat/handle/:handle" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+            <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
             <Route path="/admin/reports" element={<AdminReports />} />
-
-            {/* QR Smoke Test */}
             <Route path="/debug-qr" element={<DebugQR />} />
-
-            {/* QR scan route to create a pending connection request */}
             <Route path="/connect" element={<Connect me={me} />} />
-
-            {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         )}
@@ -340,13 +249,13 @@ export default function App() {
 
       <Footer />
 
-      {/* Bottom-right chat bubble (render once, but NOT on /chat*) */}
       {showChatLauncher && (
         <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
       )}
     </ChatProvider>
   )
 }
+
 
 
 
