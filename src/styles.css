@@ -218,19 +218,11 @@ button, .btn { min-height: 44px; }
 .btn-primary:hover { filter: brightness(1.02); }
 .btn-primary:active { filter: brightness(.98); }
 
-/* NEW: constant coral button (no black) */
-.btn-coral{
+/* IMPORTANT: make accent = CORAL globally */
+.btn-accent {
   background: var(--brand-coral);
   color: #fff;
   border-color: var(--brand-coral);
-}
-.btn-coral:hover{ filter: brightness(1.02); }
-.btn-coral:active{ filter: brightness(.98); }
-
-.btn-accent {
-  background: #111827;
-  color: #fff;
-  border-color: #0f172a;
 }
 .btn-accent:hover { filter: brightness(1.02); }
 .btn-accent:active { filter: brightness(.98); }
