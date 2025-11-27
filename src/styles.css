@@ -209,7 +209,7 @@ button, .btn { min-height: 44px; }
 /* ===== Shapes ===== */
 .btn-pill { border-radius: 999px; }
 
-/* ===== Variants (unchanged visuals) ===== */
+/* ===== Variants ===== */
 .btn-primary {
   background: var(--brand-teal);
   color: #fff;
@@ -218,6 +218,7 @@ button, .btn { min-height: 44px; }
 .btn-primary:hover { filter: brightness(1.02); }
 .btn-primary:active { filter: brightness(.98); }
 
+/* Dark accent (keep for "Sign out" etc.) */
 .btn-accent {
   background: #111827;
   color: #fff;
@@ -225,6 +226,15 @@ button, .btn { min-height: 44px; }
 }
 .btn-accent:hover { filter: brightness(1.02); }
 .btn-accent:active { filter: brightness(.98); }
+
+/* NEW: Constant coral CTAs */
+.btn-coral {
+  background: var(--brand-coral);
+  color: #fff;
+  border-color: #e11d48; /* coral-700-ish */
+}
+.btn-coral:hover { filter: brightness(1.02); }
+.btn-coral:active { filter: brightness(.98); }
 
 .btn-neutral {
   background: #fff;
@@ -324,4 +334,5 @@ button, .btn { min-height: 44px; }
   padding: 12px;
   max-height: min(60dvh, 520px);
 }
+
 
