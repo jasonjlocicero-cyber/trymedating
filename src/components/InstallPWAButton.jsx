@@ -1,5 +1,5 @@
 // src/components/InstallPWAButton.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { isStandaloneDisplayMode, onDisplayModeChange } from '../lib/pwa'
 
@@ -10,28 +10,42 @@ const isiOS = () =>
 
 export default function InstallPWAButton() {
   const location = useLocation()
-  const [deferredPrompt, setDeferredPrompt] = useState(null)
-  const [installed, setInstalled] = useState(isStandaloneDisplayMode())
 
-  // Capture Chrome/Edge prompt & appinstalled
+  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const [installed, _setInstalled] = useState(isStandaloneDisplayMode())
+
+  // “Sticky true” guard: once installed is true in this window, never flip to false
+  const installedOnceRef = useRef(installed)
+  const setInstalledSticky = (next) => {
+    if (installedOnceRef.current) return // stay true
+    if (next) {
+      installedOnceRef.current = true
+      _setInstalled(true)
+    } else {
+      _setInstalled(false)
+    }
+  }
+
+  // Setup lifecycle + events
   useEffect(() => {
     const onBIP = (e) => {
       e.preventDefault()
       setDeferredPrompt(e)
     }
     const onInstalled = () => {
-      setInstalled(true)
+      setInstalledSticky(true)
       setDeferredPrompt(null)
     }
 
     window.addEventListener('beforeinstallprompt', onBIP)
     window.addEventListener('appinstalled', onInstalled)
 
-    // React to display-mode changes / visibility
-    const unsubscribe = onDisplayModeChange(setInstalled)
+    const unsubscribe = onDisplayModeChange((isInstalled) =>
+      setInstalledSticky(isInstalled)
+    )
 
-    // Initial double-check after mount (handles cold-start in app window)
-    setInstalled(isStandaloneDisplayMode())
+    // Double-check after mount
+    setInstalledSticky(isStandaloneDisplayMode())
 
     return () => {
       window.removeEventListener('beforeinstallprompt', onBIP)
@@ -40,13 +54,13 @@ export default function InstallPWAButton() {
     }
   }, [])
 
-  // Re-evaluate on client-side route changes (e.g., tapping “Home”)
+  // Re-check on route changes, but keep the sticky-true behavior
   useEffect(() => {
-    setInstalled(isStandaloneDisplayMode())
+    setInstalledSticky(isStandaloneDisplayMode())
   }, [location])
 
-  // Hide completely when truly installed (PWA window)
-  if (installed) return null
+  // Hide completely inside installed window
+  if (installedOnceRef.current || installed) return null
 
   const showHowTo = () => {
     const ua = navigator.userAgent
@@ -55,7 +69,7 @@ export default function InstallPWAButton() {
     } else if (/Edg\//.test(ua)) {
       alert('On Microsoft Edge: ⋯ menu → Apps → “Install this site as an app”.')
     } else {
-      alert('On Chrome/Brave: click the install icon in the address bar, or ⋮ menu → “Install app”.')
+      alert('On Chrome/Brave: click the address-bar install icon, or ⋮ menu → “Install app”.')
     }
   }
 
@@ -65,7 +79,6 @@ export default function InstallPWAButton() {
       try { await deferredPrompt.userChoice } catch {}
       setDeferredPrompt(null)
     } else {
-      // Browser did not surface the prompt (cooldown/engagement heuristics)
       showHowTo()
     }
   }
