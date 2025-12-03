@@ -23,7 +23,7 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
-import InstallPWAButton from "./components/InstallPWAButton"
+import InstallPWAButton from './components/InstallPWAButton'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -64,7 +64,7 @@ function Home({ me }) {
             you’ve actually met. No endless swiping—just real conversations with people you trust.
           </p>
 
-          {/* ORIGINAL PALETTE */}
+          {/* CTA row */}
           <div
             style={{
               display: 'flex',
@@ -78,20 +78,20 @@ function Home({ me }) {
             {!authed ? (
               <>
                 <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
-                <a className="btn btn-neutral btn-pill" href="#how-it-works">How it works</a>
+                {/* coral button per request */}
+                <a className="btn btn-accent btn-pill" href="#how-it-works">How it works</a>
+                {/* teal install button */}
+                <InstallPWAButton className="btn btn-primary btn-pill" />
               </>
             ) : (
               <>
                 {/* teal primary */}
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                {/* dark accent (black) */}
+                {/* coral accents */}
                 <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
-
-            {/* Install PWA button appears only when installable */}
-            <InstallPWAButton label="Install TryMeDating" />
           </div>
 
           <div
@@ -112,7 +112,7 @@ function Home({ me }) {
 
       <section id="how-it-works" style={{ padding: '28px 0' }}>
         <div className="container" style={{ maxWidth: 960 }}>
-          <h2 className="text-coral" style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
+          <h2 style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
           <div
             style={{
               display: 'grid',
@@ -259,6 +259,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
