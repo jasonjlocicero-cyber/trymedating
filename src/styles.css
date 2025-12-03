@@ -243,6 +243,15 @@ button, .btn { min-height: 44px; }
 .btn-danger:hover { filter: brightness(1.02); }
 .btn-danger:active { filter: brightness(.98); }
 
+/* New: explicit coral variant (for convenience alongside .btn-accent) */
+.btn-coral {
+  background: var(--brand-coral);
+  color: #fff;
+  border-color: var(--brand-coral);
+}
+.btn-coral:hover { filter: brightness(1.02); }
+.btn-coral:active { filter: brightness(.98); }
+
 /* ===== Optional utilities (non-breaking) ===== */
 
 /* Sizes */
@@ -325,5 +334,8 @@ button, .btn { min-height: 44px; }
   padding: 12px;
   max-height: min(60dvh, 520px);
 }
+
+/* === Tiny text utility for headings etc. === */
+.text-coral { color: var(--brand-coral); }
 
 
