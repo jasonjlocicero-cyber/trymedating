@@ -12,68 +12,62 @@ export default function InstallPWAButton() {
 
   useEffect(() => {
     const onBeforeInstallPrompt = (e) => {
-      // Chrome/Edge: capture the prompt so we can show our own UI
-      e.preventDefault()
+      e.preventDefault()            // capture Chrome/Edge prompt
       setDeferredPrompt(e)
     }
-
     const onAppInstalled = () => {
       setInstalled(true)
       setDeferredPrompt(null)
     }
-
     const recheck = () => setInstalled(isStandaloneDisplayMode())
-
-    // Re-check when the display-mode flips (Chrome emits 'change' events)
-    const mm = window.matchMedia?.('(display-mode: standalone)')
-    mm?.addEventListener?.('change', recheck)
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
     window.addEventListener('appinstalled', onAppInstalled)
+
+    // update when display-mode flips (installed window vs tab)
+    const mm = window.matchMedia?.('(display-mode: standalone)')
+    mm?.addEventListener?.('change', recheck)
     window.addEventListener('visibilitychange', recheck)
-    window.addEventListener('resize', recheck)
 
     return () => {
-      mm?.removeEventListener?.('change', recheck)
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
       window.removeEventListener('appinstalled', onAppInstalled)
+      mm?.removeEventListener?.('change', recheck)
       window.removeEventListener('visibilitychange', recheck)
-      window.removeEventListener('resize', recheck)
     }
   }, [])
 
-  // ✅ Only render when there's an actionable path:
-  // - Not installed AND (we have a captured prompt OR we're on iOS with A2HS)
-  if (installed || (!deferredPrompt && !isiOS())) return null
+  // 🔒 Hide only when truly installed
+  if (installed) return null
+
+  const showHowTo = () => {
+    const ua = navigator.userAgent
+    if (isiOS()) {
+      alert('On iOS: Safari → Share → Add to Home Screen')
+    } else if (/Edg\//.test(ua)) {
+      alert('On Microsoft Edge: ⋯ menu → Apps → “Install this site as an app”')
+    } else {
+      alert('On Chrome/Brave: click the install icon in the address bar, or ⋮ menu → “Install app”')
+    }
+  }
 
   const handleClick = async () => {
-    if (deferredPrompt) {
+    if (deferredPrompt?.prompt) {
       deferredPrompt.prompt()
-      try {
-        const { outcome } = await deferredPrompt.userChoice
-        if (outcome === 'accepted') setDeferredPrompt(null)
-      } catch {
-        /* no-op */
-      }
-      return
+      try { await deferredPrompt.userChoice } catch {}
+      setDeferredPrompt(null)
+    } else {
+      // no prompt available (cooldown/heuristics) – show quick tip
+      showHowTo()
     }
-
-    // iOS fallback instructions (no programmatic prompt on iOS)
-    alert(
-      'How to install on iOS:\n' +
-      '• Safari → Share → Add to Home Screen'
-    )
   }
 
   return (
-    <button
-      className="btn btn-primary btn-pill"
-      onClick={handleClick}
-      aria-label="Install app"
-    >
+    <button className="btn btn-primary btn-pill" onClick={handleClick}>
       Install app
     </button>
   )
 }
+
 
 
