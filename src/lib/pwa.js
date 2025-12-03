@@ -1,21 +1,32 @@
 // src/lib/pwa.js
+
+// Treat any installed display-mode as "installed"
+const DISPLAY_MODES = [
+  'standalone',
+  'minimal-ui',
+  'fullscreen',
+  // Chromium desktop PWAs can report this:
+  'window-controls-overlay',
+]
+
 export function isStandaloneDisplayMode() {
   if (typeof window === 'undefined') return false
 
-  // Chrome/Edge/Brave
-  const mql = window.matchMedia?.('(display-mode: standalone)')
-  const standaloneMql = !!mql?.matches
+  // Match any installed display-mode the browser supports
+  const inInstalledMode = DISPLAY_MODES.some(
+    (mode) => window.matchMedia?.(`(display-mode: ${mode})`)?.matches
+  )
 
-  // iOS Safari
+  // iOS Safari (no matchMedia support for display-mode)
   const iosStandalone =
     typeof window.navigator !== 'undefined' &&
     'standalone' in window.navigator &&
     window.navigator.standalone === true
 
-  // Android TWA / installed referrer hint
+  // Android TWA hint (good on first load)
   const fromAndroidApp = !!document.referrer?.startsWith('android-app://')
 
-  return Boolean(standaloneMql || iosStandalone || fromAndroidApp)
+  return Boolean(inInstalledMode || iosStandalone || fromAndroidApp)
 }
 
 export function onDisplayModeChange(cb) {
@@ -23,18 +34,25 @@ export function onDisplayModeChange(cb) {
 
   const handler = () => cb(isStandaloneDisplayMode())
 
-  // Listen for Chrome/Edge display-mode changes
-  const mq = window.matchMedia?.('(display-mode: standalone)')
-  if (mq?.addEventListener) mq.addEventListener('change', handler)
-  else if (mq?.addListener) mq.addListener(handler)
+  // Subscribe to *all* relevant display-mode queries we care about
+  const mqs = DISPLAY_MODES
+    .map((mode) => window.matchMedia?.(`(display-mode: ${mode})`))
+    .filter(Boolean)
 
-  // Also cover lifecycle & tab visibility changes
+  mqs.forEach((mq) => {
+    if (mq.addEventListener) mq.addEventListener('change', handler)
+    else if (mq.addListener) mq.addListener(handler)
+  })
+
+  // Also react to lifecycle / tab visibility changes
   window.addEventListener('pageshow', handler)
   window.addEventListener('visibilitychange', handler)
 
   return () => {
-    if (mq?.removeEventListener) mq.removeEventListener('change', handler)
-    else if (mq?.removeListener) mq.removeListener(handler)
+    mqs.forEach((mq) => {
+      if (mq.removeEventListener) mq.removeEventListener('change', handler)
+      else if (mq.removeListener) mq.removeListener(handler)
+    })
     window.removeEventListener('pageshow', handler)
     window.removeEventListener('visibilitychange', handler)
   }
