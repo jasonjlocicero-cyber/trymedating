@@ -23,7 +23,7 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
-import InstallPWAButton from "./components/InstallPWAButton";
+import InstallPWAButton from "./components/InstallPWAButton"
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -89,6 +89,9 @@ function Home({ me }) {
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
               </>
             )}
+
+            {/* Install PWA button appears only when installable */}
+            <InstallPWAButton label="Install TryMeDating" />
           </div>
 
           <div
