@@ -23,6 +23,7 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
+import InstallPWAButton from "./components/InstallPWAButton";
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
