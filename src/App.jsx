@@ -9,6 +9,10 @@ import Header from './components/Header'
 import Footer from './components/Footer'
 import ChatLauncher from './components/ChatLauncher'
 
+// PWA buttons / nudges
+import InstallPWAButton from './components/InstallPWAButton'
+import InstallNudgeMobile from './components/InstallNudgeMobile'
+
 // Pages
 import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
@@ -23,7 +27,6 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
-import InstallPWAButton from './components/InstallPWAButton'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -78,18 +81,17 @@ function Home({ me }) {
             {!authed ? (
               <>
                 <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
-                {/* coral button per request */}
                 <a className="btn btn-accent btn-pill" href="#how-it-works">How it works</a>
-                {/* teal install button */}
-                <InstallPWAButton className="btn btn-primary btn-pill" />
+                {/* PWA install button (works where beforeinstallprompt is supported) */}
+                <InstallPWAButton />
               </>
             ) : (
               <>
-                {/* teal primary */}
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                {/* coral accents */}
                 <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
+                {/* Keep install available for signed-in users too */}
+                <InstallPWAButton />
               </>
             )}
           </div>
@@ -112,7 +114,9 @@ function Home({ me }) {
 
       <section id="how-it-works" style={{ padding: '28px 0' }}>
         <div className="container" style={{ maxWidth: 960 }}>
-          <h2 style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
+          <h2 className="home-section-title" style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>
+            How it works
+          </h2>
           <div
             style={{
               display: 'grid',
@@ -251,6 +255,9 @@ export default function App() {
         )}
       </main>
 
+      {/* Mobile sticky nudge for “one-tap” feel on Android and clear guidance on iOS */}
+      <InstallNudgeMobile />
+
       <Footer />
 
       {showChatLauncher && (
@@ -259,8 +266,6 @@ export default function App() {
     </ChatProvider>
   )
 }
-
-
 
 
 
