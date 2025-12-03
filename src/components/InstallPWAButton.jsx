@@ -1,5 +1,7 @@
+// src/components/InstallPWAButton.jsx
 import React, { useEffect, useState } from 'react'
-import { isStandaloneDisplayMode } from '../lib/pwa'
+import { useLocation } from 'react-router-dom'
+import { isStandaloneDisplayMode, onDisplayModeChange } from '../lib/pwa'
 
 const isiOS = () =>
   typeof navigator !== 'undefined' &&
@@ -7,47 +9,53 @@ const isiOS = () =>
   !window.MSStream
 
 export default function InstallPWAButton() {
+  const location = useLocation()
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [installed, setInstalled] = useState(isStandaloneDisplayMode())
 
+  // Capture Chrome/Edge prompt & appinstalled
   useEffect(() => {
-    const onBeforeInstallPrompt = (e) => {
-      e.preventDefault()            // capture Chrome/Edge prompt
+    const onBIP = (e) => {
+      e.preventDefault()
       setDeferredPrompt(e)
     }
-    const onAppInstalled = () => {
+    const onInstalled = () => {
       setInstalled(true)
       setDeferredPrompt(null)
     }
-    const recheck = () => setInstalled(isStandaloneDisplayMode())
 
-    window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
-    window.addEventListener('appinstalled', onAppInstalled)
+    window.addEventListener('beforeinstallprompt', onBIP)
+    window.addEventListener('appinstalled', onInstalled)
 
-    // update when display-mode flips (installed window vs tab)
-    const mm = window.matchMedia?.('(display-mode: standalone)')
-    mm?.addEventListener?.('change', recheck)
-    window.addEventListener('visibilitychange', recheck)
+    // React to display-mode changes / visibility
+    const unsubscribe = onDisplayModeChange(setInstalled)
+
+    // Initial double-check after mount (handles cold-start in app window)
+    setInstalled(isStandaloneDisplayMode())
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
-      window.removeEventListener('appinstalled', onAppInstalled)
-      mm?.removeEventListener?.('change', recheck)
-      window.removeEventListener('visibilitychange', recheck)
+      window.removeEventListener('beforeinstallprompt', onBIP)
+      window.removeEventListener('appinstalled', onInstalled)
+      unsubscribe?.()
     }
   }, [])
 
-  // 🔒 Hide only when truly installed
+  // Re-evaluate on client-side route changes (e.g., tapping “Home”)
+  useEffect(() => {
+    setInstalled(isStandaloneDisplayMode())
+  }, [location])
+
+  // Hide completely when truly installed (PWA window)
   if (installed) return null
 
   const showHowTo = () => {
     const ua = navigator.userAgent
     if (isiOS()) {
-      alert('On iOS: Safari → Share → Add to Home Screen')
+      alert('On iOS: Safari → Share → “Add to Home Screen”.')
     } else if (/Edg\//.test(ua)) {
-      alert('On Microsoft Edge: ⋯ menu → Apps → “Install this site as an app”')
+      alert('On Microsoft Edge: ⋯ menu → Apps → “Install this site as an app”.')
     } else {
-      alert('On Chrome/Brave: click the install icon in the address bar, or ⋮ menu → “Install app”')
+      alert('On Chrome/Brave: click the install icon in the address bar, or ⋮ menu → “Install app”.')
     }
   }
 
@@ -57,7 +65,7 @@ export default function InstallPWAButton() {
       try { await deferredPrompt.userChoice } catch {}
       setDeferredPrompt(null)
     } else {
-      // no prompt available (cooldown/heuristics) – show quick tip
+      // Browser did not surface the prompt (cooldown/engagement heuristics)
       showHowTo()
     }
   }
@@ -68,6 +76,7 @@ export default function InstallPWAButton() {
     </button>
   )
 }
+
 
 
 
