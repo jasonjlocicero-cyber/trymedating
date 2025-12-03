@@ -1,65 +1,75 @@
 // src/components/InstallPWAButton.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
 
-export default function InstallPWAButton({
-  label = "Install app",
-  className = "btn btn-primary btn-pill", // uses your existing button styles
-}) {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [canInstall, setCanInstall] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
+export default function InstallPWAButton() {
+  const [deferred, setDeferred] = useState(null);
+  const [installed, setInstalled] = useState(
+    // Detect already-installed (standalone / PWA window)
+    window.matchMedia?.('(display-mode: standalone)')?.matches === true
+  );
 
   useEffect(() => {
-    // detect if already installed / running standalone
-    const mediaStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches;
-    const iosStandalone = window.navigator?.standalone === true; // iOS Safari
-    setIsStandalone(!!(mediaStandalone || iosStandalone));
-
-    // listen for install availability
-    const onBIP = (e) => {
-      // Prevent the mini-infobar & default auto-prompt
+    function onBIP(e) {
+      // Chrome fires this only when it thinks the app is installable
       e.preventDefault();
-      setDeferredPrompt(e);
-      setCanInstall(true);
-    };
+      setDeferred(e);
+      console.debug('[PWA] beforeinstallprompt fired');
+    }
 
-    const onInstalled = () => {
-      setDeferredPrompt(null);
-      setCanInstall(false);
-      setIsStandalone(true);
-      try { localStorage.setItem("tmd_installed", "1"); } catch {}
-    };
+    function onInstalled() {
+      console.debug('[PWA] appinstalled');
+      setInstalled(true);
+      setDeferred(null);
+    }
 
-    window.addEventListener("beforeinstallprompt", onBIP);
-    window.addEventListener("appinstalled", onInstalled);
+    window.addEventListener('beforeinstallprompt', onBIP);
+    window.addEventListener('appinstalled', onInstalled);
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", onBIP);
-      window.removeEventListener("appinstalled", onInstalled);
+      window.removeEventListener('beforeinstallprompt', onBIP);
+      window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
 
-  // Button only appears when:
-  // - not already installed/standalone
-  // - and the browser has fired beforeinstallprompt
-  if (isStandalone || !canInstall) return null;
+  const canPrompt = !!deferred && !installed;
 
-  const handleClick = async () => {
+  async function handleInstall() {
+    if (!deferred) return;
+    deferred.prompt();
     try {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt(); // show the native prompt
-      const { outcome } = await deferredPrompt.userChoice;
-      // You can optionally log outcome === 'accepted' | 'dismissed'
-      setDeferredPrompt(null);
-      setCanInstall(false);
-    } catch {
-      // swallow errors (some browsers can cancel the flow)
+      const choice = await deferred.userChoice;
+      console.debug('[PWA] userChoice:', choice);
+    } finally {
+      // Chrome lets the event be used once
+      setDeferred(null);
     }
-  };
+  }
 
+  // If already installed, render nothing
+  if (installed) return null;
+
+  // If we can prompt, render the real install button
+  if (canPrompt) {
+    return (
+      <button className="btn btn-primary btn-pill" onClick={handleInstall}>
+        Install app
+      </button>
+    );
+  }
+
+  // Fallback: show a CTA that tells the user how to install via the browser UI
   return (
-    <button type="button" className={className} onClick={handleClick}>
-      {label}
+    <button
+      className="btn btn-neutral btn-pill"
+      onClick={() => {
+        alert(
+          'How to install:\n• Chrome (Windows/macOS/Linux): Click the “Install” icon in the address bar, or ︙ > Install TryMeDating\n• Edge: ︙ > Apps > Install this site as an app\n• iOS Safari: Share ▸ Add to Home Screen'
+        );
+      }}
+      title="Install via browser"
+    >
+      Install app
     </button>
   );
 }
+
