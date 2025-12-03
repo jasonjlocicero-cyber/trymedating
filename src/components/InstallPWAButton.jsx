@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from 'react'
 import { isStandaloneDisplayMode } from '../lib/pwa'
 
+const isiOS = () =>
+  typeof navigator !== 'undefined' &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !window.MSStream
+
 export default function InstallPWAButton() {
   const [deferredPrompt, setDeferredPrompt] = useState(null)
   const [installed, setInstalled] = useState(isStandaloneDisplayMode())
 
   useEffect(() => {
     const onBeforeInstallPrompt = (e) => {
-      // Chrome/Edge: intercept, so we can show our own button
+      // Chrome/Edge: capture the prompt so we can show our own UI
       e.preventDefault()
       setDeferredPrompt(e)
     }
@@ -19,12 +24,17 @@ export default function InstallPWAButton() {
 
     const recheck = () => setInstalled(isStandaloneDisplayMode())
 
+    // Re-check when the display-mode flips (Chrome emits 'change' events)
+    const mm = window.matchMedia?.('(display-mode: standalone)')
+    mm?.addEventListener?.('change', recheck)
+
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt)
     window.addEventListener('appinstalled', onAppInstalled)
     window.addEventListener('visibilitychange', recheck)
     window.addEventListener('resize', recheck)
 
     return () => {
+      mm?.removeEventListener?.('change', recheck)
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt)
       window.removeEventListener('appinstalled', onAppInstalled)
       window.removeEventListener('visibilitychange', recheck)
@@ -32,28 +42,26 @@ export default function InstallPWAButton() {
     }
   }, [])
 
-  // If already running as an installed PWA, hide the button entirely
-  if (installed) return null
+  // ✅ Only render when there's an actionable path:
+  // - Not installed AND (we have a captured prompt OR we're on iOS with A2HS)
+  if (installed || (!deferredPrompt && !isiOS())) return null
 
   const handleClick = async () => {
     if (deferredPrompt) {
       deferredPrompt.prompt()
       try {
         const { outcome } = await deferredPrompt.userChoice
-        // If accepted, the appinstalled event will flip `installed` to true
         if (outcome === 'accepted') setDeferredPrompt(null)
       } catch {
-        // noop
+        /* no-op */
       }
       return
     }
 
-    // Fallback instructions when no prompt is available (iOS / some desktop cases)
+    // iOS fallback instructions (no programmatic prompt on iOS)
     alert(
-      'How to install:\n\n' +
-      '• Chrome/Edge (desktop): Use the "Install" icon in the address bar.\n' +
-      '• Android Chrome: ⋮ menu → Install app.\n' +
-      '• iOS Safari: Share → Add to Home Screen.'
+      'How to install on iOS:\n' +
+      '• Safari → Share → Add to Home Screen'
     )
   }
 
@@ -67,6 +75,5 @@ export default function InstallPWAButton() {
     </button>
   )
 }
-
 
 
