@@ -112,7 +112,7 @@ function Home({ me }) {
 
       <section id="how-it-works" style={{ padding: '28px 0' }}>
         <div className="container" style={{ maxWidth: 960 }}>
-          <h2 style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
+          <h2 className="text-coral" style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>How it works</h2>
           <div
             style={{
               display: 'grid',
