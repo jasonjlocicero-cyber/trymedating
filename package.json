@@ -5,27 +5,21 @@
   "description": "TryMeDating desktop wrapper + web app",
   "author": "TryMeDating",
   "license": "UNLICENSED",
-
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
-
   "main": "electron/main.js",
-
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-
     "gen:icons": "node scripts/gen-icons.mjs",
-
     "desktop:dev": "electron .",
     "desktop:build:win": "npm run build && npm run gen:icons && electron-builder --win",
     "desktop:build:mac": "npm run build && electron-builder --mac",
     "desktop:build:linux": "npm run build && electron-builder --linux"
   },
-
   "dependencies": {
     "@sentry/react": "^7.120.0",
     "@supabase/supabase-js": "^2.39.7",
@@ -38,20 +32,17 @@
     "react-qr-code": "^2.0.18",
     "react-router-dom": "^6.22.0"
   },
-
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
-    "to-ico": "^1.4.4",
+    "png-to-ico": "^2.1.8",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0"
   },
-
   "optionalDependencies": {
     "sharp": "^0.33.3"
   },
-
   "build": {
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
@@ -63,25 +54,22 @@
     "directories": {
       "buildResources": "public/icons"
     },
-
     "win": {
       "target": "nsis",
       "icon": "public/icons/icon.ico"
     },
-
     "mac": {
       "category": "public.app-category.social-networking",
       "icon": "public/icons/icon-512.png"
     },
-
     "linux": {
       "target": ["AppImage"],
       "icon": "public/icons"
     },
-
     "asar": true
   }
 }
+
 
 
 
