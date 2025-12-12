@@ -2,9 +2,9 @@
   "name": "trymedating-brand-site",
   "version": "0.1.0",
   "private": true,
-
-  "description": "TryMeDating — invite-only dating via QR codes with private 1:1 messaging.",
+  "description": "TryMeDating desktop wrapper + web app",
   "author": "TryMeDating",
+  "license": "UNLICENSED",
 
   "engines": {
     "node": ">=20.0.0",
@@ -17,12 +17,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+
     "gen:icons": "node scripts/gen-icons.mjs",
 
     "desktop:dev": "electron .",
-    "desktop:build:win": "electron-builder --win",
-    "desktop:build:mac": "electron-builder --mac",
-    "desktop:build:linux": "electron-builder --linux"
+    "desktop:build:win": "npm run build && npm run gen:icons && electron-builder --win",
+    "desktop:build:mac": "npm run build && electron-builder --mac",
+    "desktop:build:linux": "npm run build && electron-builder --linux"
   },
 
   "dependencies": {
@@ -40,25 +41,25 @@
 
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.2.0",
-    "vite-plugin-pwa": "^0.20.0",
     "electron": "^32.2.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "to-ico": "^1.4.4",
+    "vite": "^5.2.0",
+    "vite-plugin-pwa": "^0.20.0"
   },
 
   "optionalDependencies": {
-    "sharp": "^0.33.3",
-    "to-ico": "^1.4.4"
+    "sharp": "^0.33.3"
   },
 
   "build": {
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
-
     "files": [
-      "electron/**"
+      "electron/**",
+      "dist/**",
+      "public/icons/**"
     ],
-
     "directories": {
       "buildResources": "public/icons"
     },
@@ -70,19 +71,18 @@
 
     "mac": {
       "category": "public.app-category.social-networking",
-      "icon": "public/icons/icon.icns"
+      "icon": "public/icons/icon-512.png"
     },
 
     "linux": {
-      "target": [
-        "AppImage"
-      ],
+      "target": ["AppImage"],
       "icon": "public/icons"
     },
 
     "asar": true
   }
 }
+
 
 
 
