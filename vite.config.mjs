@@ -7,24 +7,29 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // simple, auto-updating service worker
+      // We register via `virtual:pwa-register` in src/main.jsx
+      injectRegister: null,
+
+      // Simple, auto-updating service worker
       registerType: 'autoUpdate',
+
+      // Name the generated SW file
       filename: 'sw.js',
 
-      // we already serve a static manifest from /public/manifest.webmanifest
+      // We serve a static manifest from /public/manifest.webmanifest
       manifest: false,
 
-      // make sure common static assets are available to the SW
+      // Make sure common static assets are available to the SW
       includeAssets: [
         'icons/*',
         'favicon.ico',
         'apple-touch-icon.png',
-        'robots.txt'
+        'robots.txt',
+        'offline.html'
       ],
 
-      // Workbox (service worker) behavior
       workbox: {
-        // Show our offline page for navigations when the network is down
+        // Serve our offline page for navigations when the network is down
         navigateFallback: '/offline.html',
 
         // Never hijack API/auth/function calls
@@ -52,12 +57,13 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
-          // Never cache auth or REST calls (always hit network)
+          // Never cache auth
           {
             urlPattern: /^https:\/\/[^/]+supabase\.co\/auth\/v1\/.*/i,
             handler: 'NetworkOnly',
             options: { cacheName: 'supabase-auth' }
           },
+          // Never cache REST
           {
             urlPattern: /^https:\/\/[^/]+supabase\.co\/rest\/v1\/.*/i,
             handler: 'NetworkOnly',
@@ -65,6 +71,7 @@ export default defineConfig({
           }
         ],
 
+        // Keep cache tidy between releases
         cleanupOutdatedCaches: true
       }
     })
@@ -79,4 +86,5 @@ export default defineConfig({
     sourcemap: false
   }
 })
+
 
