@@ -12,7 +12,6 @@
     "build": "vite build",
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
-
     "desktop:dev": "electron .",
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
@@ -59,12 +58,15 @@
       "icon": "public/icons/icon-512.png"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "public/icons"
     },
     "asar": true
   }
 }
+
 
 
 
