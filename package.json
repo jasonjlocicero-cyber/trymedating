@@ -44,13 +44,12 @@
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
     "protocols": [
-      { "name": "TryMeDating Link", "schemes": ["tryme"] }
+      {
+        "name": "TryMeDating Link",
+        "schemes": ["tryme"]
+      }
     ],
-    "files": [
-      "electron/**",
-      "dist/**",
-      "public/icons/**"
-    ],
+    "files": ["electron/**", "dist/**", "public/icons/**"],
     "directories": {
       "buildResources": "public/icons"
     },
@@ -61,6 +60,7 @@
     "asar": true
   }
 }
+
 
 
 
