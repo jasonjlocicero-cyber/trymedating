@@ -13,7 +13,7 @@ await fs.mkdir(outDir, { recursive: true });
 // Optical centering tweak:
 // Negative X moves the logo LEFT, positive moves RIGHT.
 // If you still want it more left, make this more negative (ex: -32).
-const OPTICAL_X_AT_1024 = -26;
+const OPTICAL_X_AT_1024 = -34;
 const OPTICAL_Y_AT_1024 = 0;
 
 async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
