@@ -41,24 +41,25 @@
     "sharp": "^0.33.3"
   },
   "build": {
-  "appId": "com.trymedating.desktop",
-  "productName": "TryMeDating",
-  "protocols": [
-    { "name": "TryMeDating Link", "schemes": ["tryme"] }
-  ],
-  "files": [
-    "electron/**",
-    "dist/**",
-    "public/icons/**"
-  ],
-  "directories": {
-    "buildResources": "public/icons"
-  },
-  "win": {
-    "target": "nsis",
-    "icon": "public/icons/icon.ico"
-  },
-  "asar": true
+    "appId": "com.trymedating.desktop",
+    "productName": "TryMeDating",
+    "protocols": [
+      { "name": "TryMeDating Link", "schemes": ["tryme"] }
+    ],
+    "files": [
+      "electron/**",
+      "dist/**",
+      "public/icons/**"
+    ],
+    "directories": {
+      "buildResources": "public/icons"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/icons/icon.ico"
+    },
+    "asar": true
+  }
 }
 
 
