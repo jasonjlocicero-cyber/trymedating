@@ -1,8 +1,14 @@
 // electron/preload.js (CommonJS)
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktop', {
   isElectron: true,
-  platform: process.platform
-  // In future we can expose safe IPC methods here.
+  platform: process.platform,
+  onDeepLink: (cb) => {
+    const handler = (_evt, payload) => cb(payload);
+    ipcRenderer.on('deep-link', handler);
+    // return an unsubscribe fn so React can clean up
+    return () => ipcRenderer.removeListener('deep-link', handler);
+  },
 });
+
