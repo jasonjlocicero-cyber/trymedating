@@ -33,6 +33,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
+    "png-to-ico": "^2.1.8",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0"
   },
@@ -49,7 +50,11 @@
         "schemes": ["tryme"]
       }
     ],
-    "files": ["electron/**", "dist/**", "public/icons/**"],
+    "files": [
+      "electron/**",
+      "dist/**",
+      "public/icons/**"
+    ],
     "directories": {
       "buildResources": "public/icons"
     },
@@ -57,9 +62,15 @@
       "target": "nsis",
       "icon": "public/icons/icon.ico"
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "include": "build/installer.nsh"
+    },
     "asar": true
   }
 }
+
 
 
 
