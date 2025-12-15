@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
 
@@ -187,8 +187,47 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const showChatLauncher = !pathname.startsWith('/chat')
 
+  // --- Deep-link handler: supports ?deeplink=tryme://... (optional) ---
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const dl = sp.get('deeplink') || sp.get('dl')
+      if (!dl) return
+
+      const url = new URL(dl)
+      if (url.protocol !== 'tryme:') return
+
+      let next = '/'
+      // Examples:
+      // tryme://chat/UUID              -> /chat/UUID
+      // tryme://u/handle               -> /u/handle
+      // tryme://connect?token=ABC      -> /connect?token=ABC
+      switch (url.host) {
+        case 'chat':
+          next = `/chat${url.pathname || ''}`
+          break
+        case 'u':
+          next = `/u${url.pathname || ''}`
+          break
+        case 'connect':
+          next = `/connect${url.search || ''}`
+          break
+        default:
+          // Fallback: if it looks like an app path, try to route it as-is
+          next = `${url.pathname || '/' }${url.search || ''}`
+          break
+      }
+
+      navigate(next, { replace: true })
+    } catch {
+      /* ignore malformed deeplink */
+    }
+  }, [navigate])
+
+  // --- Auth bootstrap ---
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -266,6 +305,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
