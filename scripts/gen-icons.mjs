@@ -5,7 +5,7 @@ import sharp from "sharp";
 import pngToIco from "png-to-ico";
 
 const root = process.cwd();
-const input = path.join(root, "public", "logo-mark.png");
+const input = path.join(root, "public", "icon-source.png");
 const outDir = path.join(root, "public", "icons");
 
 await fs.mkdir(outDir, { recursive: true });
