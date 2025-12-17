@@ -33,53 +33,36 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
-    "png-to-ico": "^2.1.8",
+    "png-to-ico": "^3.0.1",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0"
   },
   "optionalDependencies": {
-    "icojs": "^0.16.1",
     "sharp": "^0.33.3"
   },
   "build": {
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
-    "protocols": [
-      {
-        "name": "TryMeDating Link",
-        "schemes": ["tryme"]
-      }
-    ],
     "files": [
-      "electron/**",
-      "dist/**",
-      "public/icons/**"
+      "electron/**"
     ],
     "directories": {
       "buildResources": "public/icons"
     },
     "win": {
       "target": "nsis",
-      "icon": "public/icons/icon.ico"
+      "icon": "public/icons/icon-512.png"
     },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "include": "build/installer.nsh"
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "icon": "public/icons/icon-512.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "public/icons"
     },
     "asar": true
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
