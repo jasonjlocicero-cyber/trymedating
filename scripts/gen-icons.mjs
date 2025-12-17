@@ -5,16 +5,12 @@ import sharp from "sharp";
 import pngToIco from "png-to-ico";
 
 const root = process.cwd();
-
-// Source logo (NO text) — this is the one you want
 const input = path.join(root, "public", "logo-mark.png");
-
-// Output dirs
 const outDir = path.join(root, "public", "icons");
 
 await fs.mkdir(outDir, { recursive: true });
 
-// Optical centering tweak (negative moves LEFT)
+// Center tweak (leave at 0 for now)
 const OPTICAL_X_AT_1024 = 0;
 const OPTICAL_Y_AT_1024 = 0;
 
@@ -28,7 +24,6 @@ async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
     .toBuffer();
 
   const pad = Math.floor((size - inner) / 2);
-
   const scale = size / 1024;
   const opticalX = Math.round(OPTICAL_X_AT_1024 * scale);
   const opticalY = Math.round(OPTICAL_Y_AT_1024 * scale);
@@ -46,48 +41,37 @@ async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
     .toBuffer();
 }
 
-try {
-  // 1) Master 1024 (square, padded)
-  const master1024 = await makePaddedSquareMaster(input, 1024, 860);
-  await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
+const master1024 = await makePaddedSquareMaster(input, 1024, 860);
+await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
 
-  // 2) Standard PWA icons
-  await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
-  await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
+await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
+await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
 
-  // 3) Maskable set (more padding)
-  const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
-  await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
-  await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
-  await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
+const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
+await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
+await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
+await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
 
-  // 4) Apple touch icon
-  await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
+await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
 
-  // 5) Favicons PNG
-  const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
-  const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
-  await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
-  await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
+const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
+const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
+await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
+await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-  // 6) Windows ICO (MUST include 256x256)
-  const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
-  const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
-  const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
-  const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
-  const ico32  = await sharp(master1024).resize(32, 32).png().toBuffer();
-  const ico16  = await sharp(master1024).resize(16, 16).png().toBuffer();
+// Build a multi-size ICO including 256x256
+const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
+const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
+const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
+const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
+const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
+const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
 
-  // Order doesn't matter much, but keeping largest->smallest is fine
-  const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32, ico16]);
+const ico = await pngToIco([ico16b, ico32b, ico48, ico64, ico128, ico256]);
 
-  await fs.writeFile(path.join(outDir, "icon.ico"), ico);
-  await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
+// ✅ Write BOTH locations
+await fs.writeFile(path.join(outDir, "icon.ico"), ico);
+await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
 
-  console.log("✅ Generated icons, including:");
-  console.log("   - public/icons/icon.ico");
-  console.log("   - public/favicon.ico");
-} catch (err) {
-  console.error("❌ gen-icons failed:", err);
-  process.exit(1);
-}
+console.log("✅ Icons written to /public/icons (including icon.ico) and favicons to /public/");
+
