@@ -59,7 +59,7 @@ const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
 await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
 await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-// Build a multi-size ICO including 256x256
+// 6) Windows ICO (must include 256x256 or electron-builder fails)
 const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
 const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
 const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
@@ -67,9 +67,9 @@ const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
 const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
 const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
 
-const ico = await pngToIco([ico16b, ico32b, ico48, ico64, ico128, ico256]);
+// IMPORTANT: put 256 FIRST (some libs pick "first" as primary frame)
+const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
 
-// ✅ Write BOTH locations
 await fs.writeFile(path.join(outDir, "icon.ico"), ico);
 await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
 
