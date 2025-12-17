@@ -2,6 +2,8 @@
   "name": "trymedating-brand-site",
   "version": "0.1.1",
   "private": true,
+  "description": "TryMeDating (Vite + Electron desktop build)",
+  "author": "TryMeDating",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
@@ -43,25 +45,26 @@
   "build": {
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
+    "protocols": [
+      {
+        "name": "TryMeDating Link",
+        "schemes": ["tryme"]
+      }
+    ],
     "files": [
-      "electron/**"
+      "electron/**",
+      "dist/**",
+      "public/icons/**",
+      "public/favicon.ico",
+      "public/favicon-16.png",
+      "public/favicon-32.png"
     ],
     "directories": {
       "buildResources": "public/icons"
     },
     "win": {
       "target": "nsis",
-      "icon": "public/icons/icon-512.png"
-    },
-    "mac": {
-      "category": "public.app-category.social-networking",
-      "icon": "public/icons/icon-512.png"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "public/icons"
+      "icon": "public/icons/icon.ico"
     },
     "asar": true
   }
