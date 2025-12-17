@@ -2,8 +2,8 @@
   "name": "trymedating-brand-site",
   "version": "0.1.1",
   "private": true,
-  "description": "TryMeDating (Vite + Electron desktop build)",
-  "author": "TryMeDating",
+  "description": "TryMeDating brand site + desktop wrapper",
+  "author": "Jason LoCicero",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
@@ -35,16 +35,18 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
-    "png-to-ico": "^3.0.1",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0"
   },
   "optionalDependencies": {
-    "sharp": "^0.33.3"
+    "icojs": "^0.16.1",
+    "sharp": "^0.33.3",
+    "png-to-ico": "^2.1.8"
   },
   "build": {
     "appId": "com.trymedating.desktop",
     "productName": "TryMeDating",
+    "asar": true,
     "protocols": [
       {
         "name": "TryMeDating Link",
@@ -54,10 +56,7 @@
     "files": [
       "electron/**",
       "dist/**",
-      "public/icons/**",
-      "public/favicon.ico",
-      "public/favicon-16.png",
-      "public/favicon-32.png"
+      "public/**"
     ],
     "directories": {
       "buildResources": "public/icons"
@@ -65,7 +64,7 @@
     "win": {
       "target": "nsis",
       "icon": "public/icons/icon.ico"
-    },
-    "asar": true
+    }
   }
 }
+
