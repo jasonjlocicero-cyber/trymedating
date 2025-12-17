@@ -2,7 +2,7 @@
 import fs from "fs/promises";
 import path from "path";
 import sharp from "sharp";
-import pngToIco from "png-to-ico";
+import pngToIco from "to-ico";
 
 const root = process.cwd();
 const input = path.join(root, "public", "logo-mark.png");
@@ -59,7 +59,7 @@ const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
 await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
 await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-// 6) Windows ICO (must include 256x256 or electron-builder fails)
+// 6) Windows ICO (multi-size frames; must include 256x256)
 const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
 const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
 const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
@@ -67,8 +67,8 @@ const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
 const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
 const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
 
-// IMPORTANT: put 256 FIRST (some libs pick "first" as primary frame)
-const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
+// to-ico reliably preserves the 256 frame
+const ico = await toIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
 
 await fs.writeFile(path.join(outDir, "icon.ico"), ico);
 await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
