@@ -10,7 +10,6 @@ const outDir = path.join(root, "public", "icons");
 
 await fs.mkdir(outDir, { recursive: true });
 
-// Negative X moves LEFT, positive moves RIGHT.
 const OPTICAL_X_AT_1024 = 0;
 const OPTICAL_Y_AT_1024 = 0;
 
@@ -60,7 +59,7 @@ const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
 await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
 await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-// ✅ MUST include 256x256 for electron-builder
+// MUST include 256x256 for electron-builder
 const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
 const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
 const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
@@ -74,5 +73,7 @@ await fs.writeFile(path.join(outDir, "icon.ico"), ico);
 await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
 
 console.log("✅ Generated public/icons/icon.ico with 256x256 included");
+
+
 
 
