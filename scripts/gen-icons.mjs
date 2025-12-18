@@ -1,3 +1,5 @@
+console.log("RUNNING GEN-ICONS v2 (MUST BUILD 256x256 ICO)");
+
 // scripts/gen-icons.mjs
 import fs from "fs/promises";
 import path from "path";
