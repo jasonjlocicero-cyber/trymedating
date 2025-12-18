@@ -60,7 +60,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/icons/icon.ico"
+      "icon": "public/icons/icon-512.png"
     }
   }
 }
