@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
     "desktop:dev": "electron .",
-    "desktop:build:win": "npm run gen:icons && npm run build && electron-builder --win",
+    "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
     "desktop:build:linux": "electron-builder --linux"
   },
@@ -35,55 +35,55 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
-    "png-to-ico": "^2.1.8",
-    "sharp": "^0.33.3",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0"
   },
-  "build": {
-  "appId": "com.trymedating.desktop",
-  "productName": "TryMeDating",
-  "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
-  "asar": true,
-
-  "files": [
-    "electron/**",
-    "dist/**",
-    "public/**",
-    "package.json"
-  ],
-
-  "directories": {
-    "buildResources": "public/icons",
-    "output": "release"
+  "optionalDependencies": {
+    "icojs": "^0.16.1",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.3"
   },
-
-  "protocols": [
-    {
-      "name": "TryMeDating Link",
-      "schemes": ["tryme"]
-    }
-  ],
-
-  "win": {
-    "target": [
+  "build": {
+    "appId": "com.trymedating.desktop",
+    "productName": "TryMeDating",
+    "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "protocols": [
       {
-        "target": "nsis",
-        "arch": ["x64"]
+        "name": "TryMeDating Link",
+        "schemes": ["tryme"]
       }
     ],
-    "icon": "public/icons/icon.ico",
-    "publisherName": "TryMeDating"
-  },
-
-  "nsis": {
-    "oneClick": true,
-    "perMachine": false,
-    "allowToChangeInstallationDirectory": false,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true,
-    "shortcutName": "TryMeDating"
+    "files": [
+      "electron/**",
+      "dist/**",
+      "public/**",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "public/icons",
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icons/icon.ico",
+      "publisherName": "TryMeDating"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TryMeDating"
+    }
   }
 }
+
 
 
