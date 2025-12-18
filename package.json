@@ -41,27 +41,49 @@
     "vite-plugin-pwa": "^0.20.0"
   },
   "build": {
-    "appId": "com.trymedating.desktop",
-    "productName": "TryMeDating",
-    "asar": true,
-    "protocols": [
+  "appId": "com.trymedating.desktop",
+  "productName": "TryMeDating",
+  "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
+  "asar": true,
+
+  "files": [
+    "electron/**",
+    "dist/**",
+    "public/**",
+    "package.json"
+  ],
+
+  "directories": {
+    "buildResources": "public/icons",
+    "output": "release"
+  },
+
+  "protocols": [
+    {
+      "name": "TryMeDating Link",
+      "schemes": ["tryme"]
+    }
+  ],
+
+  "win": {
+    "target": [
       {
-        "name": "TryMeDating Link",
-        "schemes": ["tryme"]
+        "target": "nsis",
+        "arch": ["x64"]
       }
     ],
-    "files": [
-      "electron/**",
-      "dist/**",
-      "public/**"
-    ],
-    "directories": {
-      "buildResources": "public/icons"
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "public/icons/icon.ico"
-    }
+    "icon": "public/icons/icon.ico",
+    "publisherName": "TryMeDating"
+  },
+
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "TryMeDating"
   }
 }
+
 
