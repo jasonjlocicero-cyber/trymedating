@@ -5,13 +5,28 @@ import sharp from "sharp";
 import pngToIco from "png-to-ico";
 
 const root = process.cwd();
+
+// ✅ SINGLE SOURCE OF TRUTH (heart-only)
 const input = path.join(root, "public", "logo-mark.png");
+
+// Output folders
 const outDir = path.join(root, "public", "icons");
 
-await fs.mkdir(outDir, { recursive: true });
-
-const OPTICAL_X_AT_1024 = 0;
+// Optical centering tweak (scaled for each size)
+const OPTICAL_X_AT_1024 = -64; // negative moves LEFT
 const OPTICAL_Y_AT_1024 = 0;
+
+async function safeUnlink(p) {
+  try {
+    await fs.unlink(p);
+  } catch {
+    // ignore missing
+  }
+}
+
+async function ensureDir(p) {
+  await fs.mkdir(p, { recursive: true });
+}
 
 async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
   const logo = await sharp(srcPath)
@@ -36,43 +51,92 @@ async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     },
   })
-    .composite([{ input: logo, left: pad + opticalX, top: pad + opticalY }])
+    .composite([
+      {
+        input: logo,
+        left: pad + opticalX,
+        top: pad + opticalY,
+      },
+    ])
     .png()
     .toBuffer();
 }
 
-const master1024 = await makePaddedSquareMaster(input, 1024, 860);
-await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
+async function main() {
+  await ensureDir(outDir);
 
-await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
-await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
+  // Guard: ensure input exists
+  try {
+    await fs.access(input);
+  } catch {
+    console.error(`❌ Missing input: ${input}`);
+    process.exit(1);
+  }
 
-const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
-await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
-await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
-await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
+  // ✅ Delete previously generated outputs (prevents stale "text" icons)
+  const generated = [
+    path.join(outDir, "icon-1024.png"),
+    path.join(outDir, "icon-512.png"),
+    path.join(outDir, "icon-192.png"),
+    path.join(outDir, "maskable-1024.png"),
+    path.join(outDir, "maskable-512.png"),
+    path.join(outDir, "maskable-192.png"),
+    path.join(outDir, "apple-touch-icon.png"),
+    path.join(outDir, "icon.ico"),
+    path.join(root, "public", "favicon-32.png"),
+    path.join(root, "public", "favicon-16.png"),
+    path.join(root, "public", "favicon.ico"),
+  ];
 
-await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
+  for (const f of generated) await safeUnlink(f);
 
-const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
-const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
-await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
-await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
+  // 1) Centered/padded 1024 master (optically centered)
+  const master1024 = await makePaddedSquareMaster(input, 1024, 860);
+  await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
 
-// MUST include 256x256 for electron-builder
-const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
-const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
-const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
-const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
-const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
-const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
+  // 2) Standard PWA icons
+  await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
+  await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
 
-const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
+  // 3) Maskable set (extra safe padding)
+  const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
+  await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
+  await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
+  await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
 
-await fs.writeFile(path.join(outDir, "icon.ico"), ico);
-await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
+  // 4) Apple touch icon
+  await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
 
-console.log("✅ Generated public/icons/icon.ico with 256x256 included");
+  // 5) Favicons PNG
+  const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
+  const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
+  await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
+  await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
+
+  // 6) Windows ICO (must include 256x256 frame)
+  const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
+  const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
+  const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
+  const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
+  const ico32  = await sharp(master1024).resize(32, 32).png().toBuffer();
+  const ico16  = await sharp(master1024).resize(16, 16).png().toBuffer();
+
+  const ico = await pngToIco([ico16, ico32, ico48, ico64, ico128, ico256]);
+
+  // Write BOTH:
+  // - public/favicon.ico (web)
+  // - public/icons/icon.ico (electron-builder Windows icon)
+  await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
+  await fs.writeFile(path.join(outDir, "icon.ico"), ico);
+
+  console.log("✅ Icons generated from public/logo-mark.png (heart-only).");
+  console.log("✅ Generated public/icons/icon.ico with 256x256 included.");
+}
+
+main().catch((err) => {
+  console.error("❌ gen-icons failed:", err);
+  process.exit(1);
+});
 
 
 
