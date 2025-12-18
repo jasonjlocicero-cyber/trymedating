@@ -1,3 +1,7 @@
+// IMPORTANT:
+// - public/logo-mark.png is the ONLY source asset
+// - All icons are generated — do NOT hand-edit files in public/icons
+// - Run `npm run gen:icons` after changing the logo
 // scripts/gen-icons.mjs
 import fs from "fs/promises";
 import path from "path";
