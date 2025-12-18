@@ -5,17 +5,23 @@ import sharp from "sharp";
 import pngToIco from "png-to-ico";
 
 const root = process.cwd();
+
+// ✅ Source of truth: logo mark ONLY (no text)
 const input = path.join(root, "public", "logo-mark.png");
+
+// ✅ Where electron-builder expects to find icons
 const outDir = path.join(root, "public", "icons");
 
 await fs.mkdir(outDir, { recursive: true });
 
-// Negative X moves LEFT, positive moves RIGHT
+// Optical centering tweak:
+// Negative X moves the logo LEFT, positive moves RIGHT.
 const OPTICAL_X_AT_1024 = 0;
 const OPTICAL_Y_AT_1024 = 0;
 
-async function makeMasterPng(size = 1024, inner = 860) {
-  const logo = await sharp(input)
+// Creates a padded square PNG master so small icon sizes still look centered
+async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
+  const logo = await sharp(srcPath)
     .resize(inner, inner, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
@@ -42,52 +48,49 @@ async function makeMasterPng(size = 1024, inner = 860) {
     .toBuffer();
 }
 
-(async () => {
-  // Master icon
-  const master1024 = await makeMasterPng(1024, 860);
+try {
+  // 1) Master icon
+  const master1024 = await makePaddedSquareMaster(input, 1024, 860);
   await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
 
-  // Common PNGs
+  // 2) PWA icons
   await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
-  await sharp(master1024).resize(256, 256).png().toFile(path.join(outDir, "icon-256.png"));
   await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
 
-  // Maskable
-  const maskable1024 = await makeMasterPng(1024, 780);
+  // 3) Maskable set (extra padding)
+  const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
   await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
   await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
   await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
 
-  // Apple touch
+  // 4) Apple touch icon
   await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
 
-  // Favicons PNG
-  await sharp(master1024).resize(32, 32).png().toFile(path.join(root, "public", "favicon-32.png"));
-  await sharp(master1024).resize(16, 16).png().toFile(path.join(root, "public", "favicon-16.png"));
+  // 5) Favicons
+  const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
+  const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
+  await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
+  await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-  // ✅ REAL Windows app icon ICO (must include 256x256)
-  const sizes = [256, 128, 64, 48, 32, 16];
-  const buffers = [];
-  for (const s of sizes) {
-    buffers.push(await sharp(master1024).resize(s, s).png().toBuffer());
-  }
+  // 6) ✅ Windows ICO (MUST include 256x256 or electron-builder errors)
+  const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
+  const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
+  const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
+  const ico48  = await sharp(master1024).resize(48, 48).png().toBuffer();
+  const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
+  const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
 
-  const appIco = await pngToIco(buffers);
-  await fs.writeFile(path.join(outDir, "icon.ico"), appIco);
+  // IMPORTANT: include 256 FIRST
+  const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
 
-  // Keep favicon.ico separate (small is fine)
-  const favIco = await pngToIco([
-    await sharp(master1024).resize(32, 32).png().toBuffer(),
-    await sharp(master1024).resize(16, 16).png().toBuffer(),
-  ]);
-  await fs.writeFile(path.join(root, "public", "favicon.ico"), favIco);
+  await fs.writeFile(path.join(outDir, "icon.ico"), ico);
+  await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
 
-  const stat = await fs.stat(path.join(outDir, "icon.ico"));
-  console.log(`✅ Icons written. icon.ico size = ${stat.size} bytes`);
-  console.log("   Expect icon.ico to be MUCH larger than 5,430 bytes.");
-})().catch((err) => {
+  console.log("✅ Icons written to /public/icons and favicons to /public/");
+  console.log("✅ Generated icon.ico includes 256x256 frame for electron-builder.");
+} catch (err) {
   console.error("❌ gen-icons failed:", err);
   process.exit(1);
-});
+}
 
 
