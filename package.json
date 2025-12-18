@@ -15,7 +15,7 @@
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
     "desktop:dev": "electron .",
-    "desktop:build:win": "electron-builder --win",
+    "desktop:build:win": "npm run gen:icons && npm run build && electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
     "desktop:build:linux": "electron-builder --linux"
   },
