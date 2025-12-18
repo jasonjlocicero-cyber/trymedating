@@ -4,7 +4,6 @@ console.log("RUNNING GEN-ICONS v2 (MUST BUILD 256x256 ICO)");
 import fs from "fs/promises";
 import path from "path";
 import sharp from "sharp";
-import pngToIco from "png-to-ico";
 
 const root = process.cwd();
 
@@ -82,10 +81,6 @@ try {
   const ico32b = await sharp(master1024).resize(32, 32).png().toBuffer();
   const ico16b = await sharp(master1024).resize(16, 16).png().toBuffer();
 
-  // IMPORTANT: include 256 FIRST
-  const ico = await pngToIco([ico256, ico128, ico64, ico48, ico32b, ico16b]);
-
-  await fs.writeFile(path.join(outDir, "icon.ico"), ico);
   await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
 
   console.log("✅ Icons written to /public/icons and favicons to /public/");
