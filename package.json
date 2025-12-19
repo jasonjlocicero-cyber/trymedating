@@ -57,7 +57,9 @@
     "protocols": [
       {
         "name": "TryMeDating Link",
-        "schemes": ["tryme"]
+        "schemes": [
+          "tryme"
+        ]
       }
     ],
     "files": [
@@ -74,7 +76,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "public/icons/icon.ico",
@@ -90,8 +94,11 @@
     }
   }
 }
+<<<<<<< HEAD
 
 
 
 
 
+=======
+>>>>>>> c7bc3aa (Add release:win script)
