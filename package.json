@@ -2,10 +2,8 @@
   "name": "trymedating-brand-site",
   "version": "0.1.1",
   "private": true,
-  "description": "TryMeDating desktop app",
-  "author": "Jason LoCicero <jasonjlocicero@gmail.com>",
-  "homepage": "https://trymedating.com",
-  "license": "UNLICENSED",
+  "description": "TryMeDating brand site + desktop wrapper",
+  "author": "Jason LoCicero",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
@@ -19,7 +17,7 @@
     "desktop:dev": "electron .",
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
-    "desktop:build:linux": "electron-builder --linux"
+    "desktop:build:linux": "electron-builder --linux",
     "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win"
   },
   "dependencies": {
@@ -84,8 +82,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TryMeDating"
-    },
-    "copyright": "Copyright © 2025 TryMeDating"
+    }
   }
 }
 
