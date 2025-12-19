@@ -1,27 +1,32 @@
-window.addEventListener("error", (e) => {
-  document.body.innerHTML =
-    `<div style="padding:20px;font-family:system-ui;">
-      <h2>Renderer crashed</h2>
-      <pre>${String(e?.error || e?.message || e)}</pre>
-    </div>`;
-});
-
-window.addEventListener("unhandledrejection", (e) => {
-  document.body.innerHTML =
-    `<div style="padding:20px;font-family:system-ui;">
-      <h2>Unhandled promise rejection</h2>
-      <pre>${String(e?.reason || e)}</pre>
-    </div>`;
-});
+// src/main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, HashRouter } from "react-router-dom";
 import App from "./App.jsx";
+import "./index.css";
 
-// If your preload exposes window.desktop.isElectron
+// Detect Electron (preload should set window.desktop.isElectron = true)
 const isElectron = !!window?.desktop?.isElectron;
 
+// Router: BrowserRouter for website, HashRouter for Electron (file:// safe)
 const Router = isElectron ? HashRouter : BrowserRouter;
+
+// PWA / Service Worker: DO NOT register in Electron
+if (!isElectron) {
+  // No top-level await — wrap in async IIFE
+  (async () => {
+    try {
+      const mod = await import("virtual:pwa-register");
+      const registerSW = mod?.registerSW;
+      if (typeof registerSW === "function") {
+        registerSW({ immediate: true });
+      }
+    } catch (e) {
+      // Non-fatal
+      console.warn("[pwa] registerSW failed:", e);
+    }
+  })();
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
