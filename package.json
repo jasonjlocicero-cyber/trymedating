@@ -10,15 +10,19 @@
   },
   "main": "electron/main.js",
   "scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "preview": "vite preview",
-  "gen:icons": "node scripts/gen-icons.mjs",
-  "desktop:dev": "electron .",
-  "desktop:build:win": "electron-builder --win",
-  "desktop:build:mac": "electron-builder --mac",
-  "desktop:build:linux": "electron-builder --linux",
-  "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "gen:icons": "node scripts/gen-icons.mjs",
+
+    "desktop:dev": "electron .",
+    "desktop:build:win": "electron-builder --win",
+    "desktop:build:mac": "electron-builder --mac",
+    "desktop:build:linux": "electron-builder --linux",
+
+    "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win",
+    "release:mac": "npm run gen:icons && npm run build && npm run desktop:build:mac",
+    "release:linux": "npm run gen:icons && npm run build && npm run desktop:build:linux"
   },
   "dependencies": {
     "@sentry/react": "^7.120.0",
@@ -85,6 +89,7 @@
     }
   }
 }
+
 
 
 
