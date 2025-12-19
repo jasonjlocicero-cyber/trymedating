@@ -1,11 +1,6 @@
 // electron/main.js
-import { app, BrowserWindow, Menu } from "electron";
+import { app, BrowserWindow, globalShortcut } from "electron";
 import path from "path";
-
-const isDev =
-  !app.isPackaged ||
-  process.env.NODE_ENV === "development" ||
-  process.env.TMD_DEVTOOLS === "1";
 
 let mainWindow;
 
@@ -20,23 +15,7 @@ function createWindow() {
     },
   });
 
-  // Always load built index.html (packaged-safe)
-  const indexHtml = path.join(__dirname, "..", "dist", "index.html");
-
-  // IMPORTANT: Use hash routing inside Electron
-  mainWindow.loadFile(indexHtml, { hash: "/" });
-
-  // Open DevTools reliably (and again after finish-load)
-  if (isDev) {
-    mainWindow.webContents.openDevTools({ mode: "detach" });
-    mainWindow.webContents.once("did-finish-load", () => {
-      if (!mainWindow.webContents.isDevToolsOpened()) {
-        mainWindow.webContents.openDevTools({ mode: "detach" });
-      }
-    });
-  }
-
-  // Loud logging for anything that would cause blank body
+  // Helpful diagnostics
   mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[did-fail-load]", code, desc, url);
   });
@@ -45,42 +24,48 @@ function createWindow() {
     console.error("[render-process-gone]", details);
   });
 
-  mainWindow.webContents.on("console-message", (_e, level, message, line, sourceId) => {
-    console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
-  });
+  // DEV vs PROD load
+  const isDev = !app.isPackaged;
 
-  // Add a Help menu so you can open devtools even if F12 fails
-  const menu = Menu.buildFromTemplate([
-    ...(process.platform === "darwin"
-      ? [{ label: app.name, submenu: [{ role: "quit" }] }]
-      : []),
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "togglefullscreen" },
-        {
-          label: "Toggle DevTools",
-          accelerator: process.platform === "darwin" ? "Alt+Command+I" : "Ctrl+Shift+I",
-          click: () => mainWindow?.webContents?.toggleDevTools(),
-        },
-      ],
-    },
-  ]);
-  Menu.setApplicationMenu(menu);
+  if (isDev) {
+    // Vite dev server. HashRouter works fine here too.
+    mainWindow.loadURL("http://localhost:5173/#/");
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  } else {
+    // Packaged: load built file and force hash route root
+    const indexHtml = path.join(__dirname, "..", "dist", "index.html");
+    mainWindow.loadFile(indexHtml, { hash: "/" });
+  }
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+
+  // ✅ ALWAYS allow devtools shortcuts
+  globalShortcut.register("F12", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+
+  globalShortcut.register("CommandOrControl+Shift+I", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-;
 
 
 
