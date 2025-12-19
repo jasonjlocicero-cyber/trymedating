@@ -10,39 +10,40 @@ import App from './App';
 import './index.css';
 import './styles.css';
 
-// ✅ Detect Electron safely
-const isElectron = !!window?.desktop?.isElectron;
+// PWA registration (vite-plugin-pwa) — DO NOT register inside Electron/file://
+import { registerSW } from 'virtual:pwa-register';
 
-// PWA registration (vite-plugin-pwa)
-// IMPORTANT: Do NOT register SW inside Electron
-if (!isElectron) {
-  // dynamic import WITHOUT top-level await
-  import('virtual:pwa-register')
-    .then(({ registerSW }) => {
-      registerSW({ immediate: true });
-    })
-    .catch((err) => {
-      console.warn('[pwa] registerSW skipped/failed:', err);
-    });
+const isElectron = !!window?.desktop?.isElectron;
+const isFileProtocol = typeof window !== 'undefined' && window.location?.protocol === 'file:';
+
+// Only register SW for the real website context
+if (!isElectron && !isFileProtocol) {
+  registerSW({ immediate: true });
 }
+
+// ✅ Choose the right router:
+// - Web: BrowserRouter (nice URLs)
+// - Electron/file://: HashRouter (works reliably with file protocol)
+const Router = isElectron || isFileProtocol ? HashRouter : BrowserRouter;
 
 // ✅ Desktop/Electron presence + deep-link hook (safe in browser)
 (function initDesktopBridge() {
   const d = window?.desktop;
   if (!d?.isElectron) return;
 
-  console.log('[desktop] running in Electron:', { platform: d.platform });
+  console.log('[desktop] running in Electron:', {
+    platform: d.platform,
+  });
 
   const unsub = d.onDeepLink?.((payload) => {
     console.log('[desktop] deep link:', payload);
+    // TODO: route or handle payload here if needed
   });
 
   window.__TMD_UNSUB_DEEPLINK__ = unsub;
 })();
 
 const rootEl = document.getElementById('root');
-const Router = isElectron ? HashRouter : BrowserRouter;
-
 createRoot(rootEl).render(
   <React.StrictMode>
     <Router>
