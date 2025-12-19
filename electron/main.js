@@ -1,67 +1,12 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, shell, ipcMain, crashReporter, session } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain } = require("electron");
 const path = require("path");
 
-const isDev =
-  !app.isPackaged ||
-  process.env.NODE_ENV === "development" ||
-  process.env.ELECTRON_IS_DEV === "1";
+// ✅ DEV should be determined by packaging state, not NODE_ENV
+// (NODE_ENV can be set globally on Windows and break packaged apps)
+const isDev = !app.isPackaged;
 
 let mainWindow;
-
-// ----------------------
-// Crash + hard-fail logging
-// ----------------------
-function startCrashReporter() {
-  // This does NOT send anywhere unless you configure submitURL.
-  // It still generates local crash dumps, which helps stability debugging.
-  try {
-    crashReporter.start({
-      productName: "TryMeDating",
-      companyName: "TryMeDating",
-      submitURL: "", // keep empty for now (local only)
-      uploadToServer: false,
-      compress: true,
-    });
-  } catch {
-    // ignore if crashReporter unavailable
-  }
-}
-
-function wireProcessGuards() {
-  process.on("uncaughtException", (err) => {
-    console.error("[main] uncaughtException:", err);
-  });
-
-  process.on("unhandledRejection", (reason) => {
-    console.error("[main] unhandledRejection:", reason);
-  });
-
-  app.on("render-process-gone", (_event, webContents, details) => {
-    console.error("[main] render-process-gone:", details);
-    // If a renderer crashes, try to recover by reloading
-    try {
-      if (!isDev && webContents) webContents.reload();
-    } catch {}
-  });
-
-  app.on("child-process-gone", (_event, details) => {
-    console.error("[main] child-process-gone:", details);
-  });
-}
-
-// ----------------------
-// Security helpers
-// ----------------------
-function isAllowedDevURL(url) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-    return u.hostname === "localhost" || u.hostname === "127.0.0.1";
-  } catch {
-    return false;
-  }
-}
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
@@ -70,7 +15,7 @@ function createMainWindow() {
     show: false,
     backgroundColor: "#ffffff",
     title: "TryMeDating",
-    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"), // Windows OK
+    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"), // ok for Windows
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -78,63 +23,44 @@ function createMainWindow() {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      devTools: isDev, // ✅ DevTools only in dev
     },
   });
 
-  // ✅ Always open external links in system browser (never inside app)
+  // ✅ Block new-window popups; open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
 
-  // ✅ Block unexpected navigation
+  // ✅ Prevent navigation to random origins (phishing / redirects)
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (isDev) {
-      // allow dev server only
-      if (!isAllowedDevURL(url)) event.preventDefault();
-      return;
-    }
-
-    // production: only allow local file://
     try {
       const target = new URL(url);
-      if (target.protocol !== "file:") event.preventDefault();
+
+      if (isDev) {
+        // allow localhost only in dev
+        const allowedHosts = ["localhost", "127.0.0.1"];
+        if (target.protocol !== "http:" || !allowedHosts.includes(target.hostname)) {
+          event.preventDefault();
+        }
+      } else {
+        // production must be file:// only
+        if (target.protocol !== "file:") event.preventDefault();
+      }
     } catch {
       event.preventDefault();
     }
   });
 
-  // ✅ Permission hard-deny (tightens stability & security)
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
-
-  // ✅ Basic CSP header in production (keeps renderer predictable)
-  // Note: your Vite build should work with this; if you later add inline scripts, adjust.
-  if (!isDev) {
-    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      const csp = [
-        "default-src 'self'",
-        "img-src 'self' data: blob:",
-        "style-src 'self' 'unsafe-inline'",
-        "script-src 'self'",
-        "connect-src 'self' https://*.supabase.co https://*.sentry.io",
-        "font-src 'self' data:",
-      ].join("; ");
-
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          "Content-Security-Policy": [csp],
-        },
-      });
-    });
-  }
-
   if (isDev) {
+    // Dev: Vite server
     const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
     mainWindow.loadURL(devUrl);
   } else {
-    mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+    // Prod: load built app from dist
+    // app.getAppPath() is safe in asar/unpacked
+    const indexHtml = path.join(app.getAppPath(), "dist", "index.html");
+    mainWindow.loadFile(indexHtml);
   }
 
   mainWindow.once("ready-to-show", () => {
@@ -145,7 +71,7 @@ function createMainWindow() {
   // ✅ Remove menu in production
   if (!isDev) Menu.setApplicationMenu(null);
 
-  // ✅ Kill DevTools shortcuts in production (belt & suspenders)
+  // ✅ Kill DevTools shortcuts in production
   mainWindow.webContents.on("before-input-event", (event, input) => {
     if (!isDev && input.control && input.shift && input.key.toLowerCase() === "i") {
       event.preventDefault();
@@ -158,15 +84,7 @@ function createMainWindow() {
 
 app.setName("TryMeDating");
 
-// ✅ Helps Windows identity & installer behavior
-try {
-  app.setAppUserModelId("com.trymedating.desktop");
-} catch {}
-
-startCrashReporter();
-wireProcessGuards();
-
-// ✅ Single-instance lock (prevents multiple apps fighting storage/protocol)
+// ✅ Single-instance lock
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -191,7 +109,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// ✅ Expose app version to renderer
+// ✅ Expose app version
 ipcMain.handle("app:getVersion", () => app.getVersion());
+
 
 
