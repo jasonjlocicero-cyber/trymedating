@@ -10,46 +10,36 @@ import App from './App'
 import './index.css'
 import './styles.css' // consolidated global styles
 
-// PWA registration (vite-plugin-pwa) — web only
+// PWA registration (vite-plugin-pwa)
 import { registerSW } from 'virtual:pwa-register'
 
-// Detect Electron safely
+// Detect Electron / file:// (packaged desktop)
 const isElectron = !!window?.desktop?.isElectron
-const isFileProtocol =
-  typeof window !== 'undefined' && window.location && window.location.protocol === 'file:'
+const isFileProtocol = window?.location?.protocol === 'file:'
 
 // ✅ Router choice:
-// - Electron packaged runs on file:// -> HashRouter avoids pathname issues
-// - Web / dev server stays BrowserRouter
+// - Web (Netlify): BrowserRouter
+// - Electron (file://): HashRouter (prevents blank route issues under file protocol)
 const Router = isElectron || isFileProtocol ? HashRouter : BrowserRouter
 
-// ✅ Register SW only when it makes sense (web http/https)
+// ✅ Only register the service worker on real web origins (http/https), not Electron/file://
 if (!isElectron && !isFileProtocol) {
   registerSW({ immediate: true })
 }
 
-// ✅ Desktop/Electron presence + deep-link hook (safe in browser)
+// ✅ Optional: Desktop bridge visibility (safe everywhere)
 ;(function initDesktopBridge() {
   const d = window?.desktop
   if (!d?.isElectron) return
 
-  // Quick visibility that the bridge is alive
   console.log('[desktop] running in Electron:', { platform: d.platform })
 
-  // Cleanup any prior hot-reload listener (dev only)
-  try {
-    const prev = window.__TMD_UNSUB_DEEPLINK__
-    if (typeof prev === 'function') prev()
-  } catch {
-    /* ignore */
-  }
-
-  // Optional: listen for deep links if your main process emits them
   const unsub = d.onDeepLink?.((payload) => {
     console.log('[desktop] deep link:', payload)
-    // Routing is handled elsewhere (or add mapping here if you want)
+    // Deep-link routing is handled in App.jsx (and/or your hook), so we just log here.
   })
 
+  // For dev hot reload cleanup if needed
   window.__TMD_UNSUB_DEEPLINK__ = unsub
 })()
 
@@ -61,7 +51,7 @@ createRoot(rootEl).render(
     </Router>
   </React.StrictMode>
 )
-;
+
 
 
 
