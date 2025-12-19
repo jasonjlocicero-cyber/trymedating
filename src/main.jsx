@@ -1,3 +1,18 @@
+window.addEventListener("error", (e) => {
+  document.body.innerHTML =
+    `<div style="padding:20px;font-family:system-ui;">
+      <h2>Renderer crashed</h2>
+      <pre>${String(e?.error || e?.message || e)}</pre>
+    </div>`;
+});
+
+window.addEventListener("unhandledrejection", (e) => {
+  document.body.innerHTML =
+    `<div style="padding:20px;font-family:system-ui;">
+      <h2>Unhandled promise rejection</h2>
+      <pre>${String(e?.reason || e)}</pre>
+    </div>`;
+});
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, HashRouter } from "react-router-dom";
