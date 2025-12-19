@@ -1,9 +1,9 @@
 // electron/main.js
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import path from "path";
 
-const DEVTOOLS = process.env.TMD_DEVTOOLS === "1" || !app.isPackaged;
-const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL; // optional, if you use it in dev
+const DEVTOOLS = true; // FORCE ON for now
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL; // optional
 
 let mainWindow;
 
@@ -18,62 +18,63 @@ function createWindow() {
     },
   });
 
+  // ✅ PROOF POPUP: if you don't see this, you're NOT running this file
+  dialog.showMessageBox(mainWindow, {
+    type: "info",
+    title: "TryMeDating Debug",
+    message: "MAIN.JS LOADED ✅ (electron/main.js)",
+  });
+
   // ---- Load URL (dev) or file (prod) ----
   if (DEV_SERVER_URL) {
-    // Dev: Vite server
-    // Use hash routing in Electron
     mainWindow.loadURL(`${DEV_SERVER_URL}#/`);
   } else {
-    // Prod: packaged/dist
     const indexHtml = path.join(__dirname, "..", "dist", "index.html");
-    // HashRouter expects #/...
-    mainWindow.loadFile(indexHtml, { hash: "/" });
+    // IMPORTANT: do NOT force hash here while we're debugging
+    mainWindow.loadFile(indexHtml);
   }
 
-  // ---- Always log failures ----
+  mainWindow.webContents.on("did-finish-load", async () => {
+    const url = mainWindow.webContents.getURL();
+
+    // ✅ Second proof popup: shows EXACTLY what Electron loaded
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "TryMeDating Debug",
+      message: `did-finish-load ✅\nURL:\n${url}`,
+    });
+
+    // ✅ FORCE DevTools to open AFTER load
+    setTimeout(() => {
+      try {
+        mainWindow.webContents.openDevTools({ mode: "detach" });
+      } catch {}
+    }, 250);
+  });
+
   mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
-    console.error("[did-fail-load]", code, desc, url);
+    dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "TryMeDating Debug",
+      message: `[did-fail-load]\n${code} ${desc}\n${url}`,
+    });
   });
 
   mainWindow.webContents.on("render-process-gone", (_e, details) => {
-    console.error("[render-process-gone]", details);
+    dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: "TryMeDating Debug",
+      message: `[render-process-gone]\n${JSON.stringify(details, null, 2)}`,
+    });
   });
-
-  // ---- DevTools toggle keys (works in packaged too) ----
-  mainWindow.webContents.on("before-input-event", (_event, input) => {
-    const isF12 = input.key === "F12" && input.type === "keyDown";
-    const isCtrlShiftI =
-      input.type === "keyDown" &&
-      input.control &&
-      input.shift &&
-      (input.key === "I" || input.key === "i");
-
-    if (isF12 || isCtrlShiftI) {
-      if (mainWindow.webContents.isDevToolsOpened()) {
-        mainWindow.webContents.closeDevTools();
-      } else {
-        mainWindow.webContents.openDevTools({ mode: "detach" });
-      }
-      _event.preventDefault();
-    }
-  });
-
-  if (DEVTOOLS) {
-    mainWindow.webContents.openDevTools({ mode: "detach" });
-  }
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 
