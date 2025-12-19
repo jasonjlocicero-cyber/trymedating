@@ -4,7 +4,11 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // ✅ Required for Electron file:// and also safe for Netlify
   base: './',
+
+  // ✅ Plugins must live inside `plugins: []`
+  plugins: [
     react(),
     VitePWA({
       // We register via `virtual:pwa-register` in src/main.jsx
@@ -86,5 +90,6 @@ export default defineConfig({
     sourcemap: false
   }
 })
+
 
 
