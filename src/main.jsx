@@ -1,40 +1,69 @@
-// src/main.jsx
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, HashRouter } from "react-router-dom";
-import App from "./App.jsx";
-import "./index.css";
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
+import App from './App'
 
-// Detect Electron (preload should set window.desktop.isElectron = true)
-const isElectron = !!window?.desktop?.isElectron;
+// If you have global styles import them here (keep yours if different)
+import './index.css'
 
-// Router: BrowserRouter for website, HashRouter for Electron (file:// safe)
-const Router = isElectron ? HashRouter : BrowserRouter;
+/**
+ * Detect Electron renderer.
+ * You already expose `window.desktop.isElectron` via preload (recommended).
+ * Fallback: user agent check (less ideal) if preload isn't present.
+ */
+const isElectron =
+  !!window?.desktop?.isElectron ||
+  (typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || ''))
 
-// PWA / Service Worker: DO NOT register in Electron
-if (!isElectron) {
-  // No top-level await — wrap in async IIFE
-  (async () => {
-    try {
-      const mod = await import("virtual:pwa-register");
-      const registerSW = mod?.registerSW;
-      if (typeof registerSW === "function") {
-        registerSW({ immediate: true });
-      }
-    } catch (e) {
-      // Non-fatal
-      console.warn("[pwa] registerSW failed:", e);
-    }
-  })();
+/**
+ * Register the PWA Service Worker ONLY for web builds (NOT Electron).
+ * - No top-level await.
+ * - Import is dynamic inside an async function.
+ */
+function registerPWAIfWeb() {
+  if (isElectron) return
+
+  // Only attempt on secure contexts (https) or localhost
+  const isLocalhost =
+    typeof location !== 'undefined' &&
+    (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+
+  const isSecure =
+    typeof window !== 'undefined' &&
+    (window.isSecureContext || isLocalhost)
+
+  if (!isSecure) return
+
+  // Don’t block rendering; do it after the app is mounted
+  setTimeout(() => {
+    import('virtual:pwa-register')
+      .then(({ registerSW }) => {
+        registerSW({
+          immediate: true,
+          onNeedRefresh() {
+            // Optional: you can wire this to a toast later
+            console.log('[PWA] Update available')
+          },
+          onOfflineReady() {
+            console.log('[PWA] Offline ready')
+          }
+        })
+      })
+      .catch((err) => {
+        console.warn('[PWA] registerSW import failed:', err)
+      })
+  }, 0)
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(
+ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <Router>
+    <BrowserRouter>
       <App />
-    </Router>
+    </BrowserRouter>
   </React.StrictMode>
-);
+)
+
+registerPWAIfWeb()
 
 
 
