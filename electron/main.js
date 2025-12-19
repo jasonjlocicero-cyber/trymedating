@@ -1,150 +1,115 @@
 // electron/main.js
-const { app, BrowserWindow, shell } = require('electron');
-const path = require('path');
+const { app, BrowserWindow, Menu, shell, ipcMain } = require("electron");
+const path = require("path");
 
-let win;
+const isDev =
+  !app.isPackaged ||
+  process.env.NODE_ENV === "development" ||
+  process.env.ELECTRON_IS_DEV === "1";
 
-/**
- * URL strategy:
- * - If you set TMD_APP_URL, we always load that (best for “wrapper” builds).
- * - Else if running dev (ELECTRON_START_URL/VITE_DEV_SERVER_URL), load that.
- * - Else default to your live site.
- */
-const APP_URL =
-  process.env.TMD_APP_URL ||
-  process.env.ELECTRON_START_URL ||
-  process.env.VITE_DEV_SERVER_URL ||
-  'https://trymedating.com';
+let mainWindow;
 
-const PROTOCOL = 'tryme';
-
-function registerProtocol() {
-  try {
-    // Best-effort registration (Windows/macOS)
-    // NOTE: On Windows, protocol registration is most reliable from an installed build,
-    // but this still helps in dev + “first run” scenarios.
-    if (process.defaultApp) {
-      // Dev mode: pass the entry script as an arg (Windows needs this)
-      if (process.argv.length >= 2) {
-        app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
-      }
-    } else {
-      // Packaged app
-      app.setAsDefaultProtocolClient(PROTOCOL);
-    }
-  } catch (e) {
-    console.error('[protocol] register failed:', e);
-  }
-}
-
-function createWindow() {
-  win = new BrowserWindow({
-    width: 1100,
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
     height: 800,
-    minWidth: 960,
-    minHeight: 640,
-    backgroundColor: '#ffffff',
     show: false,
+    backgroundColor: "#ffffff",
+    title: "TryMeDating",
+    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"), // OK on Windows
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      sandbox: true
-      // (no nodeIntegration in renderer for safety)
-    }
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
   });
 
-  win.once('ready-to-show', () => win.show());
-
-  // Load dev server or your live site (wrapper) or whatever TMD_APP_URL points to
-  win.loadURL(APP_URL);
-
-  // Open external links in the user’s default browser
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  // ✅ Block new-window popups; open external links in the system browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
-    return { action: 'deny' };
+    return { action: "deny" };
+  });
+
+  // ✅ Prevent navigation to random origins (phishing / unexpected redirects)
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    try {
+      const target = new URL(url);
+      const allowed = isDev
+        ? ["localhost", "127.0.0.1"]
+        : []; // in prod you should only load local files
+      if (!isDev && target.protocol !== "file:") {
+        event.preventDefault();
+      }
+      if (isDev && target.protocol !== "http:") {
+        // keep dev simple
+        return;
+      }
+      if (isDev && !allowed.includes(target.hostname)) {
+        event.preventDefault();
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
+
+  if (isDev) {
+    // Dev: Vite server
+    const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+    mainWindow.loadURL(devUrl);
+  } else {
+    // Prod: Vite build output
+    mainWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"));
+  }
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    if (isDev) mainWindow.webContents.openDevTools({ mode: "detach" });
+  });
+
+  // ✅ Remove menu in production (cleaner + fewer shortcuts)
+  if (!isDev) Menu.setApplicationMenu(null);
+
+  // ✅ Kill DevTools in production even if a shortcut tries to open it
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (!isDev && input.control && input.shift && input.key.toLowerCase() === "i") {
+      event.preventDefault();
+    }
+    if (!isDev && input.key === "F12") {
+      event.preventDefault();
+    }
   });
 }
 
-function navigateToRoute(target) {
-  if (!win) return;
+app.setName("TryMeDating");
 
-  const js = `
-    try {
-      window.history.pushState({}, "", ${JSON.stringify(target)});
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    } catch (e) {}
-  `;
-
-  win.show();
-  win.focus();
-  win.webContents.executeJavaScript(js).catch(() => {});
-}
-
-function handleDeepLink(link) {
-  try {
-    const u = new URL(link);
-
-    // Map tryme://… to SPA routes
-    // Supported:
-    //   tryme://connect?token=...
-    //   tryme://u?handle=jason    (or tryme://u/jason)
-    let target = '/';
-
-    if (u.hostname === 'connect' || u.pathname === '/connect') {
-      target = '/connect' + (u.search || '');
-    } else if (u.hostname === 'u' || u.pathname.startsWith('/u/')) {
-      const handle = u.searchParams.get('handle') || u.pathname.split('/').pop();
-      if (handle) target = `/u/${handle}`;
-    }
-
-    // If the page hasn’t finished loading yet, wait a moment.
-    if (win && win.webContents && win.webContents.isLoading()) {
-      win.webContents.once('did-finish-load', () => navigateToRoute(target));
-    } else {
-      navigateToRoute(target);
-    }
-  } catch (e) {
-    console.error('[deep link] error:', e);
-  }
-}
-
-// Ensure single instance
+// ✅ Single-instance lock (prevents multiple apps fighting over storage/protocols)
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  // Windows: handle deep link when a 2nd instance is attempted
-  app.on('second-instance', (_event, argv) => {
-    const deep = argv.find(a => typeof a === 'string' && a.startsWith(`${PROTOCOL}://`));
-    if (deep) handleDeepLink(deep);
-
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
 
   app.whenReady().then(() => {
-    registerProtocol();
-    createWindow();
+    createMainWindow();
 
-    // Windows: handle a deep link passed at first launch
-    if (process.platform === 'win32') {
-      const deepArg = process.argv.find(a => typeof a === 'string' && a.startsWith(`${PROTOCOL}://`));
-      if (deepArg) setTimeout(() => handleDeepLink(deepArg), 500);
-    }
-  });
-
-  // macOS: deep links (app already running / or launching)
-  app.on('open-url', (event, url) => {
-    event.preventDefault();
-    handleDeepLink(url);
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    });
   });
 }
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+// ✅ Expose app version to renderer via IPC (so you can display it in the UI)
+ipcMain.handle("app:getVersion", () => app.getVersion());
+
