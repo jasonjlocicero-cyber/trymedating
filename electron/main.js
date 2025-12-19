@@ -1,10 +1,11 @@
 // electron/main.js
-import { app, BrowserWindow, globalShortcut } from "electron";
+import { app, BrowserWindow } from "electron";
 import path from "path";
 
-const DEVTOOLS = process.env.TMD_DEVTOOLS === "1";
+const DEVTOOLS = process.env.TMD_DEVTOOLS === "1" || !app.isPackaged;
+const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL; // optional, if you use it in dev
 
-let mainWindow = null;
+let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -17,11 +18,19 @@ function createWindow() {
     },
   });
 
-  const indexHtml = path.join(__dirname, "..", "dist", "index.html");
+  // ---- Load URL (dev) or file (prod) ----
+  if (DEV_SERVER_URL) {
+    // Dev: Vite server
+    // Use hash routing in Electron
+    mainWindow.loadURL(`${DEV_SERVER_URL}#/`);
+  } else {
+    // Prod: packaged/dist
+    const indexHtml = path.join(__dirname, "..", "dist", "index.html");
+    // HashRouter expects #/...
+    mainWindow.loadFile(indexHtml, { hash: "/" });
+  }
 
-  // With HashRouter, this ensures we start at "#/"
-  mainWindow.loadFile(indexHtml, { hash: "/" });
-
+  // ---- Always log failures ----
   mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[did-fail-load]", code, desc, url);
   });
@@ -30,20 +39,22 @@ function createWindow() {
     console.error("[render-process-gone]", details);
   });
 
-  // Always allow a DevTools toggle hotkey in packaged builds
-  // F12 or Ctrl+Shift+I
-  mainWindow.webContents.on("before-input-event", (event, input) => {
-    const isF12 = input.key === "F12";
+  // ---- DevTools toggle keys (works in packaged too) ----
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    const isF12 = input.key === "F12" && input.type === "keyDown";
     const isCtrlShiftI =
-      input.control && input.shift && (input.key === "I" || input.key === "i");
+      input.type === "keyDown" &&
+      input.control &&
+      input.shift &&
+      (input.key === "I" || input.key === "i");
 
     if (isF12 || isCtrlShiftI) {
-      event.preventDefault();
       if (mainWindow.webContents.isDevToolsOpened()) {
         mainWindow.webContents.closeDevTools();
       } else {
         mainWindow.webContents.openDevTools({ mode: "detach" });
       }
+      _event.preventDefault();
     }
   });
 
@@ -55,14 +66,8 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  // Optional: global shortcut (works even if focus quirks happen)
-  globalShortcut.register("F12", () => {
-    if (!mainWindow) return;
-    if (mainWindow.webContents.isDevToolsOpened()) {
-      mainWindow.webContents.closeDevTools();
-    } else {
-      mainWindow.webContents.openDevTools({ mode: "detach" });
-    }
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
@@ -70,14 +75,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
-});
-;
 
 
 
