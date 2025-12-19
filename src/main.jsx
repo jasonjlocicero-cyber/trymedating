@@ -10,30 +10,26 @@ import App from './App';
 import './index.css';
 import './styles.css';
 
-// PWA registration (vite-plugin-pwa) — DO NOT register inside Electron/file://
-import { registerSW } from 'virtual:pwa-register';
-
+// Detect Electron + file protocol
 const isElectron = !!window?.desktop?.isElectron;
-const isFileProtocol = typeof window !== 'undefined' && window.location?.protocol === 'file:';
+const isFileProtocol = window.location.protocol === 'file:';
 
-// Only register SW for the real website context
+// ✅ Only register PWA service worker on the website (http/https), not Electron/file://
+// ✅ Avoid top-level await (use promise-based dynamic import)
 if (!isElectron && !isFileProtocol) {
-  registerSW({ immediate: true });
+  import('virtual:pwa-register')
+    .then(({ registerSW }) => registerSW({ immediate: true }))
+    .catch(() => {
+      // ignore if plugin not available in a given environment
+    });
 }
-
-// ✅ Choose the right router:
-// - Web: BrowserRouter (nice URLs)
-// - Electron/file://: HashRouter (works reliably with file protocol)
-const Router = isElectron || isFileProtocol ? HashRouter : BrowserRouter;
 
 // ✅ Desktop/Electron presence + deep-link hook (safe in browser)
 (function initDesktopBridge() {
   const d = window?.desktop;
   if (!d?.isElectron) return;
 
-  console.log('[desktop] running in Electron:', {
-    platform: d.platform,
-  });
+  console.log('[desktop] running in Electron:', { platform: d.platform });
 
   const unsub = d.onDeepLink?.((payload) => {
     console.log('[desktop] deep link:', payload);
@@ -43,6 +39,8 @@ const Router = isElectron || isFileProtocol ? HashRouter : BrowserRouter;
   window.__TMD_UNSUB_DEEPLINK__ = unsub;
 })();
 
+const Router = (isElectron || isFileProtocol) ? HashRouter : BrowserRouter;
+
 const rootEl = document.getElementById('root');
 createRoot(rootEl).render(
   <React.StrictMode>
@@ -51,6 +49,7 @@ createRoot(rootEl).render(
     </Router>
   </React.StrictMode>
 );
+;
 
 
 
