@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, crashReporter, session } = require("electron");
 const path = require("path");
 
 const isDev =
@@ -9,51 +9,57 @@ const isDev =
 
 let mainWindow;
 
-// --- Deep link state (Windows can deliver before window is ready) ---
-let pendingDeepLink = null;
-
-function isTryMeUrl(s) {
-  return typeof s === "string" && s.toLowerCase().startsWith("tryme:");
-}
-
-function extractDeepLinkFromArgv(argv) {
-  if (!Array.isArray(argv)) return null;
-  // argv may include quotes or extra args; grab the first thing that looks like tryme:
-  const found = argv.find((a) => isTryMeUrl(a) || (typeof a === "string" && a.includes("tryme:")));
-  if (!found) return null;
-
-  // Normalize a bit
-  let url = String(found).trim().replace(/^"+|"+$/g, "").replace(/^'+|'+$/g, "");
-  const idx = url.toLowerCase().indexOf("tryme:");
-  if (idx > 0) url = url.slice(idx);
-  return url;
-}
-
-function sendDeepLinkToRenderer(url) {
-  if (!url) return;
-
-  // if window isn't ready yet, stash it
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingDeepLink = url;
-    return;
-  }
-
-  const sendNow = () => {
-    try {
-      mainWindow.webContents.send("deep-link", { url });
-    } catch (e) {
-      // If send fails (rare), stash and try once after load
-      pendingDeepLink = url;
-    }
-  };
-
-  if (mainWindow.webContents.isLoading()) {
-    // wait until the page is loaded
-    mainWindow.webContents.once("did-finish-load", () => {
-      sendNow();
+// ----------------------
+// Crash + hard-fail logging
+// ----------------------
+function startCrashReporter() {
+  // This does NOT send anywhere unless you configure submitURL.
+  // It still generates local crash dumps, which helps stability debugging.
+  try {
+    crashReporter.start({
+      productName: "TryMeDating",
+      companyName: "TryMeDating",
+      submitURL: "", // keep empty for now (local only)
+      uploadToServer: false,
+      compress: true,
     });
-  } else {
-    sendNow();
+  } catch {
+    // ignore if crashReporter unavailable
+  }
+}
+
+function wireProcessGuards() {
+  process.on("uncaughtException", (err) => {
+    console.error("[main] uncaughtException:", err);
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[main] unhandledRejection:", reason);
+  });
+
+  app.on("render-process-gone", (_event, webContents, details) => {
+    console.error("[main] render-process-gone:", details);
+    // If a renderer crashes, try to recover by reloading
+    try {
+      if (!isDev && webContents) webContents.reload();
+    } catch {}
+  });
+
+  app.on("child-process-gone", (_event, details) => {
+    console.error("[main] child-process-gone:", details);
+  });
+}
+
+// ----------------------
+// Security helpers
+// ----------------------
+function isAllowedDevURL(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  } catch {
+    return false;
   }
 }
 
@@ -64,8 +70,7 @@ function createMainWindow() {
     show: false,
     backgroundColor: "#ffffff",
     title: "TryMeDating",
-    // In dev this path works; in packaged builds, icon handling is mostly via electron-builder config
-    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"),
+    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"), // Windows OK
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -73,34 +78,57 @@ function createMainWindow() {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      devTools: isDev, // ✅ DevTools only in dev
     },
   });
 
-  // ✅ Block new-window popups; open external links in the system browser
+  // ✅ Always open external links in system browser (never inside app)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
 
-  // ✅ Prevent navigation to random origins (phishing / unexpected redirects)
+  // ✅ Block unexpected navigation
   mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (isDev) {
+      // allow dev server only
+      if (!isAllowedDevURL(url)) event.preventDefault();
+      return;
+    }
+
+    // production: only allow local file://
     try {
       const target = new URL(url);
-      const allowed = isDev ? ["localhost", "127.0.0.1"] : []; // prod should only be file:
-      if (!isDev && target.protocol !== "file:") {
-        event.preventDefault();
-      }
-      if (isDev && target.protocol !== "http:") {
-        // keep dev simple
-        return;
-      }
-      if (isDev && !allowed.includes(target.hostname)) {
-        event.preventDefault();
-      }
+      if (target.protocol !== "file:") event.preventDefault();
     } catch {
       event.preventDefault();
     }
   });
+
+  // ✅ Permission hard-deny (tightens stability & security)
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
+
+  // ✅ Basic CSP header in production (keeps renderer predictable)
+  // Note: your Vite build should work with this; if you later add inline scripts, adjust.
+  if (!isDev) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const csp = [
+        "default-src 'self'",
+        "img-src 'self' data: blob:",
+        "style-src 'self' 'unsafe-inline'",
+        "script-src 'self'",
+        "connect-src 'self' https://*.supabase.co https://*.sentry.io",
+        "font-src 'self' data:",
+      ].join("; ");
+
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [csp],
+        },
+      });
+    });
+  }
 
   if (isDev) {
     const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
@@ -112,19 +140,12 @@ function createMainWindow() {
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
     if (isDev) mainWindow.webContents.openDevTools({ mode: "detach" });
-
-    // If we received a deep link before the window was visible, forward it now
-    if (pendingDeepLink) {
-      const dl = pendingDeepLink;
-      pendingDeepLink = null;
-      sendDeepLinkToRenderer(dl);
-    }
   });
 
-  // ✅ Remove menu in production (cleaner + fewer shortcuts)
+  // ✅ Remove menu in production
   if (!isDev) Menu.setApplicationMenu(null);
 
-  // ✅ Kill DevTools in production even if a shortcut tries to open it
+  // ✅ Kill DevTools shortcuts in production (belt & suspenders)
   mainWindow.webContents.on("before-input-event", (event, input) => {
     if (!isDev && input.control && input.shift && input.key.toLowerCase() === "i") {
       event.preventDefault();
@@ -137,35 +158,20 @@ function createMainWindow() {
 
 app.setName("TryMeDating");
 
-// --- Register protocol client (best effort in dev, reliable when installed/packaged) ---
-function registerProtocolClient() {
-  try {
-    if (process.platform === "win32") {
-      // In dev, Windows needs the exe + your script path
-      if (process.defaultApp) {
-        app.setAsDefaultProtocolClient("tryme", process.execPath, [path.resolve(process.argv[1])]);
-      } else {
-        app.setAsDefaultProtocolClient("tryme");
-      }
-    } else {
-      app.setAsDefaultProtocolClient("tryme");
-    }
-  } catch (e) {
-    // Don't crash the app if this fails; it can fail in dev or without install privileges
-    console.warn("[protocol] setAsDefaultProtocolClient failed:", e?.message || e);
-  }
-}
+// ✅ Helps Windows identity & installer behavior
+try {
+  app.setAppUserModelId("com.trymedating.desktop");
+} catch {}
 
-// ✅ Single-instance lock
+startCrashReporter();
+wireProcessGuards();
+
+// ✅ Single-instance lock (prevents multiple apps fighting storage/protocol)
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  // Windows: second instance is where deep link arrives while app already running
-  app.on("second-instance", (_event, argv) => {
-    const dl = extractDeepLinkFromArgv(argv);
-    if (dl) sendDeepLinkToRenderer(dl);
-
+  app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -173,18 +179,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    registerProtocolClient();
     createMainWindow();
-
-    // Windows: deep link when app is launched the first time via protocol
-    if (process.platform === "win32") {
-      const dl = extractDeepLinkFromArgv(process.argv);
-      if (dl) {
-        pendingDeepLink = dl;
-        // If window already loaded quickly, we can attempt immediately
-        sendDeepLinkToRenderer(dl);
-      }
-    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -192,16 +187,11 @@ if (!gotLock) {
   });
 }
 
-// macOS: deep links arrive here (both first launch and running app)
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  if (isTryMeUrl(url)) sendDeepLinkToRenderer(url);
-});
-
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// ✅ Expose app version to renderer via IPC
+// ✅ Expose app version to renderer
 ipcMain.handle("app:getVersion", () => app.getVersion());
+
 
