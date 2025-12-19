@@ -1,13 +1,16 @@
 // electron/main.js
-const { app, BrowserWindow, globalShortcut } = require("electron");
-const path = require("path");
+import { app, BrowserWindow, Menu } from "electron";
+import path from "path";
 
-function hasDevtoolsFlag() {
-  return process.argv.includes("--devtools") || process.env.TMD_DEVTOOLS === "1";
-}
+const isDev =
+  !app.isPackaged ||
+  process.env.NODE_ENV === "development" ||
+  process.env.TMD_DEVTOOLS === "1";
+
+let mainWindow;
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     webPreferences: {
@@ -17,65 +20,67 @@ function createWindow() {
     },
   });
 
+  // Always load built index.html (packaged-safe)
   const indexHtml = path.join(__dirname, "..", "dist", "index.html");
 
-  // With HashRouter, this is all you need:
-  win.loadFile(indexHtml);
+  // IMPORTANT: Use hash routing inside Electron
+  mainWindow.loadFile(indexHtml, { hash: "/" });
 
-  // --- Debug helpers ---
-  win.webContents.on("did-fail-load", (_e, code, desc, url) => {
+  // Open DevTools reliably (and again after finish-load)
+  if (isDev) {
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+    mainWindow.webContents.once("did-finish-load", () => {
+      if (!mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.openDevTools({ mode: "detach" });
+      }
+    });
+  }
+
+  // Loud logging for anything that would cause blank body
+  mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("[did-fail-load]", code, desc, url);
   });
 
-  win.webContents.on("render-process-gone", (_e, details) => {
+  mainWindow.webContents.on("render-process-gone", (_e, details) => {
     console.error("[render-process-gone]", details);
   });
 
-  win.webContents.on("console-message", (_e, level, message, line, sourceId) => {
-    // Handy when devtools isn’t open yet
+  mainWindow.webContents.on("console-message", (_e, level, message, line, sourceId) => {
     console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
   });
 
-  // Open devtools if flagged, or if running unpacked with env/args
-  if (hasDevtoolsFlag()) {
-    win.webContents.openDevTools({ mode: "detach" });
-  }
-
-  // Always provide hotkeys for devtools (packaged-safe)
-  win.once("ready-to-show", () => {
-    try {
-      globalShortcut.register("F12", () => {
-        if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
-        else win.webContents.openDevTools({ mode: "detach" });
-      });
-
-      globalShortcut.register("CommandOrControl+Shift+I", () => {
-        if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools();
-        else win.webContents.openDevTools({ mode: "detach" });
-      });
-    } catch (e) {
-      console.error("[globalShortcut] failed:", e);
-    }
-  });
-
-  win.on("closed", () => {
-    try {
-      globalShortcut.unregisterAll();
-    } catch {}
-  });
+  // Add a Help menu so you can open devtools even if F12 fails
+  const menu = Menu.buildFromTemplate([
+    ...(process.platform === "darwin"
+      ? [{ label: app.name, submenu: [{ role: "quit" }] }]
+      : []),
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "togglefullscreen" },
+        {
+          label: "Toggle DevTools",
+          accelerator: process.platform === "darwin" ? "Alt+Command+I" : "Ctrl+Shift+I",
+          click: () => mainWindow?.webContents?.toggleDevTools(),
+        },
+      ],
+    },
+  ]);
+  Menu.setApplicationMenu(menu);
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+app.whenReady().then(createWindow);
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+;
 
 
 
