@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  plugins: [
+  base: './',
     react(),
     VitePWA({
       // We register via `virtual:pwa-register` in src/main.jsx
