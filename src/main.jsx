@@ -11,9 +11,13 @@ import './index.css';
 import './styles.css';
 
 // PWA registration (vite-plugin-pwa)
-// NOTE: In Electron (file://), SW won’t really apply, but leaving this is fine.
-import { registerSW } from 'virtual:pwa-register';
-registerSW({ immediate: true });
+// IMPORTANT: Do NOT register SW inside Electron (file:// + SW can cause weirdness)
+const isElectron = !!window?.desktop?.isElectron;
+if (!isElectron) {
+  // eslint-disable-next-line import/no-unresolved
+  const { registerSW } = await import('virtual:pwa-register');
+  registerSW({ immediate: true });
+}
 
 // ✅ Desktop/Electron presence + deep-link hook (safe in browser)
 (function initDesktopBridge() {
@@ -24,6 +28,7 @@ registerSW({ immediate: true });
 
   const unsub = d.onDeepLink?.((payload) => {
     console.log('[desktop] deep link:', payload);
+    // TODO: route/handle payload here if needed
   });
 
   window.__TMD_UNSUB_DEEPLINK__ = unsub;
@@ -31,11 +36,7 @@ registerSW({ immediate: true });
 
 const rootEl = document.getElementById('root');
 
-// ✅ Key fix: BrowserRouter breaks on file:// (Electron unpacked/installed).
-// Use HashRouter in Electron or when protocol is file:
-const isElectron = !!window?.desktop?.isElectron;
-const isFileProtocol = typeof window !== 'undefined' && window.location?.protocol === 'file:';
-const Router = (isElectron || isFileProtocol) ? HashRouter : BrowserRouter;
+const Router = isElectron ? HashRouter : BrowserRouter;
 
 createRoot(rootEl).render(
   <React.StrictMode>
