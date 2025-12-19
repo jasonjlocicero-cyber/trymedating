@@ -1,46 +1,33 @@
 // src/main.jsx
-import './sentry.client.js'; // Sentry bootstrap (no-op if VITE_SENTRY_DSN is unset)
+import './sentry.client.js';
 
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, HashRouter } from 'react-router-dom';
+import {
+  BrowserRouter,
+  HashRouter,
+} from 'react-router-dom';
 import App from './App';
 
 // Global styles
 import './index.css';
-import './styles.css'; // ensure our consolidated global styles are loaded
+import './styles.css';
 
-// PWA registration (vite-plugin-pwa)
+// PWA registration (safe in Electron too)
 import { registerSW } from 'virtual:pwa-register';
 registerSW({ immediate: true });
 
-// ✅ Desktop/Electron presence + deep-link hook (safe in browser)
-(function initDesktopBridge() {
-  const d = window?.desktop;
-  if (!d?.isElectron) return;
+// Detect Electron safely
+const isElectron = !!window?.desktop?.isElectron;
 
-  // Quick visibility that the bridge is alive
+// Debug visibility (you already saw this working 👍)
+if (isElectron) {
   console.log('[desktop] running in Electron:', {
-    platform: d.platform,
+    platform: window.desktop.platform,
   });
+}
 
-  // Optional: listen for deep links if your main process emits them
-  // (preload exposes onDeepLink() unsubscribe pattern)
-  const unsub = d.onDeepLink?.((payload) => {
-    console.log('[desktop] deep link:', payload);
-    // TODO: route or handle payload here if needed
-  });
-
-  // If you ever need cleanup on hot reload, keep a reference
-  window.__TMD_UNSUB_DEEPLINK__ = unsub;
-})();
-
-// ✅ Use HashRouter in Electron (file://) to avoid blank routes in production.
-// Keep BrowserRouter for the web (Netlify) build.
-const isElectron =
-  typeof window !== 'undefined' &&
-  !!window.desktop?.isElectron;
-
+// Pick the correct router
 const Router = isElectron ? HashRouter : BrowserRouter;
 
 const rootEl = document.getElementById('root');
@@ -51,6 +38,7 @@ createRoot(rootEl).render(
     </Router>
   </React.StrictMode>
 );
+
 
 
 
