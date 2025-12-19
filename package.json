@@ -20,6 +20,7 @@
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
     "desktop:build:linux": "electron-builder --linux",
+    "desktop:prod": "npm run build && electron ."
 
     "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win",
     "release:mac": "npm run gen:icons && npm run build && npm run desktop:build:mac",
