@@ -2,8 +2,10 @@
   "name": "trymedating-brand-site",
   "version": "0.1.1",
   "private": true,
-  "description": "TryMeDating brand site + desktop wrapper",
-  "author": "Jason LoCicero",
+  "description": "TryMeDating desktop app",
+  "author": "Jason LoCicero <jasonjlocicero@gmail.com>",
+  "homepage": "https://trymedating.com",
+  "license": "UNLICENSED",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
@@ -81,7 +83,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TryMeDating"
-    }
+    },
+    "copyright": "Copyright © 2025 TryMeDating"
   }
 }
 
