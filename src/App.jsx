@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
 
@@ -12,6 +12,9 @@ import ChatLauncher from './components/ChatLauncher'
 // PWA buttons / nudges
 import InstallPWAButton from './components/InstallPWAButton'
 import InstallNudgeMobile from './components/InstallNudgeMobile'
+
+// Desktop deep links (Electron)
+import useDesktopDeepLinks from './desktop/useDesktopDeepLinks'
 
 // Pages
 import AuthPage from './pages/AuthPage'
@@ -187,10 +190,12 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
   const { pathname } = useLocation()
-  const navigate = useNavigate()
   const showChatLauncher = !pathname.startsWith('/chat')
 
-  // --- Deep-link handler: supports ?deeplink=tryme://... (optional) ---
+  // ✅ Electron deep links: tryme://connect?token=... etc
+  useDesktopDeepLinks()
+
+  // --- URL query deep-link handler: supports ?deeplink=tryme://... (optional/testing) ---
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search)
@@ -217,15 +222,18 @@ export default function App() {
           break
         default:
           // Fallback: if it looks like an app path, try to route it as-is
-          next = `${url.pathname || '/' }${url.search || ''}`
+          next = `${url.pathname || '/'}${url.search || ''}`
           break
       }
 
-      navigate(next, { replace: true })
+      // Since we don’t have navigate here (and don’t want to import useNavigate just for this),
+      // do a soft navigation inside SPA:
+      window.history.replaceState({}, '', next)
+      window.dispatchEvent(new PopStateEvent('popstate'))
     } catch {
       /* ignore malformed deeplink */
     }
-  }, [navigate])
+  }, [])
 
   // --- Auth bootstrap ---
   useEffect(() => {
@@ -305,6 +313,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
