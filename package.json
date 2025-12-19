@@ -18,9 +18,10 @@
 
     "desktop:dev": "electron .",
     "desktop:prod": "npm run build && electron .",
-    "desktop:build:win": "electron-builder --win",
-    "desktop:build:mac": "electron-builder --mac",
-    "desktop:build:linux": "electron-builder --linux",
+
+    "desktop:build:win": "cross-env TMD_ELECTRON=1 electron-builder --win",
+    "desktop:build:mac": "cross-env TMD_ELECTRON=1 electron-builder --mac",
+    "desktop:build:linux": "cross-env TMD_ELECTRON=1 electron-builder --linux",
 
     "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win",
     "release:mac": "npm run gen:icons && npm run build && npm run desktop:build:mac",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
+    "cross-env": "^7.0.3",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
     "vite": "^5.2.0",
