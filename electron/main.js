@@ -4,7 +4,11 @@ const path = require("path");
 
 // ✅ DEV should be determined by packaging state, not NODE_ENV
 // (NODE_ENV can be set globally on Windows and break packaged apps)
-const isDev = !app.isPackaged;
+const isDev =
+  process.argv.includes('--devtools') ||
+  !app.isPackaged ||
+  process.env.NODE_ENV === "development" ||
+  process.env.ELECTRON_IS_DEV === "1";
 
 let mainWindow;
 
