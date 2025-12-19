@@ -21,3 +21,6 @@ Thumbs.db
 .tmp/
 .supabase/**/temp/
 supabase/.temp/
+
+release/
+dist/
