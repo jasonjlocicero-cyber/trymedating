@@ -3,7 +3,7 @@ import './sentry.client.js'; // Sentry bootstrap (no-op if VITE_SENTRY_DSN is un
 
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import App from './App';
 
 // Global styles
@@ -35,14 +35,23 @@ registerSW({ immediate: true });
   window.__TMD_UNSUB_DEEPLINK__ = unsub;
 })();
 
+// ✅ Use HashRouter in Electron (file://) to avoid blank routes in production.
+// Keep BrowserRouter for the web (Netlify) build.
+const isElectron =
+  typeof window !== 'undefined' &&
+  !!window.desktop?.isElectron;
+
+const Router = isElectron ? HashRouter : BrowserRouter;
+
 const rootEl = document.getElementById('root');
 createRoot(rootEl).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <Router>
       <App />
-    </BrowserRouter>
+    </Router>
   </React.StrictMode>
 );
+
 
 
 
