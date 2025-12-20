@@ -1,60 +1,48 @@
-// src/main.jsx
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import { BrowserRouter, HashRouter } from 'react-router-dom'
-import App from './App.jsx'
-import './index.css'
+// electron/main.js
+import { app, BrowserWindow } from 'electron'
+import path from 'path'
 
-// Detect Electron/file:// renderer reliably (nodeIntegration is off)
-const isFileProtocol = window.location?.protocol === 'file:'
-const isElectronFlag =
-  !!window?.desktop?.isElectron || // if your preload exposes this
-  !!window?.electron ||            // some preload patterns expose this
-  !!window?.isElectron             // fallback if you’ve set it anywhere
+const DEVTOOLS = process.env.TMD_DEVTOOLS === '1'
+const DEV_SERVER_URL = process.env.TMD_DEV_SERVER_URL // e.g. http://localhost:5173
 
-const isElectron = isFileProtocol || isElectronFlag
+let win
 
-// IMPORTANT: PWA/SW should NOT run in Electron.
-// In Electron, SW/caching can cause "blank body" or weird intermittent loads.
-async function maybeRegisterSW() {
-  try {
-    if (isElectron) return
-    if (!import.meta.env.PROD) return
-    if (!('serviceWorker' in navigator)) return
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: true
+    }
+  })
 
-    const mod = await import('virtual:pwa-register')
-    const registerSW = mod?.registerSW
-    if (typeof registerSW !== 'function') return
+  if (DEV_SERVER_URL) {
+    // DEV: load Vite
+    win.loadURL(DEV_SERVER_URL)
+  } else {
+    // PROD: load built files (dist)
+    const indexHtml = path.join(__dirname, '..', 'dist', 'index.html')
+    win.loadFile(indexHtml, { hash: '/' })
+  }
 
-    registerSW({
-      immediate: true,
-      onRegistered(r) {
-        // optional: console.log('SW registered', r)
-      },
-      onRegisterError(err) {
-        console.warn('[PWA] SW register error:', err)
-      }
-    })
-  } catch (err) {
-    console.warn('[PWA] SW setup skipped:', err)
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[did-fail-load]', code, desc, url)
+  })
+
+  if (DEVTOOLS) {
+    win.webContents.openDevTools({ mode: 'detach' })
   }
 }
 
-maybeRegisterSW()
+app.whenReady().then(createWindow)
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    {isElectron ? (
-      <HashRouter>
-        <App />
-      </HashRouter>
-    ) : (
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    )}
-  </React.StrictMode>
-)
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
 
 
 
