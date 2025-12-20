@@ -17,7 +17,8 @@
     "gen:icons": "node scripts/gen-icons.mjs",
 
     "desktop:dev": "electron .",
-    "desktop:dev:full": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "desktop:dev:vite": "vite --port 5173",
+    "desktop:dev:full": "concurrently -k \"npm run desktop:dev:vite\" \"cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .\"",
 
     "desktop:prod": "npm run build && electron .",
     "desktop:build:win": "electron-builder --win",
@@ -48,7 +49,7 @@
     "electron-builder": "^24.13.3",
     "vite": "^5.2.0",
     "vite-plugin-pwa": "^0.20.0",
-    "wait-on": "^7.2.0"
+    "wait-on": "^8.0.0"
   },
   "optionalDependencies": {
     "icojs": "^0.16.1",
@@ -96,6 +97,7 @@
     }
   }
 }
+
 
 
 
