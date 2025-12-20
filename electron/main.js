@@ -1,116 +1,61 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, shell, ipcMain } = require("electron");
-const path = require("path");
+import { app, BrowserWindow } from 'electron'
+import path from 'path'
 
-// ✅ DEV should be determined by packaging state, not NODE_ENV
-// (NODE_ENV can be set globally on Windows and break packaged apps)
-const isDev = !app.isPackaged;
+const DEVTOOLS = process.env.TMD_DEVTOOLS === '1'
+const DEV_SERVER_URL = process.env.TMD_DEV_SERVER_URL || ''
 
-let mainWindow;
+let win
 
-function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1200,
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280,
     height: 800,
-    show: false,
-    backgroundColor: "#ffffff",
-    title: "TryMeDating",
-    icon: path.join(__dirname, "..", "public", "icons", "icon.ico"), // ok for Windows
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-    },
-  });
-
-  // ✅ Block new-window popups; open external links in system browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
-  });
-
-  // ✅ Prevent navigation to random origins (phishing / redirects)
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    try {
-      const target = new URL(url);
-
-      if (isDev) {
-        // allow localhost only in dev
-        const allowedHosts = ["localhost", "127.0.0.1"];
-        if (target.protocol !== "http:" || !allowedHosts.includes(target.hostname)) {
-          event.preventDefault();
-        }
-      } else {
-        // production must be file:// only
-        if (target.protocol !== "file:") event.preventDefault();
-      }
-    } catch {
-      event.preventDefault();
+      devTools: true
     }
-  });
+  })
 
-  if (isDev) {
-    // Dev: Vite server
-    const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
-    mainWindow.loadURL(devUrl);
+  // Dev mode: load Vite server
+  if (DEV_SERVER_URL) {
+    win.loadURL(DEV_SERVER_URL)
   } else {
-    // Prod: load built app from dist
-    // app.getAppPath() is safe in asar/unpacked
-    const indexHtml = path.join(app.getAppPath(), "dist", "index.html");
-    mainWindow.loadFile(indexHtml);
+    // Prod mode: load built file and force hash route so HashRouter mounts
+    const indexHtml = path.join(__dirname, '..', 'dist', 'index.html')
+    win.loadFile(indexHtml, { hash: '/' })
   }
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-    if (isDev) mainWindow.webContents.openDevTools({ mode: "detach" });
-  });
+  // Useful diagnostics
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[did-fail-load]', code, desc, url)
+  })
 
-  // ✅ Remove menu in production
-  if (!isDev) Menu.setApplicationMenu(null);
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[render-process-gone]', details)
+  })
 
-  // ✅ Kill DevTools shortcuts in production
-  mainWindow.webContents.on("before-input-event", (event, input) => {
-    if (!isDev && input.control && input.shift && input.key.toLowerCase() === "i") {
-      event.preventDefault();
-    }
-    if (!isDev && input.key === "F12") {
-      event.preventDefault();
-    }
-  });
+  if (DEVTOOLS) {
+    win.webContents.openDevTools({ mode: 'detach' })
+  }
 }
 
-app.setName("TryMeDating");
+app.whenReady().then(createWindow)
 
-// ✅ Single-instance lock
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  app.quit();
-} else {
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
 
-  app.whenReady().then(() => {
-    createMainWindow();
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+})
 
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
-    });
-  });
-}
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
 
-// ✅ Expose app version
-ipcMain.handle("app:getVersion", () => app.getVersion());
+
+
 
 
 

@@ -1,48 +1,69 @@
 // src/main.jsx
-import './sentry.client.js'; // Sentry bootstrap (no-op if VITE_SENTRY_DSN is unset)
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
+import App from './App.jsx'
+import './index.css'
 
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
+// Detect Electron/file:// renderer reliably (nodeIntegration is off)
+const isFileProtocol = window.location?.protocol === 'file:'
+const isElectronFlag =
+  !!window?.desktop?.isElectron || // if your preload exposes this
+  !!window?.electron ||            // some preload patterns expose this
+  !!window?.isElectron             // fallback if you’ve set it anywhere
 
-// Global styles
-import './index.css';
-import './styles.css'; // ensure our consolidated global styles are loaded
+const isElectron = isFileProtocol || isElectronFlag
 
-// PWA registration (vite-plugin-pwa)
-import { registerSW } from 'virtual:pwa-register';
-registerSW({ immediate: true });
+// IMPORTANT: PWA/SW should NOT run in Electron.
+// In Electron, SW/caching can cause "blank body" or weird intermittent loads.
+async function maybeRegisterSW() {
+  try {
+    if (isElectron) return
+    if (!import.meta.env.PROD) return
+    if (!('serviceWorker' in navigator)) return
 
-// ✅ Desktop/Electron presence + deep-link hook (safe in browser)
-(function initDesktopBridge() {
-  const d = window?.desktop;
-  if (!d?.isElectron) return;
+    const mod = await import('virtual:pwa-register')
+    const registerSW = mod?.registerSW
+    if (typeof registerSW !== 'function') return
 
-  // Quick visibility that the bridge is alive
-  console.log('[desktop] running in Electron:', {
-    platform: d.platform,
-  });
+    registerSW({
+      immediate: true,
+      onRegistered() {},
+      onRegisterError(err) {
+        console.warn('[PWA] SW register error:', err)
+      }
+    })
+  } catch (err) {
+    console.warn('[PWA] SW setup skipped:', err)
+  }
+}
 
-  // Optional: listen for deep links if your main process emits them
-  // (preload exposes onDeepLink() unsubscribe pattern)
-  const unsub = d.onDeepLink?.((payload) => {
-    console.log('[desktop] deep link:', payload);
-    // TODO: route or handle payload here if needed
-  });
+maybeRegisterSW()
 
-  // If you ever need cleanup on hot reload, keep a reference
-  window.__TMD_UNSUB_DEEPLINK__ = unsub;
-})();
-
-const rootEl = document.getElementById('root');
-createRoot(rootEl).render(
+ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    {isElectron ? (
+      <HashRouter>
+        <App />
+      </HashRouter>
+    ) : (
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    )}
   </React.StrictMode>
-);
+)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
