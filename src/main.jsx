@@ -5,17 +5,17 @@ import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
-// Detect Electron renderer reliably (works for both file:// and dev-server http://)
+// Detect Electron/file:// renderer reliably (nodeIntegration is off)
 const isFileProtocol = window.location?.protocol === 'file:'
 const isElectronFlag =
-  !!window?.desktop?.isElectron || // from preload.js contextBridge (your setup)
-  !!window?.electron ||
-  !!window?.isElectron
+  !!window?.desktop?.isElectron || // if your preload exposes this
+  !!window?.electron ||            // some preload patterns expose this
+  !!window?.isElectron             // fallback if you’ve set it anywhere
 
 const isElectron = isFileProtocol || isElectronFlag
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-// In Electron, SW/caching can cause intermittent "blank body" issues.
+// In Electron, SW/caching can cause "blank body" or weird intermittent loads.
 async function maybeRegisterSW() {
   try {
     if (isElectron) return
@@ -53,6 +53,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
