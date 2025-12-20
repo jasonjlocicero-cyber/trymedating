@@ -19,9 +19,9 @@
     "desktop:dev": "electron .",
     "desktop:prod": "npm run build && electron .",
 
-    "desktop:dev:vite": "vite --port 5173",
-    "desktop:dev:run": "cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .",
-    "desktop:dev:full": "concurrently -k -n VITE,ELECTRON \"npm:desktop:dev:vite\" \"wait-on http://localhost:5173 && npm:desktop:dev:run\"",
+    "desktop:dev:vite": "vite --port 5173 --strictPort",
+    "desktop:dev:electron": "cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "desktop:dev:full": "concurrently -k -n VITE,ELECTRON \"npm run desktop:dev:vite\" \"wait-on http://localhost:5173 && npm run desktop:dev:electron\"",
 
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
@@ -69,12 +69,7 @@
         "schemes": ["tryme"]
       }
     ],
-    "files": [
-      "electron/**",
-      "dist/**",
-      "public/**",
-      "package.json"
-    ],
+    "files": ["electron/**", "dist/**", "public/**", "package.json"],
     "directories": {
       "buildResources": "public/icons",
       "output": "release"
@@ -99,6 +94,7 @@
     }
   }
 }
+
 
 
 
