@@ -1,99 +1,60 @@
-// electron/main.js
-import { app, BrowserWindow, globalShortcut, Menu } from "electron";
-import path from "path";
+// src/main.jsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter, HashRouter } from 'react-router-dom'
+import App from './App.jsx'
+import './index.css'
 
-const DEVTOOLS = process.env.TMD_DEVTOOLS === "1";
+// Detect Electron/file:// renderer reliably (nodeIntegration is off)
+const isFileProtocol = window.location?.protocol === 'file:'
+const isElectronFlag =
+  !!window?.desktop?.isElectron || // if your preload exposes this
+  !!window?.electron ||            // some preload patterns expose this
+  !!window?.isElectron             // fallback if you’ve set it anywhere
 
-// Tell Electron where to load in dev (you can set this in scripts/env)
-const DEV_SERVER_URL = process.env.TMD_DEV_SERVER_URL || "http://localhost:5173";
+const isElectron = isFileProtocol || isElectronFlag
 
-let win;
+// IMPORTANT: PWA/SW should NOT run in Electron.
+// In Electron, SW/caching can cause "blank body" or weird intermittent loads.
+async function maybeRegisterSW() {
+  try {
+    if (isElectron) return
+    if (!import.meta.env.PROD) return
+    if (!('serviceWorker' in navigator)) return
 
-function createWindow() {
-  win = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    show: true,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      devTools: true, // IMPORTANT: allow devtools
-    },
-  });
+    const mod = await import('virtual:pwa-register')
+    const registerSW = mod?.registerSW
+    if (typeof registerSW !== 'function') return
 
-  // ✅ Load dev server when not packaged OR when explicitly provided
-  if (!app.isPackaged) {
-    win.loadURL(DEV_SERVER_URL);
-  } else {
-    // ✅ PROD: load built index.html safely
-    const indexHtml = path.join(__dirname, "..", "dist", "index.html");
-    // Force hash router mount point
-    win.loadFile(indexHtml, { hash: "/" });
+    registerSW({
+      immediate: true,
+      onRegistered(r) {
+        // optional: console.log('SW registered', r)
+      },
+      onRegisterError(err) {
+        console.warn('[PWA] SW register error:', err)
+      }
+    })
+  } catch (err) {
+    console.warn('[PWA] SW setup skipped:', err)
   }
-
-  // Always log load failures
-  win.webContents.on("did-fail-load", (_e, code, desc, url) => {
-    console.error("[did-fail-load]", code, desc, url);
-  });
-
-  win.webContents.on("render-process-gone", (_e, details) => {
-    console.error("[render-process-gone]", details);
-  });
-
-  // ✅ Open devtools *after* the page finishes loading (important)
-  win.webContents.once("did-finish-load", () => {
-    if (DEVTOOLS) {
-      win.webContents.openDevTools({ mode: "detach" });
-    }
-  });
-
-  // ✅ Add a basic menu so DevTools is always accessible
-  const template = [
-    ...(process.platform === "darwin"
-      ? [{ label: app.name, submenu: [{ role: "quit" }] }]
-      : []),
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-      ],
-    },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(() => {
-  createWindow();
+maybeRegisterSW()
 
-  // ✅ Hard guarantee devtools shortcut works
-  globalShortcut.register("CommandOrControl+Shift+I", () => {
-    if (win && !win.isDestroyed()) win.webContents.toggleDevTools();
-  });
-  globalShortcut.register("F12", () => {
-    if (win && !win.isDestroyed()) win.webContents.toggleDevTools();
-  });
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
-
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
-});
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    {isElectron ? (
+      <HashRouter>
+        <App />
+      </HashRouter>
+    ) : (
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    )}
+  </React.StrictMode>
+)
 
 
 
