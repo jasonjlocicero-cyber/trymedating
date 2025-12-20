@@ -16,9 +16,10 @@
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
 
-    "desktop:dev": "concurrently -k -n VITE,ELECTRON -c auto \"vite\" \"wait-on http://localhost:5173 && cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .\"",
-    "desktop:prod": "npm run build && electron .",
+    "desktop:dev": "electron .",
+    "desktop:dev:full": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .\"",
 
+    "desktop:prod": "npm run build && electron .",
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
     "desktop:build:linux": "electron-builder --linux",
@@ -59,11 +60,6 @@
     "productName": "TryMeDating",
     "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
     "asar": true,
-
-    "extraMetadata": {
-      "main": "electron/main.js"
-    },
-
     "protocols": [
       {
         "name": "TryMeDating Link",
@@ -100,6 +96,7 @@
     }
   }
 }
+
 
 
 
