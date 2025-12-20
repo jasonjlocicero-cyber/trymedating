@@ -16,8 +16,9 @@
     "preview": "vite preview",
     "gen:icons": "node scripts/gen-icons.mjs",
 
-    "desktop:dev": "set TMD_DEVTOOLS=1&& electron .",
+    "desktop:dev": "concurrently -k -n VITE,ELECTRON -c auto \"vite\" \"wait-on http://localhost:5173 && cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "desktop:prod": "npm run build && electron .",
+
     "desktop:build:win": "electron-builder --win",
     "desktop:build:mac": "electron-builder --mac",
     "desktop:build:linux": "electron-builder --linux",
@@ -40,10 +41,13 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^9.0.0",
+    "cross-env": "^7.0.3",
     "electron": "^32.2.0",
     "electron-builder": "^24.13.3",
     "vite": "^5.2.0",
-    "vite-plugin-pwa": "^0.20.0"
+    "vite-plugin-pwa": "^0.20.0",
+    "wait-on": "^7.2.0"
   },
   "optionalDependencies": {
     "icojs": "^0.16.1",
@@ -96,6 +100,7 @@
     }
   }
 }
+
 
 
 
