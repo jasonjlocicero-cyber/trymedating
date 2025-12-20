@@ -5,19 +5,17 @@ import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
-// Detect Electron reliably:
-// - In packaged Electron, window.location.protocol is "file:"
-// - In dev Electron (loading http://localhost), protocol is "http:" so we rely on preload flag
+// Detect Electron renderer reliably (works for both file:// and dev-server http://)
 const isFileProtocol = window.location?.protocol === 'file:'
 const isElectronFlag =
-  !!window?.desktop?.isElectron || // ✅ your preload exposes this
-  !!window?.electron ||            // other patterns (safe fallback)
-  !!window?.isElectron             // last-resort fallback
+  !!window?.desktop?.isElectron || // from preload.js contextBridge (your setup)
+  !!window?.electron ||
+  !!window?.isElectron
 
 const isElectron = isFileProtocol || isElectronFlag
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-// In Electron, SW/caching can cause intermittent blank screens / stale assets.
+// In Electron, SW/caching can cause intermittent "blank body" issues.
 async function maybeRegisterSW() {
   try {
     if (isElectron) return
@@ -30,9 +28,7 @@ async function maybeRegisterSW() {
 
     registerSW({
       immediate: true,
-      onRegistered() {
-        // optional: console.log('[PWA] SW registered')
-      },
+      onRegistered() {},
       onRegisterError(err) {
         console.warn('[PWA] SW register error:', err)
       }
