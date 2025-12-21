@@ -17,35 +17,19 @@ const isElectronFromPreload =
 
 const isElectron = isFileProtocol || isElectronFromPreload
 
-// IMPORTANT: PWA/SW should NOT run in Electron.
-async function maybeRegisterSW() {
-  try {
-    if (isElectron) return
-    if (!import.meta.env.PROD) return
-    if (!('serviceWorker' in navigator)) return
-
-    const mod = await import('virtual:pwa-register')
-    const registerSW = mod?.registerSW
-    if (typeof registerSW !== 'function') return
-
-    registerSW({
-      immediate: true,
-      onRegistered() {},
-      onRegisterError(err) {
-        console.warn('[PWA] SW register error:', err)
-      }
+// IMPORTANT:
+// Only attempt PWA/SW registration in *production web*.
+// In dev, do nothing (prevents Vite "virtual:pwa-register" resolution errors).
+if (!isElectron && import.meta.env.PROD && 'serviceWorker' in navigator) {
+  import('./pwa/maybeRegisterSW.js')
+    .then((m) => (typeof m?.default === 'function' ? m.default() : undefined))
+    .catch(() => {
+      // ignore: PWA helper missing or not included
     })
-  } catch (err) {
-    // If PWA plugin isn't included in this build, this import can fail — that's fine.
-    console.warn('[PWA] SW setup skipped:', err)
-  }
 }
-
-maybeRegisterSW()
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
-  // Fail loudly instead of silently doing nothing
   throw new Error('Root element #root not found')
 }
 
@@ -62,6 +46,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
