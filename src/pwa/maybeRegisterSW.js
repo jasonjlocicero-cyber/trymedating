@@ -1,12 +1,7 @@
 // src/pwa/maybeRegisterSW.js
-export async function maybeRegisterSW({ isElectron = false } = {}) {
+export default async function maybeRegisterSW() {
   try {
-    if (isElectron) return
-    if (!import.meta.env.PROD) return
-    if (!('serviceWorker' in navigator)) return
-
-    // Important: prevent Vite from trying to resolve this in dev
-    const mod = await import(/* @vite-ignore */ 'virtual:pwa-register')
+    const mod = await import('virtual:pwa-register')
     const registerSW = mod?.registerSW
     if (typeof registerSW !== 'function') return
 
@@ -18,9 +13,8 @@ export async function maybeRegisterSW({ isElectron = false } = {}) {
       }
     })
   } catch (err) {
+    // If PWA plugin isn't included in this build, importing can fail — that's fine.
     console.warn('[PWA] SW setup skipped:', err)
   }
 }
-
-export default maybeRegisterSW
 
