@@ -11,15 +11,19 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+
     "gen:icons": "node scripts/gen-icons.mjs",
-    "desktop:dev": "cross-env TMD_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .",
-    "desktop:prod": "npm run build && electron .",
-    "desktop:build:win": "electron-builder --win",
-    "desktop:build:mac": "electron-builder --mac",
-    "desktop:build:linux": "electron-builder --linux",
-    "release:win": "npm run gen:icons && npm run build && npm run desktop:build:win",
-    "release:mac": "npm run gen:icons && npm run build && npm run desktop:build:mac",
-    "release:linux": "npm run gen:icons && npm run build && npm run desktop:build:linux"
+
+    "desktop:dev": "cross-env TMD_ELECTRON=1 TMD_DEVTOOLS=1 TMD_OPEN_DEVTOOLS=1 TMD_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "desktop:prod": "cross-env TMD_ELECTRON=1 TMD_DEVTOOLS=0 npm run build && electron .",
+
+    "desktop:build:win": "cross-env TMD_ELECTRON=1 electron-builder --win",
+    "desktop:build:mac": "cross-env TMD_ELECTRON=1 electron-builder --mac",
+    "desktop:build:linux": "cross-env TMD_ELECTRON=1 electron-builder --linux",
+
+    "release:win": "cross-env TMD_ELECTRON=1 npm run gen:icons && npm run build && npm run desktop:build:win",
+    "release:mac": "cross-env TMD_ELECTRON=1 npm run gen:icons && npm run build && npm run desktop:build:mac",
+    "release:linux": "cross-env TMD_ELECTRON=1 npm run gen:icons && npm run build && npm run desktop:build:linux"
   },
   "dependencies": {
     "@sentry/react": "^7.120.0",
@@ -51,11 +55,11 @@
     "productName": "TryMeDating",
     "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
     "asar": true,
-    "protocols": [ { "name": "TryMeDating Link", "schemes": [ "tryme" ] } ],
-    "files": [ "electron/**", "dist/**", "public/**", "package.json" ],
+    "protocols": [{ "name": "TryMeDating Link", "schemes": ["tryme"] }],
+    "files": ["electron/**", "dist/**", "public/**", "package.json"],
     "directories": { "buildResources": "public/icons", "output": "release" },
     "win": {
-      "target": [ { "target": "nsis", "arch": [ "x64" ] } ],
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/icons/icon.ico",
       "publisherName": "TryMeDating"
     },
@@ -67,5 +71,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "TryMeDating"
     }
+  }
+}
+
   }
 }
