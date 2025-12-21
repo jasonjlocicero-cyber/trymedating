@@ -17,6 +17,17 @@ const isElectronFromPreload =
 
 const isElectron = isFileProtocol || isElectronFromPreload
 
+// IMPORTANT:
+// Only attempt PWA/SW registration in *production web*.
+// In dev, do nothing (prevents Vite "virtual:pwa-register" resolution errors).
+if (!isElectron && import.meta.env.PROD && 'serviceWorker' in navigator) {
+  import('./pwa/maybeRegisterSW.js')
+    .then((m) => (typeof m?.default === 'function' ? m.default() : undefined))
+    .catch(() => {
+      // ignore: PWA helper missing or not included
+    })
+}
+
 const rootEl = document.getElementById('root')
 if (!rootEl) {
   throw new Error('Root element #root not found')
@@ -35,6 +46,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
