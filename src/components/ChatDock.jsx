@@ -373,7 +373,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 }
 
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock({ peerId: peerIdProp }) {
+export default function ChatDock({ peerId: peerIdProp, partnerId, variant = "page" }) {
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -414,10 +414,11 @@ export default function ChatDock({ peerId: peerIdProp }) {
 
   /* Accept peerId from route (prop) */
   useEffect(() => {
-    if (peerIdProp && typeof peerIdProp === "string") {
-      setPeer(peerIdProp);
+    const incoming = peerIdProp || partnerId;
+    if (incoming && typeof incoming === "string") {
+      setPeer(incoming);
     }
-  }, [peerIdProp]);
+  }, [peerIdProp, partnerId]);
 
   /* auth */
   useEffect(() => {
@@ -1044,7 +1045,14 @@ export default function ChatDock({ peerId: peerIdProp }) {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 8, maxHeight: 360 }}>
+          <div 
+            style={{
+              display: "grid",
+              gridTemplateRows: "1fr auto",
+              gap: 8,
+              ...(panel ? { height: "100%", minHeight: 0 } : { maxHeight: 360 }),
+            }}
+          >
             <div
               ref={scrollerRef}
               onDragOver={(e) => e.preventDefault()}
@@ -1055,8 +1063,8 @@ export default function ChatDock({ peerId: peerIdProp }) {
                 padding: 12,
                 overflowY: "auto",
                 background: "#fff",
-                minHeight: 140,
-                maxHeight: 260,
+                minHeight: panel ? 0 : 140,
+                maxHeight: panel ? "none" : 260,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
