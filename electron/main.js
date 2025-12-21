@@ -1,7 +1,6 @@
-/* electron/main.js - CommonJS main process entry
-   Fixes: packaged EXE crashing due to ESM "import" syntax
-   Adds: deterministic devtools gating + load-path logging + fail/crash diagnostics
-*/
+// electron/main.js (CommonJS)
+// Fixes packaged EXE crash: "Cannot use import statement outside a module"
+// Adds deterministic dev/prod load + deterministic DevTools gating + logging
 
 const { app, BrowserWindow, shell } = require("electron");
 const path = require("node:path");
@@ -9,45 +8,46 @@ const path = require("node:path");
 function getRuntimeFlags() {
   const isDev = !app.isPackaged;
 
-  // Dev server URL can be passed in (your script already sets this for desktop:dev)
-  const devServerUrl = process.env.TMD_DEV_SERVER_URL;
+  // Your scripts use TMD_DEV_SERVER_URL and TMD_DEVTOOLS
+  const devServerUrl = process.env.TMD_DEV_SERVER_URL || "";
+  const devToolsEnv = process.env.TMD_DEVTOOLS;
 
-  // DevTools behavior: deterministic
-  // - default: enabled in dev, disabled in packaged
-  // - override: set TMD_DEVTOOLS=1 to allow in packaged
-  const allowDevTools =
-    process.env.TMD_DEVTOOLS === "1" || (isDev && process.env.TMD_DEVTOOLS !== "0");
+  // Deterministic DevTools:
+  // - In dev (not packaged): default allow unless explicitly disabled (TMD_DEVTOOLS=0)
+  // - In packaged: default deny unless explicitly enabled (TMD_DEVTOOLS=1)
+  const allowDevTools = isDev ? devToolsEnv !== "0" : devToolsEnv === "1";
 
-  // Auto-open devtools only when explicitly allowed
-  // - default: auto-open in dev if devtools allowed
-  // - override: TMD_OPEN_DEVTOOLS=0 disables auto-open
+  // Auto-open DevTools:
+  // - In dev: default open
+  // - In packaged: default do NOT open
   const openDevTools =
-    allowDevTools && (process.env.TMD_OPEN_DEVTOOLS ?? (isDev ? "1" : "0")) !== "0";
+    process.env.TMD_OPEN_DEVTOOLS !== "0" && (isDev ? allowDevTools : false);
 
   return { isDev, devServerUrl, allowDevTools, openDevTools };
 }
 
 function resolveIndexHtmlPath() {
-  // In packaged app.asar: __dirname -> .../resources/app.asar/electron
-  // dist is included by electron-builder "files": ["electron/**","dist/**",...]
+  // In packaged app: __dirname is .../resources/app.asar/electron
+  // dist is packaged by electron-builder "files": ["electron/**","dist/**",...]
   return path.join(__dirname, "..", "dist", "index.html");
 }
 
-function createMainWindow() {
+function createWindow() {
   const { isDev, devServerUrl, allowDevTools, openDevTools } = getRuntimeFlags();
 
-  // Expose a simple env flag to preload if you want it
+  // Provide simple flags to preload/renderer if you want them later
   process.env.TMD_ENV = isDev ? "development" : "production";
-  process.env.TMD_DEVTOOLS = allowDevTools ? "1" : "0";
+  process.env.TMD_DEVTOOLS_ALLOWED = allowDevTools ? "1" : "0";
 
   const preloadPath = path.join(__dirname, "preload.js");
   const indexHtmlPath = resolveIndexHtmlPath();
 
   console.log(
-    `[TMD] Starting... isPackaged=${app.isPackaged} isDev=${isDev} allowDevTools=${allowDevTools} openDevTools=${openDevTools}`
+    `[TMD] boot isPackaged=${app.isPackaged} isDev=${isDev} allowDevTools=${allowDevTools} openDevTools=${openDevTools}`
   );
-  console.log(`[TMD] preloadPath=${preloadPath}`);
-  console.log(`[TMD] indexHtmlPath=${indexHtmlPath}`);
+  console.log(`[TMD] preload=${preloadPath}`);
+  console.log(`[TMD] indexHtml=${indexHtmlPath}`);
+  if (isDev) console.log(`[TMD] devServerUrl=${devServerUrl || "(default http://localhost:5173)"}`);
 
   const win = new BrowserWindow({
     width: 1280,
@@ -56,19 +56,19 @@ function createMainWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath,
-      nodeIntegration: false,
       contextIsolation: true,
-      devTools: allowDevTools // hard gate
+      nodeIntegration: false,
+      devTools: allowDevTools
     }
   });
 
-  // Always push external links to the OS browser
+  // External links should open in system browser
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
   });
 
-  // Deterministically block devtools toggles when disabled
+  // Deterministically block DevTools toggle shortcuts when disabled
   win.webContents.on("before-input-event", (event, input) => {
     const isToggle =
       input.type === "keyDown" &&
@@ -77,61 +77,54 @@ function createMainWindow() {
         ((input.control || input.meta) && input.shift && (input.key === "I" || input.code === "KeyI"))
       );
 
-    if (!allowDevTools && isToggle) {
-      event.preventDefault();
-    }
+    if (!allowDevTools && isToggle) event.preventDefault();
   });
 
-  // Load URL/file deterministically
+  // Load dev server or built file
   if (isDev) {
     const urlToLoad = devServerUrl || "http://localhost:5173";
-    console.log(`[TMD] DEV loadURL => ${urlToLoad}`);
+    console.log(`[TMD] loadURL ${urlToLoad}`);
     win.loadURL(urlToLoad);
   } else {
-    console.log(`[TMD] PROD loadFile => ${indexHtmlPath}`);
+    console.log(`[TMD] loadFile ${indexHtmlPath}`);
     win.loadFile(indexHtmlPath);
   }
 
-  // Diagnostics: never silently fail again
+  // Logging so we never guess again
   win.webContents.on("did-finish-load", () => {
-    console.log(`[TMD] did-finish-load URL=${win.webContents.getURL()}`);
+    console.log(`[TMD] did-finish-load url=${win.webContents.getURL()}`);
   });
 
-  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+  win.webContents.on("did-fail-load", (_e, code, desc, url, isMainFrame) => {
     if (isMainFrame) {
-      console.error(
-        `[TMD] did-fail-load code=${errorCode} desc=${errorDescription} url=${validatedURL}`
-      );
+      console.error(`[TMD] did-fail-load code=${code} desc=${desc} url=${url}`);
     }
   });
 
-  win.webContents.on("render-process-gone", (_event, details) => {
-    console.error(
-      `[TMD] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`
-    );
+  win.webContents.on("render-process-gone", (_e, details) => {
+    console.error(`[TMD] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
   });
 
   win.on("ready-to-show", () => {
     win.show();
-    if (openDevTools) {
-      win.webContents.openDevTools({ mode: "detach" });
-    }
+    if (openDevTools) win.webContents.openDevTools({ mode: "detach" });
   });
 
   return win;
 }
 
 app.whenReady().then(() => {
-  createMainWindow();
+  createWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 
