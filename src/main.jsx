@@ -5,17 +5,19 @@ import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
-// Detect Electron/file:// renderer reliably (nodeIntegration is off)
-const isFileProtocol = window.location?.protocol === 'file:'
-const isElectronFlag =
-  !!window?.desktop?.isElectron || // if your preload exposes this
-  !!window?.electron ||            // some preload patterns expose this
-  !!window?.isElectron             // fallback if you’ve set it anywhere
+// Reliable Electron detection:
+// - In Electron, preload should expose window.tmd.isElectron (recommended)
+// - In packaged builds, protocol will be file: (also true)
+const isFileProtocol = window?.location?.protocol === 'file:'
+const isElectronFromPreload =
+  Boolean(window?.tmd?.isElectron) || // recommended preload key
+  Boolean(window?.desktop?.isElectron) || // legacy pattern
+  Boolean(window?.electron) || // legacy pattern
+  Boolean(window?.isElectron) // fallback if set elsewhere
 
-const isElectron = isFileProtocol || isElectronFlag
+const isElectron = isFileProtocol || isElectronFromPreload
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-// In Electron, SW/caching can cause "blank body" or weird intermittent loads.
 async function maybeRegisterSW() {
   try {
     if (isElectron) return
@@ -34,13 +36,20 @@ async function maybeRegisterSW() {
       }
     })
   } catch (err) {
+    // If PWA plugin isn't included in this build, this import can fail — that's fine.
     console.warn('[PWA] SW setup skipped:', err)
   }
 }
 
 maybeRegisterSW()
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const rootEl = document.getElementById('root')
+if (!rootEl) {
+  // Fail loudly instead of silently doing nothing
+  throw new Error('Root element #root not found')
+}
+
+ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     {isElectron ? (
       <HashRouter>
@@ -53,6 +62,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
