@@ -10,87 +10,94 @@ import { VitePWA } from 'vite-plugin-pwa'
  *
  * Turn it on only for the web build (Netlify).
  */
-const isElectronBuild =
-  process.env.TMD_ELECTRON === '1' || process.env.ELECTRON === 'true'
+export default defineConfig(({ command }) => {
+  const isElectronBuild =
+    process.env.TMD_ELECTRON === '1' || process.env.ELECTRON === 'true'
 
-export default defineConfig({
-  // ✅ Required for Electron file:// and also safe for Netlify
-  base: './',
+  // Web should use "/" for safest asset loading on deep routes.
+  // Electron/file:// should use "./" so assets resolve from the packaged folder.
+  const base = isElectronBuild ? './' : '/'
 
-  plugins: [
-    react(),
+  const enablePWA = !isElectronBuild && command === 'build'
 
-    // ✅ Only enable PWA on web builds
-    !isElectronBuild &&
-      VitePWA({
-        // We register via `virtual:pwa-register` in src/main.jsx
-        injectRegister: null,
+  return {
+    base,
 
-        registerType: 'autoUpdate',
-        filename: 'sw.js',
+    plugins: [
+      react(),
 
-        // We serve a static manifest from /public/manifest.webmanifest
-        manifest: false,
+      enablePWA &&
+        VitePWA({
+          // We register via `virtual:pwa-register` in src/main.jsx
+          injectRegister: null,
 
-        includeAssets: [
-          'icons/*',
-          'favicon.ico',
-          'apple-touch-icon.png',
-          'robots.txt',
-          'offline.html'
-        ],
+          registerType: 'autoUpdate',
+          filename: 'sw.js',
 
-        workbox: {
-          navigateFallback: '/offline.html',
+          // We serve a static manifest from /public/manifest.webmanifest
+          manifest: false,
 
-          navigateFallbackDenylist: [
-            /\/auth\//i,
-            /\/rest\//i,
-            /\/functions\//i,
-            /\/realtime\//i,
-            /supabase\.co/i
+          includeAssets: [
+            'icons/*',
+            'favicon.ico',
+            'apple-touch-icon.png',
+            'robots.txt',
+            'offline.html'
           ],
 
-          globDirectory: 'dist',
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+          workbox: {
+            navigateFallback: '/offline.html',
 
-          runtimeCaching: [
-            {
-              urlPattern:
-                /^https:\/\/[^/]+supabase\.co\/storage\/v1\/object\/public\/.*/i,
-              handler: 'CacheFirst',
-              options: {
-                cacheName: 'supabase-public',
-                expiration: { maxEntries: 60, maxAgeSeconds: 7 * 24 * 3600 },
-                cacheableResponse: { statuses: [0, 200] }
+            navigateFallbackDenylist: [
+              /\/auth\//i,
+              /\/rest\//i,
+              /\/functions\//i,
+              /\/realtime\//i,
+              /supabase\.co/i
+            ],
+
+            globDirectory: 'dist',
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+
+            runtimeCaching: [
+              {
+                urlPattern:
+                  /^https:\/\/[^/]+supabase\.co\/storage\/v1\/object\/public\/.*/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'supabase-public',
+                  expiration: { maxEntries: 60, maxAgeSeconds: 7 * 24 * 3600 },
+                  cacheableResponse: { statuses: [0, 200] }
+                }
+              },
+              {
+                urlPattern: /^https:\/\/[^/]+supabase\.co\/auth\/v1\/.*/i,
+                handler: 'NetworkOnly',
+                options: { cacheName: 'supabase-auth' }
+              },
+              {
+                urlPattern: /^https:\/\/[^/]+supabase\.co\/rest\/v1\/.*/i,
+                handler: 'NetworkOnly',
+                options: { cacheName: 'supabase-rest' }
               }
-            },
-            {
-              urlPattern: /^https:\/\/[^/]+supabase\.co\/auth\/v1\/.*/i,
-              handler: 'NetworkOnly',
-              options: { cacheName: 'supabase-auth' }
-            },
-            {
-              urlPattern: /^https:\/\/[^/]+supabase\.co\/rest\/v1\/.*/i,
-              handler: 'NetworkOnly',
-              options: { cacheName: 'supabase-rest' }
-            }
-          ],
+            ],
 
-          cleanupOutdatedCaches: true
-        }
-      })
-  ].filter(Boolean),
+            cleanupOutdatedCaches: true
+          }
+        })
+    ].filter(Boolean),
 
-  server: {
-    port: 5173
-  },
+    server: {
+      port: 5173
+    },
 
-  build: {
-    outDir: 'dist',
-    sourcemap: false
+    build: {
+      outDir: 'dist',
+      sourcemap: false
+    }
   }
 })
+
 
 
 
