@@ -13,7 +13,6 @@ export async function maybeRegisterSW() {
       }
     })
   } catch (err) {
-    // If the PWA plugin/virtual module isn't present for some reason, don't crash the app.
     console.warn('[PWA] SW setup skipped:', err)
   }
 }
