@@ -1,4 +1,4 @@
-// electron/preload.js (CommonJS)
+﻿// electron/preload.js (CommonJS)
 
 const { contextBridge } = require("electron");
 
@@ -7,8 +7,3 @@ contextBridge.exposeInMainWorld("tmd", {
   env: process.env.TMD_ENV || "unknown",
   devToolsAllowed: (process.env.TMD_DEVTOOLS_ALLOWED || "0") === "1"
 });
-
-
-
-
-

@@ -1,4 +1,4 @@
-// electron/main.js (CommonJS)
+﻿// electron/main.js (CommonJS)
 // Fix: packaged EXE crash "Cannot use import statement outside a module"
 
 const { app, BrowserWindow, shell } = require("electron");
@@ -111,14 +111,3 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-;
-
-
-
-
-
-
-
-
-
-
