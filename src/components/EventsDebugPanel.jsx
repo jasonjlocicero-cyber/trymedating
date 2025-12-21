@@ -1,8 +1,8 @@
 // src/components/EventsDebugPanel.jsx
-import { useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 
 export default function EventsDebugPanel({ title = 'Debug', events }) {
-  // DEV-only. Never render in production.
+  // DEV-only. Never let it break production chat.
   if (!import.meta.env.DEV) return null
 
   const [open, setOpen] = useState(false)
@@ -66,6 +66,7 @@ const styles = {
     wordBreak: 'break-word'
   }
 }
+
 
 
 
