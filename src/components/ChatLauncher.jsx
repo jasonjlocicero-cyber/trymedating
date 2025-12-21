@@ -11,9 +11,52 @@ async function fetchProfileName(userId) {
     .select('display_name, handle, user_id')
     .eq('user_id', userId)
     .maybeSingle()
-
   if (error || !data) return ''
   return data.display_name || (data.handle ? `@${data.handle}` : '')
+}
+
+// Simple error boundary so chat errors don't blank the whole app
+class DockErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+  componentDidCatch(error) {
+    console.error('[ChatDock] crashed:', error)
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 80,
+            width: 360,
+            maxWidth: 'calc(100vw - 24px)',
+            background: '#fff',
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+            padding: 12,
+            zIndex: 1002
+          }}
+        >
+          <div style={{ fontWeight: 900, marginBottom: 8 }}>Chat failed to load</div>
+          <div className="muted" style={{ marginBottom: 10 }}>
+            A component crashed while opening chat. Check console for details.
+          </div>
+          <button className="btn btn-neutral" onClick={this.props.onClose}>
+            Close
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
 }
 
 export default function ChatLauncher({ onUnreadChange = () => {} }) {
@@ -37,11 +80,9 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       if (!alive) return
       setMe(user || null)
     })()
-
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setMe(session?.user || null)
     })
-
     return () => {
       alive = false
       sub?.subscription?.unsubscribe?.()
@@ -58,9 +99,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       }
       setOpen(true)
     }
-
     window.addEventListener('open-chat', openFromEvent)
-
     window.openChat = function (id, name = '') {
       if (id) {
         setPartnerId(id)
@@ -68,19 +107,16 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       }
       setOpen(true)
     }
-
     return () => window.removeEventListener('open-chat', openFromEvent)
   }, [])
 
   // ------- recent list when open -------
   useEffect(() => {
     let cancel = false
-
     async function loadRecent() {
-      if (!open || !me?.id) return
+      if (!open || !me?.id || partnerId) return
       setLoadingList(true)
       setErr('')
-
       try {
         const { data, error } = await supabase
           .from('messages')
@@ -116,24 +152,19 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
         const rank = new Map(order.map((id, i) => [id, i]))
         const list = (profs || [])
-          .map(p => ({
-            id: p.user_id,
-            display_name: p.display_name || '',
-            handle: p.handle || ''
-          }))
+          .map((p) => ({ id: p.user_id, display_name: p.display_name || '', handle: p.handle || '' }))
           .sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999))
 
         if (!cancel) setRecent(list)
       } catch (e) {
-        if (!cancel) setErr(e?.message || 'Failed to load conversations')
+        if (!cancel) setErr(e.message || 'Failed to load conversations')
       } finally {
         if (!cancel) setLoadingList(false)
       }
     }
-
     loadRecent()
     return () => { cancel = true }
-  }, [open, me?.id])
+  }, [open, me?.id, partnerId])
 
   // ------- unread count -------
   async function computeUnread(userId) {
@@ -142,7 +173,6 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       return
     }
 
-    // With head:true, data is typically null — use "count".
     const { count, error } = await supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
@@ -159,19 +189,15 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
   useEffect(() => {
     computeUnread(me?.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.id])
 
   // Live bump on any message change
   useEffect(() => {
     if (!me?.id) return
-
     const channel = supabase
       .channel(`messages-unread-${me.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages' },
-        () => computeUnread(me.id)
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => computeUnread(me.id))
       .subscribe()
 
     return () => supabase.removeChannel(channel)
@@ -180,14 +206,13 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   // ------- new-message toast when dock is closed -------
   useEffect(() => {
     if (!me?.id) return
-
     const ch = supabase
       .channel(`toast-${me.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
         async ({ new: m }) => {
-          if (open) return // don't toast if dock is open
+          if (open) return
           const name = await fetchProfileName(m.sender)
           setToast({
             fromId: m.sender,
@@ -208,7 +233,10 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       {/* Floating launcher button */}
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => {
+          setOpen((o) => !o)
+          if (open) setPartnerId(null)
+        }}
         title="Messages"
         aria-label="Messages"
         style={{
@@ -249,7 +277,13 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <div style={{ fontWeight: 800 }}>Messages</div>
-            <button className="btn btn-neutral" onClick={() => setOpen(false)} style={{ padding: '4px 8px' }}>✕</button>
+            <button
+              className="btn btn-neutral"
+              onClick={() => { setOpen(false); setPartnerId(null) }}
+              style={{ padding: '4px 8px' }}
+            >
+              ✕
+            </button>
           </div>
 
           {!me?.id && <div className="helper-error">Sign in to message.</div>}
@@ -264,7 +298,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
               )}
 
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 220, overflowY: 'auto' }}>
-                {recent.map(p => (
+                {recent.map((p) => (
                   <li key={p.id}>
                     <button
                       className="btn btn-neutral"
@@ -289,7 +323,6 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
                         >
                           {(p.display_name || p.handle || '?').slice(0, 1).toUpperCase()}
                         </div>
-
                         <div style={{ textAlign: 'left' }}>
                           <div style={{ fontWeight: 700 }}>{p.display_name || 'Unnamed'}</div>
                           {p.handle && <div className="muted">@{p.handle}</div>}
@@ -322,17 +355,13 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
           }}
         >
           <div style={{ fontWeight: 800, marginBottom: 4 }}>{toast.fromName}</div>
-          <div style={{ opacity: .9, marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ opacity: 0.9, marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {toast.text}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               className="btn btn-primary"
-              onClick={() => {
-                setPartnerId(toast.fromId)
-                setOpen(true)
-                setToast(null)
-              }}
+              onClick={() => { setPartnerId(toast.fromId); setOpen(true); setToast(null) }}
             >
               Open
             </button>
@@ -343,10 +372,15 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
       {/* Chat dock */}
       {open && canChat && (
-        <ChatDock
-          partnerId={partnerId}
-          // partnerName isn't required by ChatDock, but keeping state lets us show it in future headers if desired
-        />
+        <DockErrorBoundary
+          onClose={() => {
+            setPartnerId(null)
+            setPartnerName('')
+            setOpen(false)
+          }}
+        >
+          <ChatDock partnerId={partnerId} />
+        </DockErrorBoundary>
       )}
     </>
   )
