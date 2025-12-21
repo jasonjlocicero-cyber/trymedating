@@ -13,8 +13,8 @@ export default async function maybeRegisterSW() {
       }
     })
   } catch (err) {
-    // If PWA plugin isn't included in this build, importing can fail — that's fine.
     console.warn('[PWA] SW setup skipped:', err)
   }
 }
+
 
