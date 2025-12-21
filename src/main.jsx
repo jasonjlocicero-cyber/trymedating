@@ -4,7 +4,6 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
-import maybeRegisterSW from './pwa/maybeRegisterSW.js'
 
 // Reliable Electron detection:
 // - In Electron, preload should expose window.tmd.isElectron (recommended)
@@ -19,13 +18,25 @@ const isElectronFromPreload =
 const isElectron = isFileProtocol || isElectronFromPreload
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-if (!isElectron) {
-  maybeRegisterSW()
+// Also: avoid virtual:pwa-register entirely (it breaks if the plugin isn't active in dev).
+async function maybeRegisterSW() {
+  try {
+    if (isElectron) return
+    if (!import.meta.env.PROD) return
+    if (!('serviceWorker' in navigator)) return
+
+    // vite-plugin-pwa typically outputs /sw.js in the site root.
+    // If it doesn't exist for some reason, this will fail safely and your app still runs.
+    await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+  } catch (err) {
+    console.warn('[PWA] SW register skipped:', err)
+  }
 }
+
+maybeRegisterSW()
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
-  // Fail loudly instead of silently doing nothing
   throw new Error('Root element #root not found')
 }
 
@@ -42,6 +53,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
