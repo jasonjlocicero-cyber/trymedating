@@ -1,17 +1,12 @@
-/* electron/preload.js - CommonJS preload
-   Exposes minimal safe runtime flags to the renderer.
-*/
+// electron/preload.js (CommonJS)
+// Keep preload minimal and safe
 
 const { contextBridge } = require("electron");
 
-const env = process.env.TMD_ENV || "unknown";
-const devToolsAllowed = (process.env.TMD_DEVTOOLS || "0") === "1";
-
 contextBridge.exposeInMainWorld("tmd", {
   isElectron: true,
-  env,
-  devToolsAllowed,
-  platform: process.platform
+  env: process.env.TMD_ENV || "unknown",
+  devToolsAllowed: (process.env.TMD_DEVTOOLS_ALLOWED || "0") === "1"
 });
 
 
