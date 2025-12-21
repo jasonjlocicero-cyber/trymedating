@@ -4,21 +4,21 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 /**
- * We disable PWA/Service Worker for Electron builds because:
- * - SW caching + navigation fallback can cause blank screens / stale loads in Electron
- * - Electron "desktop app" shouldn't need SW offline caching anyway
- *
- * Turn it on only for the web build (Netlify).
+ * Notes:
+ * - We always include VitePWA so `virtual:pwa-register` resolves in DEV (5173) and BUILD.
+ * - We keep SW behavior OFF in dev via devOptions.enabled = false.
+ * - Electron builds should not register SW (your main.jsx already prevents this).
  */
 export default defineConfig(({ command }) => {
   const isElectronBuild =
-    process.env.TMD_ELECTRON === '1' || process.env.ELECTRON === 'true'
+    process.env.TMD_ELECTRON === '1' ||
+    process.env.TMD_ELECTRON === 'true' ||
+    process.env.ELECTRON === '1' ||
+    process.env.ELECTRON === 'true'
 
   // Web should use "/" for safest asset loading on deep routes.
   // Electron/file:// should use "./" so assets resolve from the packaged folder.
   const base = isElectronBuild ? './' : '/'
-
-  const enablePWA = !isElectronBuild && command === 'build'
 
   return {
     base,
@@ -26,69 +26,91 @@ export default defineConfig(({ command }) => {
     plugins: [
       react(),
 
-      enablePWA &&
-        VitePWA({
-          // We register via `virtual:pwa-register` in src/main.jsx
-          injectRegister: null,
+      // Keep plugin present in both dev + build so `virtual:pwa-register` exists.
+      VitePWA({
+        // We register manually via `virtual:pwa-register` in code (not auto injected).
+        injectRegister: null,
 
-          registerType: 'autoUpdate',
-          filename: 'sw.js',
+        // Auto-update SW when it *is* registered (web build).
+        registerType: 'autoUpdate',
 
-          // We serve a static manifest from /public/manifest.webmanifest
-          manifest: false,
+        // Name of generated SW file in dist/
+        filename: 'sw.js',
 
-          includeAssets: [
-            'icons/*',
-            'favicon.ico',
-            'apple-touch-icon.png',
-            'robots.txt',
-            'offline.html'
+        // Using a static manifest file in /public (manifest.webmanifest)
+        // so we don't generate one from config.
+        manifest: false,
+
+        // Keep SW OFF in dev server (but still provide the virtual module).
+        devOptions: {
+          enabled: false
+        },
+
+        includeAssets: [
+          'icons/*',
+          'favicon.ico',
+          'apple-touch-icon.png',
+          'robots.txt',
+          'offline.html'
+        ],
+
+        workbox: {
+          // Offline fallback page (web only)
+          navigateFallback: '/offline.html',
+
+          // Never try to “offline-fallback” auth/API-like routes
+          navigateFallbackDenylist: [
+            /\/auth\//i,
+            /\/rest\//i,
+            /\/functions\//i,
+            /\/realtime\//i,
+            /supabase\.co/i
           ],
 
-          workbox: {
-            navigateFallback: '/offline.html',
+          // Let VitePWA use outDir automatically; only keep patterns.
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
 
-            navigateFallbackDenylist: [
-              /\/auth\//i,
-              /\/rest\//i,
-              /\/functions\//i,
-              /\/realtime\//i,
-              /supabase\.co/i
-            ],
-
-            globDirectory: 'dist',
-            globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
-
-            runtimeCaching: [
-              {
-                urlPattern:
-                  /^https:\/\/[^/]+supabase\.co\/storage\/v1\/object\/public\/.*/i,
-                handler: 'CacheFirst',
-                options: {
-                  cacheName: 'supabase-public',
-                  expiration: { maxEntries: 60, maxAgeSeconds: 7 * 24 * 3600 },
-                  cacheableResponse: { statuses: [0, 200] }
-                }
-              },
-              {
-                urlPattern: /^https:\/\/[^/]+supabase\.co\/auth\/v1\/.*/i,
-                handler: 'NetworkOnly',
-                options: { cacheName: 'supabase-auth' }
-              },
-              {
-                urlPattern: /^https:\/\/[^/]+supabase\.co\/rest\/v1\/.*/i,
-                handler: 'NetworkOnly',
-                options: { cacheName: 'supabase-rest' }
+          runtimeCaching: [
+            // Supabase public storage: cache for performance
+            {
+              urlPattern:
+                /^https:\/\/[^/]+supabase\.co\/storage\/v1\/object\/public\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'supabase-public',
+                expiration: { maxEntries: 60, maxAgeSeconds: 7 * 24 * 3600 },
+                cacheableResponse: { statuses: [0, 200] }
               }
-            ],
+            },
 
-            cleanupOutdatedCaches: true
-          }
-        })
-    ].filter(Boolean),
+            // Supabase auth: NEVER cache
+            {
+              urlPattern: /^https:\/\/[^/]+supabase\.co\/auth\/v1\/.*/i,
+              handler: 'NetworkOnly',
+              options: { cacheName: 'supabase-auth' }
+            },
+
+            // Supabase rest: NEVER cache
+            {
+              urlPattern: /^https:\/\/[^/]+supabase\.co\/rest\/v1\/.*/i,
+              handler: 'NetworkOnly',
+              options: { cacheName: 'supabase-rest' }
+            }
+          ],
+
+          cleanupOutdatedCaches: true
+        }
+      })
+    ],
 
     server: {
-      port: 5173
+      port: 5173,
+      strictPort: true
+    },
+
+    preview: {
+      port: 4173,
+      strictPort: true
     },
 
     build: {
@@ -97,6 +119,7 @@ export default defineConfig(({ command }) => {
     }
   }
 })
+
 
 
 
