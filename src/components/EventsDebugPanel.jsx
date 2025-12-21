@@ -1,8 +1,8 @@
 // src/components/EventsDebugPanel.jsx
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 export default function EventsDebugPanel({ title = 'Debug', events }) {
-  // This panel is DEV-only. Never let it break production chat.
+  // DEV-only. Never render in production.
   if (!import.meta.env.DEV) return null
 
   const [open, setOpen] = useState(false)
