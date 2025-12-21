@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter, HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
+import maybeRegisterSW from './pwa/maybeRegisterSW.js'
 
 // Reliable Electron detection:
 // - In Electron, preload should expose window.tmd.isElectron (recommended)
@@ -18,21 +19,13 @@ const isElectronFromPreload =
 const isElectron = isFileProtocol || isElectronFromPreload
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-// Keep the PWA virtual import OUT of the dev module graph.
-// Only load our SW helper in PROD.
-if (!isElectron && import.meta.env.PROD && 'serviceWorker' in navigator) {
-  import('./pwa/maybeRegisterSW.js')
-    .then((m) => {
-      const fn = m?.default || m?.maybeRegisterSW
-      if (typeof fn === 'function') fn()
-    })
-    .catch((err) => {
-      console.warn('[PWA] SW setup skipped:', err)
-    })
+if (!isElectron) {
+  maybeRegisterSW()
 }
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
+  // Fail loudly instead of silently doing nothing
   throw new Error('Root element #root not found')
 }
 
@@ -49,6 +42,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
