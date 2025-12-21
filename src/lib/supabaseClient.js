@@ -5,6 +5,14 @@ import { createClient } from '@supabase/supabase-js'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim()
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
+console.log("[supabase env]", {
+  mode: import.meta.env.MODE,
+  hasUrl: !!SUPABASE_URL,
+  urlHost: SUPABASE_URL ? new URL(SUPABASE_URL).host : null,
+  hasAnonKey: !!SUPABASE_ANON_KEY,
+  anonKeyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 6) + "…" : null,
+})
+
 // Loud, early failure if misconfigured
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   // Show masked values to help debug in console without leaking secrets
