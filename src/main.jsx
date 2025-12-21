@@ -18,10 +18,10 @@ const isElectronFromPreload =
 const isElectron = isFileProtocol || isElectronFromPreload
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
-// Also IMPORTANT: Keep the PWA virtual import out of the dev module graph.
-// We do that by only importing our PWA helper file in PROD.
+// Keep the PWA virtual import OUT of the dev module graph.
+// Only load our SW helper in PROD.
 if (!isElectron && import.meta.env.PROD && 'serviceWorker' in navigator) {
-  import('./pwa/maybeRegisterSW')
+  import('./pwa/maybeRegisterSW.js')
     .then((m) => {
       const fn = m?.default || m?.maybeRegisterSW
       if (typeof fn === 'function') fn()
@@ -33,7 +33,6 @@ if (!isElectron && import.meta.env.PROD && 'serviceWorker' in navigator) {
 
 const rootEl = document.getElementById('root')
 if (!rootEl) {
-  // Fail loudly instead of silently doing nothing
   throw new Error('Root element #root not found')
 }
 
@@ -50,6 +49,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 )
+
 
 
 
