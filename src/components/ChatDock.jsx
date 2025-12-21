@@ -373,7 +373,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 }
 
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock({ peerId: peerIdProp, partnerId, variant = "page" }) {
+export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" }) {
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -979,12 +979,15 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, variant = "pag
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
       style={{
-        maxWidth: 720,
-        margin: "12px auto",
+        maxWidth: mode === "widget" ? "none" : 720,
+        margin: mode === "widget" ? 0 : "12px auto",
         border: "1px solid var(--border)",
-        borderRadius: 12,
+        borderRadius: mode === "widget" ? 12 : 12,
         padding: 12,
         background: "#fff",
+        height: mode === "widget" ? "100%" : "auto",
+        display: mode === "widget" ? "flex" : "block",
+        flexDirection: mode === "widget" ? "column" : undefined,
       }}
     >
       {/* header */}
@@ -1050,7 +1053,9 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, variant = "pag
               display: "grid",
               gridTemplateRows: "1fr auto",
               gap: 8,
-              ...(panel ? { height: "100%", minHeight: 0 } : { maxHeight: 360 }),
+              maxHeight: mode === "widget" ? "none" : 360,
+              height: mode === "widget" ? "100%" : "auto",
+              minHeight: 0,
             }}
           >
             <div
@@ -1064,7 +1069,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, variant = "pag
                 overflowY: "auto",
                 background: "#fff",
                 minHeight: panel ? 0 : 140,
-                maxHeight: panel ? "none" : 260,
+                maxHeight: mode === "widget" ? "none" : 260,
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
