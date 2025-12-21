@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react'
 
 export default function EventsDebugPanel({ title = 'Debug', events }) {
-  // DEV-only. Never let debug tooling break production.
+  // DEV-only panel. Never let it break production.
   if (!import.meta.env.DEV) return null
 
   const [open, setOpen] = useState(false)
@@ -66,6 +66,7 @@ const styles = {
     wordBreak: 'break-word'
   }
 }
+
 
 
 
