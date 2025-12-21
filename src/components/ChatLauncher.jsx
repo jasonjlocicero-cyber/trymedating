@@ -15,6 +15,30 @@ async function fetchProfileName(userId) {
   return data.display_name || (data.handle ? `@${data.handle}` : '');
 }
 
+// Simple responsive helper
+function useIsMobile(maxWidthPx = 640) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(`(max-width: ${maxWidthPx}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia(`(max-width: ${maxWidthPx}px)`);
+    const onChange = (e) => setIsMobile(e.matches);
+
+    if (mql.addEventListener) mql.addEventListener('change', onChange);
+    else mql.addListener(onChange);
+
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener('change', onChange);
+      else mql.removeListener(onChange);
+    };
+  }, [maxWidthPx]);
+
+  return isMobile;
+}
+
 export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null);
   const [open, setOpen] = useState(false);
@@ -23,6 +47,8 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   const [loadingList, setLoadingList] = useState(false);
   const [recent, setRecent] = useState([]);
   const [err, setErr] = useState('');
+
+  const isMobile = useIsMobile(640);
 
   // New-message toast (shows only when dock is closed)
   // shape: { fromId, fromName, text }
@@ -44,6 +70,20 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       sub?.subscription?.unsubscribe?.();
     };
   }, []);
+
+  const canChat = !!(me?.id && partnerId);
+
+  // Lock background scroll when chat is fullscreen on mobile
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!open || !canChat) return;
+
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open, canChat, isMobile]);
 
   // ------- global opener + event -------
   useEffect(() => {
@@ -115,7 +155,6 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   // ------- unread count -------
   async function computeUnread(userId) {
     if (!userId) { onUnreadChange(0); return; }
-    // Lightweight count (exact header count not exposed in JS v2 by default)
     const { data, error } = await supabase
       .from('messages')
       .select('id', { count: 'exact', head: true })
@@ -154,14 +193,71 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         async ({ new: m }) => {
           if (open) return; // don't toast if dock is open
           const name = await fetchProfileName(m.sender);
-          setToast({ fromId: m.sender, fromName: name || 'New message', text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message') });
+          setToast({
+            fromId: m.sender,
+            fromName: name || 'New message',
+            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
+          });
         }
       )
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [me?.id, open]);
 
-  const canChat = !!(me?.id && partnerId);
+  const inboxStyle = isMobile
+    ? {
+        position:'fixed',
+        inset: 0,
+        background:'#fff',
+        border:'none',
+        borderRadius: 0,
+        boxShadow:'none',
+        padding: 12,
+        zIndex: 1201,
+        display:'flex',
+        flexDirection:'column'
+      }
+    : {
+        position:'fixed', right:16, bottom:80, width:320, maxWidth:'calc(100vw - 24px)',
+        background:'#fff', border:'1px solid var(--border)', borderRadius:12,
+        boxShadow:'0 12px 32px rgba(0,0,0,0.12)', padding:12, zIndex:1001
+      };
+
+  const dockShellStyle = isMobile
+    ? {
+        position:'fixed',
+        inset: 0,
+        background:'#fff',
+        zIndex: 1202,
+        display:'flex',
+        flexDirection:'column'
+      }
+    : {
+        position:'fixed',
+        right: 16,
+        bottom: 80,
+        width: 380,
+        height: 540,
+        maxHeight: 'calc(100vh - 120px)',
+        background:'#fff',
+        border:'1px solid var(--border)',
+        borderRadius: 16,
+        boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
+        zIndex: 1202,
+        display:'flex',
+        flexDirection:'column',
+        overflow:'hidden'
+      };
+
+  const dockHeaderStyle = {
+    display:'flex',
+    alignItems:'center',
+    justifyContent:'space-between',
+    gap: 10,
+    padding:'10px 12px',
+    borderBottom:'1px solid var(--border)',
+    background:'#fff'
+  };
 
   return (
     <>
@@ -184,29 +280,39 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
       {/* Inbox picker */}
       {open && !partnerId && (
-        <div
-          style={{
-            position:'fixed', right:16, bottom:80, width:320, maxWidth:'calc(100vw - 24px)',
-            background:'#fff', border:'1px solid var(--border)', borderRadius:12,
-            boxShadow:'0 12px 32px rgba(0,0,0,0.12)', padding:12, zIndex:1001
-          }}
-        >
+        <div style={inboxStyle}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
             <div style={{ fontWeight:800 }}>Messages</div>
-            <button className="btn btn-neutral" onClick={() => setOpen(false)} style={{ padding:'4px 8px' }}>✕</button>
+            <button
+              className="btn btn-neutral"
+              onClick={() => setOpen(false)}
+              style={{ padding:'4px 8px' }}
+            >
+              ✕
+            </button>
           </div>
 
           {!me?.id && <div className="helper-error">Sign in to message.</div>}
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom:8 }}>Pick a recent chat:</div>
+              <div className="helper-muted" style={{ marginBottom:8 }}>
+                Pick a recent chat:
+              </div>
+
               {err && <div className="helper-error" style={{ marginBottom:8 }}>{err}</div>}
               {loadingList && <div className="muted">Loading…</div>}
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
               )}
-              <ul style={{ listStyle:'none', padding:0, margin:0, maxHeight:220, overflowY:'auto' }}>
+
+              <ul style={{
+                listStyle:'none',
+                padding:0,
+                margin:0,
+                maxHeight: isMobile ? 'calc(100vh - 120px)' : 220,
+                overflowY:'auto'
+              }}>
                 {recent.map(p => (
                   <li key={p.id}>
                     <button
@@ -254,8 +360,10 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
             {toast.text}
           </div>
           <div style={{ display:"flex", gap:8 }}>
-            <button className="btn btn-primary"
-              onClick={() => { setPartnerId(toast.fromId); setOpen(true); setToast(null); }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => { setPartnerId(toast.fromId); setOpen(true); setToast(null); }}
+            >
               Open
             </button>
             <button className="btn btn-neutral" onClick={() => setToast(null)}>Dismiss</button>
@@ -263,15 +371,50 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         </div>
       )}
 
-      {/* Chat dock */}
+      {/* Chat window (desktop popup + mobile fullscreen) */}
       {open && canChat && (
-        <ChatDock
-          partnerId={partnerId}
-          // partnerName isn't required by ChatDock, but keeping state lets us show it in future headers if desired
-        />
+        <div style={dockShellStyle} role="dialog" aria-label="Chat">
+          <div style={dockHeaderStyle}>
+            <div style={{
+              fontWeight: 800,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}>
+              {partnerName ? `Chat • ${partnerName}` : 'Chat'}
+            </div>
+
+            <div style={{ display:'flex', gap:8 }}>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={() => setPartnerId(null)}
+                style={{ padding:'6px 10px' }}
+                title="Back to conversations"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={() => { setOpen(false); setPartnerId(null); }}
+                style={{ padding:'6px 10px' }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            {/* IMPORTANT: pass peerId (ChatDock expects peerId) */}
+            <ChatDock peerId={partnerId} variant="panel" />
+          </div>
+        </div>
       )}
     </>
   );
 }
+
 
 
