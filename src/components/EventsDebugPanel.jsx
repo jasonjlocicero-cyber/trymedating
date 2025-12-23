@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react'
 
 export default function EventsDebugPanel({ title = 'Debug', events }) {
-  // DEV-only panel. Never let it break production.
+  // DEV-only. Never let it break production chat.
   if (!import.meta.env.DEV) return null
 
   const [open, setOpen] = useState(false)
