@@ -71,7 +71,7 @@ export default function EventsDebugPanel() {
           ⚡ Events
         </button>
       ) : (
-        <div style={panel}>
+        <div style={styles.panel}>
           <div style={header}>
             <div style={{ fontWeight: 800 }}>Events Debug</div>
             <div style={{ display: 'flex', gap: 8 }}>
