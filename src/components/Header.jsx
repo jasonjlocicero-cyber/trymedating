@@ -111,45 +111,6 @@ export default function Header({ me, unread = 0, onSignOut }) {
             Home
           </NavLink>
 
-          {/* MESSAGES = CORAL */}
-          <NavLink
-            to="/chat"
-            className="btn btn-coral btn-pill"
-            style={({ isActive }) => ({
-              background: isActive ? "var(--brand-coral)" : undefined,
-              color: isActive ? "#fff" : undefined,
-              borderColor: isActive ? "var(--brand-coral)" : undefined,
-              position: "relative",
-            })}
-          >
-            Messages
-            {unread > 0 && (
-              <span
-                aria-live="polite"
-                aria-atomic="true"
-                aria-label={`${unread} unread`}
-                style={{
-                  position: "absolute",
-                  top: -6,
-                  right: -6,
-                  minWidth: 18,
-                  height: 18,
-                  padding: "0 5px",
-                  borderRadius: 999,
-                  background: "var(--brand-coral)",
-                  color: "#fff",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  display: "grid",
-                  placeItems: "center",
-                  lineHeight: 1,
-                }}
-              >
-                {unread}
-              </span>
-            )}
-          </NavLink>
-
           {me ? (
             <button
               type="button"
@@ -169,6 +130,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   );
 }
+
 
 
 
