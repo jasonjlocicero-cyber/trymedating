@@ -1,55 +1,74 @@
 // src/pages/ChatDockPage.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import ChatDock from "../components/ChatDock";
-import MessagesPanel from "../components/MessagesPanel";
 
 export default function ChatDockPage() {
   const { peerId: peerFromPath, handle: handleFromPath } = useParams();
   const [qs] = useSearchParams();
   const navigate = useNavigate();
 
-  const [peerId, setPeerId] = useState(
-    peerFromPath || qs.get("peer") || qs.get("user") || qs.get("id") || ""
-  );
-  const handle = (handleFromPath || qs.get("handle") || "").trim().replace(/^@/, "");
+  // Normalize inputs coming from route params or querystring
+  const peerFromQS =
+    qs.get("peer") || qs.get("user") || qs.get("id") || "";
+
+  const handle = useMemo(() => {
+    return (handleFromPath || qs.get("handle") || "")
+      .trim()
+      .replace(/^@/, "");
+  }, [handleFromPath, qs]);
+
+  // Keep peerId in state so we can resolve handle -> id and then navigate
+  const [peerId, setPeerId] = useState(peerFromPath || peerFromQS || "");
+
+  // ✅ IMPORTANT: if user navigates to a different /chat/:peerId, update state
+  useEffect(() => {
+    const next = peerFromPath || peerFromQS || "";
+    setPeerId(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peerFromPath, peerFromQS]);
 
   // Resolve handle → id, then normalize to /chat/:peerId
   useEffect(() => {
     let mounted = true;
+
     (async () => {
-      if (!peerId && handle) {
-        // Read from the compatibility view so "id" is always available
-        let { data, error } = await supabase
-          .from("profiles_v")
-          .select("id")
-          .eq("handle", handle)
-          .maybeSingle();
+      if (peerId || !handle) return;
 
-        if (!mounted) return;
-        if (!error && data?.id) {
-          setPeerId(data.id);
-          navigate(`/chat/${data.id}`, { replace: true });
-          return;
-        }
+      // Read from the compatibility view so "id" is always available
+      const { data, error } = await supabase
+        .from("profiles_v")
+        .select("id")
+        .eq("handle", handle)
+        .maybeSingle();
 
-        // Optional fallback if you ever keep a "username" column
-        const { data: byUsername } = await supabase
-          .from("profiles_v")
-          .select("id")
-          .eq("username", handle)
-          .maybeSingle();
+      if (!mounted) return;
 
-        if (byUsername?.id) {
-          setPeerId(byUsername.id);
-          navigate(`/chat/${byUsername.id}`, { replace: true });
-          return;
-        }
-
-        alert("No profile with that handle.");
+      if (!error && data?.id) {
+        setPeerId(data.id);
+        navigate(`/chat/${data.id}`, { replace: true });
+        return;
       }
+
+      // Optional fallback if you ever keep a "username" column
+      const { data: byUsername } = await supabase
+        .from("profiles_v")
+        .select("id")
+        .eq("username", handle)
+        .maybeSingle();
+
+      if (!mounted) return;
+
+      if (byUsername?.id) {
+        setPeerId(byUsername.id);
+        navigate(`/chat/${byUsername.id}`, { replace: true });
+        return;
+      }
+
+      alert("No profile with that handle.");
     })();
+
     return () => {
       mounted = false;
     };
@@ -67,11 +86,13 @@ export default function ChatDockPage() {
   const openByHandle = async () => {
     const h = manualHandle.trim().replace(/^@/, "");
     if (!h) return;
+
     const { data } = await supabase
       .from("profiles_v")
       .select("id")
       .eq("handle", h)
       .maybeSingle();
+
     if (data?.id) navigate(`/chat/${data.id}`);
     else alert("No profile with that handle.");
   };
@@ -116,13 +137,10 @@ export default function ChatDockPage() {
     );
   }
 
-  // Peer resolved → render ChatDock with messages
+  // Peer resolved → render ChatDock
   return (
     <div className="p-4">
-      <ChatDock
-        peerId={peerId}
-        renderMessages={(connectionId) => <MessagesPanel connectionId={connectionId} />}
-      />
+      <ChatDock peerId={peerId} mode="page" />
     </div>
   );
 }
