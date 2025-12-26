@@ -1,5 +1,5 @@
 // src/pages/ChatDockPage.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import ChatDock from "../components/ChatDock";
@@ -9,64 +9,50 @@ export default function ChatDockPage() {
   const [qs] = useSearchParams();
   const navigate = useNavigate();
 
-  // Normalize inputs coming from route params or querystring
-  const peerFromQS =
-    qs.get("peer") || qs.get("user") || qs.get("id") || "";
+  const [peerId, setPeerId] = useState(
+    peerFromPath || qs.get("peer") || qs.get("user") || qs.get("id") || ""
+  );
 
-  const handle = useMemo(() => {
-    return (handleFromPath || qs.get("handle") || "")
-      .trim()
-      .replace(/^@/, "");
-  }, [handleFromPath, qs]);
-
-  // Keep peerId in state so we can resolve handle -> id and then navigate
-  const [peerId, setPeerId] = useState(peerFromPath || peerFromQS || "");
-
-  // ✅ IMPORTANT: if user navigates to a different /chat/:peerId, update state
-  useEffect(() => {
-    const next = peerFromPath || peerFromQS || "";
-    setPeerId(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peerFromPath, peerFromQS]);
+  const handle = (handleFromPath || qs.get("handle") || "")
+    .trim()
+    .replace(/^@/, "");
 
   // Resolve handle → id, then normalize to /chat/:peerId
   useEffect(() => {
     let mounted = true;
 
     (async () => {
-      if (peerId || !handle) return;
+      if (!peerId && handle) {
+        // Read from compatibility view so "id" is always available
+        const { data, error } = await supabase
+          .from("profiles_v")
+          .select("id")
+          .eq("handle", handle)
+          .maybeSingle();
 
-      // Read from the compatibility view so "id" is always available
-      const { data, error } = await supabase
-        .from("profiles_v")
-        .select("id")
-        .eq("handle", handle)
-        .maybeSingle();
+        if (!mounted) return;
 
-      if (!mounted) return;
+        if (!error && data?.id) {
+          setPeerId(data.id);
+          navigate(`/chat/${data.id}`, { replace: true });
+          return;
+        }
 
-      if (!error && data?.id) {
-        setPeerId(data.id);
-        navigate(`/chat/${data.id}`, { replace: true });
-        return;
+        // Optional fallback if you ever keep a "username" column
+        const { data: byUsername } = await supabase
+          .from("profiles_v")
+          .select("id")
+          .eq("username", handle)
+          .maybeSingle();
+
+        if (byUsername?.id) {
+          setPeerId(byUsername.id);
+          navigate(`/chat/${byUsername.id}`, { replace: true });
+          return;
+        }
+
+        alert("No profile with that handle.");
       }
-
-      // Optional fallback if you ever keep a "username" column
-      const { data: byUsername } = await supabase
-        .from("profiles_v")
-        .select("id")
-        .eq("username", handle)
-        .maybeSingle();
-
-      if (!mounted) return;
-
-      if (byUsername?.id) {
-        setPeerId(byUsername.id);
-        navigate(`/chat/${byUsername.id}`, { replace: true });
-        return;
-      }
-
-      alert("No profile with that handle.");
     })();
 
     return () => {
@@ -144,6 +130,7 @@ export default function ChatDockPage() {
     </div>
   );
 }
+
 
 
 
