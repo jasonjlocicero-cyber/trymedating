@@ -1068,7 +1068,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
                 padding: 12,
                 overflowY: "auto",
                 background: "#fff",
-                minHeight: panel ? 0 : 140,
+                minHeight: 140,
                 maxHeight: mode === "widget" ? "none" : 260,
               }}
             >
