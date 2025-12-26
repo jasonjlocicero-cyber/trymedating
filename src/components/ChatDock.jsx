@@ -25,8 +25,7 @@ const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}
 const OPEN = "[".repeat(2);     // "[["
 const CLOSE = "]".repeat(2);    // "]]"
 const tagStart = (t) => OPEN + t + ":"; // e.g. "[[file:"
-const betweenTags = (body, t) =>
-  body.slice(tagStart(t).length, -CLOSE.length);
+const betweenTags = (body, t) => body.slice(tagStart(t).length, -CLOSE.length);
 
 /* ---------- human-readable file size ---------- */
 function humanSize(bytes) {
@@ -373,7 +372,19 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 }
 
 /* ------------------------------ ChatDock ------------------------------ */
-export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" }) {
+export default function ChatDock(props) {
+  const {
+    peerId: peerIdProp,
+    partnerId,
+    partnerName = "",
+    onClose,
+    mode,
+  } = props;
+
+  // If ChatLauncher passes onClose, default to widget mode automatically.
+  const resolvedMode = mode || (typeof onClose === "function" ? "widget" : "page");
+  const isWidget = resolvedMode === "widget";
+
   // auth
   const [me, setMe] = useState(null);
   const myId = toId(me?.id);
@@ -397,7 +408,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
   // sessions count (for banner)
   const [sessionCount, setSessionCount] = useState(1);
 
-  // NEW: banner visibility persisted per pair
+  // banner visibility persisted per pair
   const [hidePrevBanner, setHidePrevBanner] = useState(false);
 
   const scrollerRef = useRef(null);
@@ -903,7 +914,6 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
       if (error) throw error;
       await fetchMessages(); // refresh list
     } catch (e) {
-      // If function is missing, surface a helpful hint but don’t break UI
       alert(e?.message || "Failed to delete last message.");
       console.error("[delete last message]", e);
     } finally {
@@ -927,44 +937,94 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
           <Btn tone="danger" onClick={rejectRequest} label="Reject" disabled={busy} />
         </>
       )}
-      {ACCEPTED.has(status) && (
-        <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />
-      )}
-      {(status === "rejected" || status === "disconnected") && (
-        <Btn onClick={reconnect} label="Reconnect" disabled={busy} />
-      )}
+      {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
+      {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
     </div>
   );
+
+  /* -------- widget wrapper styles (this is what makes it a true floating window) -------- */
+  const outerStyle = isWidget
+    ? {
+        position: "fixed",
+        right: 16,
+        bottom: 80,
+        width: 360,
+        maxWidth: "calc(100vw - 24px)",
+        height: "min(560px, calc(100vh - 120px))",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        background: "#fff",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
+        padding: 12,
+        zIndex: 100001,
+        display: "flex",
+        flexDirection: "column",
+      }
+    : {
+        maxWidth: 720,
+        margin: "12px auto",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        padding: 12,
+        background: "#fff",
+      };
 
   /* UI guards */
   if (!me) {
     return (
-      <div
-        style={{
-          maxWidth: 720,
-          margin: "12px auto",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 12,
-        }}
-      >
+      <div style={outerStyle}>
+        {isWidget && typeof onClose === "function" && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontWeight: 800 }}>Messages</div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              style={{
+                border: "1px solid var(--border)",
+                background: "#fff",
+                borderRadius: 10,
+                padding: "4px 10px",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div className="muted" style={{ fontSize: 13 }}>
           Please sign in to use chat.
         </div>
       </div>
     );
   }
+
   if (!peer) {
     return (
-      <div
-        style={{
-          maxWidth: 720,
-          margin: "12px auto",
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          padding: 12,
-        }}
-      >
+      <div style={outerStyle}>
+        {isWidget && typeof onClose === "function" && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontWeight: 800 }}>Messages</div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              style={{
+                border: "1px solid var(--border)",
+                background: "#fff",
+                borderRadius: 10,
+                padding: "4px 10px",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div style={{ fontWeight: 700, marginBottom: 6 }}>Messages</div>
         <div className="muted" style={{ fontSize: 13 }}>
           Loading your latest conversation…
@@ -975,21 +1035,39 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
 
   /* UI */
   return (
-    <div
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
-      style={{
-        maxWidth: mode === "widget" ? "none" : 720,
-        margin: mode === "widget" ? 0 : "12px auto",
-        border: "1px solid var(--border)",
-        borderRadius: mode === "widget" ? 12 : 12,
-        padding: 12,
-        background: "#fff",
-        height: mode === "widget" ? "100%" : "auto",
-        display: mode === "widget" ? "flex" : "block",
-        flexDirection: mode === "widget" ? "column" : undefined,
-      }}
-    >
+    <div onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} style={outerStyle}>
+      {/* widget topbar */}
+      {isWidget && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ fontWeight: 800, lineHeight: 1.1 }}>Messages</div>
+            {partnerName ? (
+              <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.1 }}>
+                Chatting with {partnerName}
+              </div>
+            ) : null}
+          </div>
+          {typeof onClose === "function" && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              style={{
+                border: "1px solid var(--border)",
+                background: "#fff",
+                borderRadius: 10,
+                padding: "4px 10px",
+                cursor: "pointer",
+                fontWeight: 800,
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
       {/* header */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontWeight: 700 }}>Connection</div>
@@ -1007,7 +1085,16 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
 
       {/* messages + composer */}
       {ACCEPTED.has(status) ? (
-        <div style={{ paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+        <div
+          style={{
+            paddingTop: 10,
+            borderTop: "1px solid var(--border)",
+            flex: isWidget ? 1 : undefined,
+            minHeight: isWidget ? 0 : undefined,
+            display: isWidget ? "flex" : "block",
+            flexDirection: isWidget ? "column" : undefined,
+          }}
+        >
           {/* sessions banner (dismissible, persisted per pair) */}
           {sessionCount > 1 && !hidePrevBanner && (
             <div
@@ -1048,13 +1135,12 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
             </div>
           )}
 
-          <div 
+          <div
             style={{
               display: "grid",
               gridTemplateRows: "1fr auto",
               gap: 8,
-              maxHeight: mode === "widget" ? "none" : 360,
-              height: mode === "widget" ? "100%" : "auto",
+              flex: isWidget ? 1 : undefined,
               minHeight: 0,
             }}
           >
@@ -1068,8 +1154,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
                 padding: 12,
                 overflowY: "auto",
                 background: "#fff",
-                minHeight: 140,
-                maxHeight: mode === "widget" ? "none" : 260,
+                minHeight: 140, // IMPORTANT: no `panel` variable here (this was the crash)
               }}
             >
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
@@ -1195,7 +1280,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
-                  sendTyping(); // TYPING: fire a broadcast ping
+                  sendTyping(); // fire a broadcast ping
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -1217,7 +1302,6 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
                 }}
               />
 
-              {/* Delete my last message (safe guard by canDeleteLast) */}
               <button
                 type="button"
                 onClick={deleteMyLastMessage}
@@ -1259,6 +1343,7 @@ export default function ChatDock({ peerId: peerIdProp, partnerId, mode = "page" 
     </div>
   );
 }
+
 
 
 
