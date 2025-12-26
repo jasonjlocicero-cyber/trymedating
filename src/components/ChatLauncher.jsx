@@ -1,6 +1,5 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
@@ -33,17 +32,11 @@ class DockErrorBoundary extends React.Component {
       return (
         <div
           style={{
-            position: 'fixed',
-            right: 16,
-            bottom: 80,
-            width: 360,
-            maxWidth: 'calc(100vw - 24px)',
             background: '#fff',
             border: '1px solid var(--border)',
             borderRadius: 12,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
-            padding: 12,
-            zIndex: 100002
+            padding: 12
           }}
         >
           <div style={{ fontWeight: 900, marginBottom: 8 }}>Chat failed to load</div>
@@ -61,12 +54,12 @@ class DockErrorBoundary extends React.Component {
 }
 
 export default function ChatLauncher({ onUnreadChange = () => {} }) {
-  const [mounted, setMounted] = useState(false)
-
   const [me, setMe] = useState(null)
   const [open, setOpen] = useState(false)
+
   const [partnerId, setPartnerId] = useState(null)
   const [partnerName, setPartnerName] = useState('')
+
   const [loadingList, setLoadingList] = useState(false)
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
@@ -74,19 +67,6 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   // New-message toast (shows only when dock is closed)
   // shape: { fromId, fromName, text }
   const [toast, setToast] = useState(null)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  const closeAll = useMemo(
-    () => () => {
-      setPartnerId(null)
-      setPartnerName('')
-      setOpen(false)
-    },
-    []
-  )
 
   // ------- auth -------
   useEffect(() => {
@@ -98,9 +78,11 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       if (!alive) return
       setMe(user || null)
     })()
+
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setMe(session?.user || null)
     })
+
     return () => {
       alive = false
       sub?.subscription?.unsubscribe?.()
@@ -117,10 +99,9 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       }
       setOpen(true)
     }
-
     window.addEventListener('open-chat', openFromEvent)
 
-    // keep backwards compatibility: other parts of app can call window.openChat(id, name)
+    // Allow pages/components to open chat
     window.openChat = function (id, name = '') {
       if (id) {
         setPartnerId(id)
@@ -225,7 +206,9 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     if (!me?.id) return
     const channel = supabase
       .channel(`messages-unread-${me.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => computeUnread(me.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () =>
+        computeUnread(me.id)
+      )
       .subscribe()
 
     return () => supabase.removeChannel(channel)
@@ -256,24 +239,26 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
   const canChat = !!(me?.id && partnerId)
 
-  // IMPORTANT: portal everything to body so it is not affected by any page/container CSS
-  if (!mounted) return null
+  const closeAll = () => {
+    setPartnerId(null)
+    setPartnerName('')
+    setOpen(false)
+    setToast(null)
+  }
 
-  return createPortal(
+  const backToInbox = () => {
+    setPartnerId(null)
+    setPartnerName('')
+  }
+
+  return (
     <>
       {/* Floating launcher button */}
       <button
         type="button"
         onClick={() => {
-          setOpen((wasOpen) => {
-            const next = !wasOpen
-            // If we’re closing the launcher, clear partner selection so the next open shows the inbox picker.
-            if (!next) {
-              setPartnerId(null)
-              setPartnerName('')
-            }
-            return next
-          })
+          setOpen((o) => !o)
+          if (open) backToInbox()
         }}
         title="Messages"
         aria-label="Messages"
@@ -289,7 +274,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
           boxShadow: '0 10px 24px rgba(0,0,0,0.12)',
           display: 'grid',
           placeItems: 'center',
-          zIndex: 100000,
+          zIndex: 1000,
           cursor: 'pointer'
         }}
       >
@@ -310,7 +295,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
             borderRadius: 12,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             padding: 12,
-            zIndex: 100001
+            zIndex: 1001
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -331,12 +316,15 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
               <div className="helper-muted" style={{ marginBottom: 8 }}>
                 Pick a recent chat:
               </div>
+
               {err && (
                 <div className="helper-error" style={{ marginBottom: 8 }}>
                   {err}
                 </div>
               )}
+
               {loadingList && <div className="muted">Loading…</div>}
+
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
               )}
@@ -349,7 +337,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
                       style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }}
                       onClick={() => {
                         setPartnerId(p.id)
-                        setPartnerName(p.display_name || (p.handle ? `@${p.handle}` : 'Friend'))
+                        setPartnerName(p.display_name || (p.handle ? `@${p.handle}` : 'Chat'))
                       }}
                     >
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -389,7 +377,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
             position: 'fixed',
             left: 16,
             bottom: 16,
-            zIndex: 100010,
+            zIndex: 1100,
             background: '#111827',
             color: '#fff',
             padding: '10px 12px',
@@ -421,14 +409,64 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
         </div>
       )}
 
-      {/* Chat dock (rendered as an actual floating “window”) */}
+      {/* Floating chat window */}
       {open && canChat && (
-        <DockErrorBoundary onClose={closeAll}>
-          <ChatDock partnerId={partnerId} partnerName={partnerName} onClose={closeAll} />
-        </DockErrorBoundary>
+        <div
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: 80,
+            width: 380,
+            height: 520,
+            maxWidth: 'calc(100vw - 24px)',
+            maxHeight: 'calc(100vh - 120px)',
+            background: '#fff',
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+            padding: 10,
+            zIndex: 1002,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10
+          }}
+        >
+          {/* Window header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <button
+                type="button"
+                className="btn btn-neutral"
+                onClick={backToInbox}
+                title="Back to inbox"
+                style={{ padding: '4px 8px' }}
+              >
+                ←
+              </button>
+              <div style={{ fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {partnerName || 'Chat'}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-neutral"
+              onClick={closeAll}
+              title="Close"
+              style={{ padding: '4px 8px' }}
+            >
+              ✕
+            </button>
+          </div>
+
+          <DockErrorBoundary onClose={closeAll}>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <ChatDock partnerId={partnerId} mode="widget" />
+            </div>
+          </DockErrorBoundary>
+        </div>
       )}
-    </>,
-    document.body
+    </>
   )
 }
 
