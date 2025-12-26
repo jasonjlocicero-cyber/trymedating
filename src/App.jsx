@@ -85,7 +85,6 @@ function Home({ me }) {
               <>
                 <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
                 <a className="btn btn-accent btn-pill" href="#how-it-works">How it works</a>
-                {/* PWA install button (works where beforeinstallprompt is supported) */}
                 <InstallPWAButton />
               </>
             ) : (
@@ -93,7 +92,6 @@ function Home({ me }) {
                 <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
                 <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
                 <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
-                {/* Keep install available for signed-in users too */}
                 <InstallPWAButton />
               </>
             )}
@@ -190,6 +188,8 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [unread, setUnread] = useState(0)
   const { pathname } = useLocation()
+
+  // Hide the floating launcher on dedicated chat routes
   const showChatLauncher = !pathname.startsWith('/chat')
 
   // ✅ Electron deep links: tryme://connect?token=... etc
@@ -206,10 +206,6 @@ export default function App() {
       if (url.protocol !== 'tryme:') return
 
       let next = '/'
-      // Examples:
-      // tryme://chat/UUID              -> /chat/UUID
-      // tryme://u/handle               -> /u/handle
-      // tryme://connect?token=ABC      -> /connect?token=ABC
       switch (url.host) {
         case 'chat':
           next = `/chat${url.pathname || ''}`
@@ -221,13 +217,10 @@ export default function App() {
           next = `/connect${url.search || ''}`
           break
         default:
-          // Fallback: if it looks like an app path, try to route it as-is
           next = `${url.pathname || '/'}${url.search || ''}`
           break
       }
 
-      // Since we don’t have navigate here (and don’t want to import useNavigate just for this),
-      // do a soft navigation inside SPA:
       window.history.replaceState({}, '', next)
       window.dispatchEvent(new PopStateEvent('popstate'))
     } catch {
@@ -302,17 +295,22 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile sticky nudge for “one-tap” feel on Android and clear guidance on iOS */}
       <InstallNudgeMobile />
-
       <Footer />
 
+      {/* Floating chat launcher (widget). Keep it off /chat routes. */}
       {showChatLauncher && (
-        <ChatLauncher onUnreadChange={(n) => setUnread(typeof n === 'number' ? n : unread)} />
+        <ChatLauncher
+          onUnreadChange={(n) => {
+            // ✅ avoid stale closure bugs
+            setUnread((prev) => (typeof n === 'number' ? n : prev))
+          }}
+        />
       )}
     </ChatProvider>
   )
 }
+
 
 
 
