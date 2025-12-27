@@ -1,7 +1,8 @@
 // src/routes/Connect.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import { useChat } from "../chat/ChatContext";
 
 /* ---------- constants / helpers ---------- */
 const CONN_TABLE = "connections";
@@ -13,15 +14,11 @@ const C = {
   decidedAt: "updated_at", // we sort by updated first, then created
 };
 
-function openChatWith(partnerId, partnerName = "") {
-  if (window.openChat) return window.openChat(partnerId, partnerName);
-  window.dispatchEvent(new CustomEvent("open-chat", { detail: { partnerId, partnerName } }));
-}
-
 /* ---------- component ---------- */
 export default function Connect({ me }) {
   const nav = useNavigate();
   const [sp] = useSearchParams();
+  const { openChat } = useChat();
 
   const authed = !!me?.id;
 
@@ -30,13 +27,35 @@ export default function Connect({ me }) {
   const [errorText, setErrorText] = useState("");
   const [message, setMessage] = useState("");
   const [recipientId, setRecipientId] = useState("");
-  const [recipientHandle, setRecipientHandle] = useState(null);
+
+  // cache a friendly label for the bubble title
+  const recipientLabelRef = useRef("");
+  const openedOnceRef = useRef(false);
 
   // Resolve recipient: prefer short-lived token, else fall back to ?to= / ?u=
   const token = sp.get("token");
   const legacyId = sp.get("to") || sp.get("u") || "";
 
   const hasRecipient = useMemo(() => !!recipientId, [recipientId]);
+
+  /* ---------- bubble-only opener ---------- */
+  function openChatBubble(partnerId, partnerName = "") {
+    if (!partnerId) return;
+
+    if (typeof openChat === "function") {
+      openChat(partnerId, partnerName || "");
+      return;
+    }
+
+    if (typeof window.openChat === "function") {
+      window.openChat(partnerId, partnerName || "");
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("open-chat", { detail: { partnerId, partnerName: partnerName || "" } })
+    );
+  }
 
   /* ---------- small helpers ---------- */
 
@@ -78,16 +97,18 @@ export default function Connect({ me }) {
     return true;
   }
 
-  // Load a friendly name/handle for chat bubble title (not shown on this page)
-  async function loadRecipientHandle(uid) {
+  // Return a friendly name/handle for chat bubble title
+  async function fetchRecipientLabel(uid) {
     try {
       const { data: prof } = await supabase
         .from("profiles")
         .select("handle, display_name")
         .eq("user_id", uid)
         .maybeSingle();
-      setRecipientHandle(prof?.display_name || prof?.handle || null);
-    } catch {}
+      return prof?.display_name || (prof?.handle ? `@${prof.handle}` : "") || "";
+    } catch {
+      return "";
+    }
   }
 
   /* ---------- resolve recipient (token redeem or legacy id) ---------- */
@@ -102,6 +123,7 @@ export default function Connect({ me }) {
       if (token) {
         const { data, error } = await supabase.rpc("tmd_redeem_qr_token", { p_token: token });
         if (cancelled) return;
+
         if (error || !data) {
           console.warn("[redeem token]", error);
           setStatus("invalid");
@@ -109,6 +131,7 @@ export default function Connect({ me }) {
           setRecipientId("");
           return;
         }
+
         setRecipientId(String(data));
         return;
       }
@@ -124,7 +147,9 @@ export default function Connect({ me }) {
     }
 
     resolveRecipient();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, legacyId]);
 
@@ -135,8 +160,8 @@ export default function Connect({ me }) {
     async function bootstrap() {
       if (!hasRecipient) return;
 
-      // fetch a friendly name for the chat header (not displayed here)
-      loadRecipientHandle(recipientId);
+      // cache label (best-effort)
+      recipientLabelRef.current = await fetchRecipientLabel(recipientId);
 
       if (!authed) {
         setStatus("none"); // UI will prompt to sign in
@@ -160,6 +185,12 @@ export default function Connect({ me }) {
         const existing = await getLatestConnection(me.id, recipientId);
         if (cancelled) return;
 
+        // Always try opening the bubble once we know who this is
+        if (!openedOnceRef.current) {
+          openedOnceRef.current = true;
+          openChatBubble(recipientId, recipientLabelRef.current);
+        }
+
         if (!existing) {
           // Create pending request me -> recipient
           setBusy(true);
@@ -167,7 +198,7 @@ export default function Connect({ me }) {
             await createPending(me.id, recipientId);
             setStatus("pending");
             setMessage("Request sent — opening chat…");
-            openChatWith(recipientId, recipientHandle || "");
+            openChatBubble(recipientId, recipientLabelRef.current);
           } finally {
             setBusy(false);
           }
@@ -176,7 +207,6 @@ export default function Connect({ me }) {
 
         // We have some relationship already
         setStatus(existing[C.status] || "none");
-        openChatWith(recipientId, recipientHandle || "");
 
         if (existing[C.status] === "pending") {
           setMessage("Request is pending — check the chat to accept/reject.");
@@ -196,13 +226,18 @@ export default function Connect({ me }) {
     }
 
     bootstrap();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasRecipient, authed, me?.id, recipientId]);
 
   /* ---------- explicit action (rarely needed now) ---------- */
   async function requestConnection() {
-    if (!authed) { nav("/auth"); return; }
+    if (!authed) {
+      nav("/auth");
+      return;
+    }
     if (!recipientId || recipientId === me.id) {
       setStatus(recipientId === me.id ? "self" : "invalid");
       return;
@@ -212,12 +247,13 @@ export default function Connect({ me }) {
       setMessage("You have blocked this user. Unblock to send requests.");
       return;
     }
+
     setBusy(true);
     try {
       await createPending(me.id, recipientId);
       setStatus("pending");
       setMessage("Request sent — opening chat…");
-      openChatWith(recipientId, recipientHandle || "");
+      openChatBubble(recipientId, recipientLabelRef.current);
     } catch (e) {
       console.error(e);
       setStatus("blocked");
@@ -227,8 +263,8 @@ export default function Connect({ me }) {
     }
   }
 
-  function goToMessages() {
-    if (recipientId) openChatWith(recipientId, recipientHandle || "");
+  function goHomeWithChatOpen() {
+    if (recipientId) openChatBubble(recipientId, recipientLabelRef.current);
     nav("/");
   }
 
@@ -267,14 +303,22 @@ export default function Connect({ me }) {
         {status === "accepted" ? (
           <>
             <span className="muted">You’re already connected! 🎉</span>
-            <button className="btn btn-primary btn-pill" onClick={goToMessages}>Open messages</button>
-            <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
+            <button className="btn btn-primary btn-pill" onClick={goHomeWithChatOpen}>
+              Open chat
+            </button>
+            <Link className="btn btn-neutral btn-pill" to="/">
+              Back home
+            </Link>
           </>
         ) : status === "pending" ? (
           <>
             <span className="muted">Request sent — waiting for acceptance.</span>
-            <button className="btn btn-primary btn-pill" onClick={goToMessages}>Open messages</button>
-            <Link className="btn btn-neutral btn-pill" to="/">Done</Link>
+            <button className="btn btn-primary btn-pill" onClick={goHomeWithChatOpen}>
+              Open chat
+            </button>
+            <Link className="btn btn-neutral btn-pill" to="/">
+              Done
+            </Link>
           </>
         ) : status === "rejected" ? (
           <>
@@ -282,7 +326,9 @@ export default function Connect({ me }) {
             <button className="btn btn-primary btn-pill" onClick={requestConnection} disabled={busy}>
               {busy ? "Sending…" : "Send again"}
             </button>
-            <Link className="btn btn-neutral btn-pill" to="/">Back</Link>
+            <Link className="btn btn-neutral btn-pill" to="/">
+              Back
+            </Link>
           </>
         ) : status === "disconnected" ? (
           <>
@@ -290,14 +336,18 @@ export default function Connect({ me }) {
             <button className="btn btn-primary btn-pill" onClick={requestConnection} disabled={busy}>
               {busy ? "Sending…" : "Request again"}
             </button>
-            <Link className="btn btn-neutral btn-pill" to="/">Back</Link>
+            <Link className="btn btn-neutral btn-pill" to="/">
+              Back
+            </Link>
           </>
         ) : status === "none" || status === "unknown" ? (
           <>
             {!authed && (
               <>
                 <span className="muted">Please sign in to send a request.</span>
-                <Link className="btn btn-primary btn-pill" to="/auth">Sign in</Link>
+                <Link className="btn btn-primary btn-pill" to="/auth">
+                  Sign in
+                </Link>
               </>
             )}
             {authed && (
@@ -309,7 +359,9 @@ export default function Connect({ me }) {
                 >
                   {busy ? "Sending…" : "Request to connect"}
                 </button>
-                <Link className="btn btn-neutral btn-pill" to="/">Cancel</Link>
+                <Link className="btn btn-neutral btn-pill" to="/">
+                  Cancel
+                </Link>
               </>
             )}
           </>
@@ -318,6 +370,7 @@ export default function Connect({ me }) {
     </div>
   );
 }
+
 
 
 
