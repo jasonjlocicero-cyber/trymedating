@@ -287,7 +287,7 @@ export default function App() {
             <Route path="/privacy" element={<Privacy />} />
 
             {/* Bubble-only: disable dedicated chat routes */}
-            <Route path="/chat" element={<Navigate to="/" replace />} />
+            <Route path="/chat*" element={<Navigate to="/" replace />} />
             <Route path="/chat/:peerId" element={<Navigate to="/" replace />} />
             <Route path="/chat/handle/:handle" element={<Navigate to="/" replace />} />
             
