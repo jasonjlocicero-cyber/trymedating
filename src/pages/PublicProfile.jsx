@@ -36,6 +36,7 @@ export default function PublicProfile() {
     if (!handle) return;
     setLoading(true);
     setErr("");
+
     (async () => {
       try {
         const { data, error } = await supabase
@@ -47,7 +48,7 @@ export default function PublicProfile() {
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
 
-        // show minimal “private” state but still render card without Message
+        // Still render the card, but if private, we won't show Message button
         if (!data.is_public) setProfile({ ...data, is_public: false });
         else setProfile(data);
       } catch (e) {
@@ -56,6 +57,7 @@ export default function PublicProfile() {
         if (alive) setLoading(false);
       }
     })();
+
     return () => {
       alive = false;
     };
@@ -63,33 +65,34 @@ export default function PublicProfile() {
 
   const isSelf = !!(me?.id && profile?.user_id && me.id === profile.user_id);
 
-  const handleMessage = () => {
+  const openChatBubble = () => {
     if (!profile?.user_id) return;
 
-    // If not signed in, send them to auth (bubble needs auth anyway)
+    // If not signed in, send them to auth (ChatLauncher can't render the dock without me.id)
     if (!me?.id) {
       nav("/auth");
       return;
     }
 
-    const partnerName =
-      profile.display_name || (profile.handle ? `@${profile.handle}` : "");
+    const label =
+      profile.display_name ||
+      (profile.handle ? `@${profile.handle}` : "") ||
+      "";
 
-    // Prefer context openChat (bubble-only). Fallback to global opener if needed.
+    // Preferred: context openChat
     if (typeof openChat === "function") {
-      openChat(profile.user_id, partnerName);
+      openChat(profile.user_id, label);
       return;
     }
 
+    // Fallbacks (kept for safety)
     if (typeof window.openChat === "function") {
-      window.openChat(profile.user_id, partnerName);
+      window.openChat(profile.user_id, label);
       return;
     }
 
     window.dispatchEvent(
-      new CustomEvent("open-chat", {
-        detail: { partnerId: profile.user_id, partnerName },
-      })
+      new CustomEvent("open-chat", { detail: { partnerId: profile.user_id, partnerName: label } })
     );
   };
 
@@ -115,6 +118,8 @@ export default function PublicProfile() {
     );
   }
 
+  const canMessage = !isSelf && !!profile.is_public;
+
   return (
     <div className="container" style={{ padding: 24, maxWidth: 820 }}>
       <div
@@ -127,14 +132,7 @@ export default function PublicProfile() {
         }}
       >
         {/* Header row */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "52px 1fr",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
+        <div style={{ display: "grid", gridTemplateColumns: "52px 1fr", gap: 12, alignItems: "center" }}>
           {/* Avatar */}
           <div
             style={{
@@ -167,17 +165,13 @@ export default function PublicProfile() {
 
           {/* Name / handle */}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900 }}>
-              {profile.display_name || profile.handle}
-            </div>
+            <div style={{ fontWeight: 900 }}>{profile.display_name || profile.handle}</div>
             <div className="muted">@{profile.handle}</div>
           </div>
         </div>
 
         {/* Bio */}
-        {profile.bio && (
-          <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>
-        )}
+        {profile.bio && <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>}
 
         {!profile.is_public && (
           <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
@@ -186,25 +180,12 @@ export default function PublicProfile() {
         )}
 
         {/* Actions */}
-        <div
-          style={{
-            marginTop: 14,
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          {/* Only show Message if NOT self AND profile is public */}
-          {!isSelf && profile.is_public && (
-            <button
-              type="button"
-              className="btn btn-accent btn-pill"
-              onClick={handleMessage}
-            >
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {canMessage && (
+            <button type="button" className="btn btn-accent btn-pill" onClick={openChatBubble}>
               Message
             </button>
           )}
-
           <Link className="btn btn-neutral btn-pill" to="/">
             Back home
           </Link>
@@ -213,6 +194,7 @@ export default function PublicProfile() {
     </div>
   );
 }
+
 
 
 
