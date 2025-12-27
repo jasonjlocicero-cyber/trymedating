@@ -1,5 +1,5 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useChat } from "../chat/ChatContext";
@@ -8,6 +8,11 @@ export default function PublicProfile() {
   const { handle } = useParams();
   const nav = useNavigate();
   const { openChat } = useChat();
+
+  const safeHandle = useMemo(
+    () => (handle || "").trim().replace(/^@/, "").toLowerCase(),
+    [handle]
+  );
 
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +38,8 @@ export default function PublicProfile() {
   // Load public profile by handle
   useEffect(() => {
     let alive = true;
-    if (!handle) return;
+    if (!safeHandle) return;
+
     setLoading(true);
     setErr("");
 
@@ -42,7 +48,7 @@ export default function PublicProfile() {
         const { data, error } = await supabase
           .from("profiles")
           .select("user_id, handle, display_name, bio, avatar_url, is_public")
-          .eq("handle", handle.toLowerCase())
+          .eq("handle", safeHandle)
           .maybeSingle();
 
         if (error) throw error;
@@ -61,14 +67,14 @@ export default function PublicProfile() {
     return () => {
       alive = false;
     };
-  }, [handle]);
+  }, [safeHandle]);
 
   const isSelf = !!(me?.id && profile?.user_id && me.id === profile.user_id);
 
   const openChatBubble = () => {
     if (!profile?.user_id) return;
 
-    // If not signed in, send them to auth (ChatLauncher can't render the dock without me.id)
+    // If not signed in, send them to auth
     if (!me?.id) {
       nav("/auth");
       return;
@@ -91,8 +97,11 @@ export default function PublicProfile() {
       return;
     }
 
+    // Use the canonical event name
     window.dispatchEvent(
-      new CustomEvent("open-chat", { detail: { partnerId: profile.user_id, partnerName: label } })
+      new CustomEvent("tryme:open-chat", {
+        detail: { partnerId: profile.user_id, partnerName: label },
+      })
     );
   };
 
@@ -131,9 +140,14 @@ export default function PublicProfile() {
           padding: 18,
         }}
       >
-        {/* Header row */}
-        <div style={{ display: "grid", gridTemplateColumns: "52px 1fr", gap: 12, alignItems: "center" }}>
-          {/* Avatar */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "52px 1fr",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
           <div
             style={{
               width: 52,
@@ -163,15 +177,17 @@ export default function PublicProfile() {
             )}
           </div>
 
-          {/* Name / handle */}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900 }}>{profile.display_name || profile.handle}</div>
+            <div style={{ fontWeight: 900 }}>
+              {profile.display_name || profile.handle}
+            </div>
             <div className="muted">@{profile.handle}</div>
           </div>
         </div>
 
-        {/* Bio */}
-        {profile.bio && <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>}
+        {profile.bio && (
+          <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>
+        )}
 
         {!profile.is_public && (
           <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
@@ -179,10 +195,13 @@ export default function PublicProfile() {
           </div>
         )}
 
-        {/* Actions */}
         <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
           {canMessage && (
-            <button type="button" className="btn btn-accent btn-pill" onClick={openChatBubble}>
+            <button
+              type="button"
+              className="btn btn-accent btn-pill"
+              onClick={openChatBubble}
+            >
               Message
             </button>
           )}
@@ -194,6 +213,7 @@ export default function PublicProfile() {
     </div>
   );
 }
+
 
 
 
