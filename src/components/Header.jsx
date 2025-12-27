@@ -2,7 +2,7 @@
 import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
-export default function Header({ me, unread = 0, onSignOut }) {
+export default function Header({ me, onSignOut }) {
   return (
     <header
       className="site-header"
@@ -130,6 +130,7 @@ export default function Header({ me, unread = 0, onSignOut }) {
     </header>
   );
 }
+
 
 
 
