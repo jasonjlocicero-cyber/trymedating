@@ -1,7 +1,6 @@
 // src/chat/ChatContext.jsx
 import React, {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -10,29 +9,17 @@ import React, {
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from '../components/ChatDock'
 
-/**
- * ChatContext
- * Lightweight global chat controller so ANY page/component can open a 1:1 chat.
- *
- * IMPORTANT:
- * - In your current setup you use <ChatProvider renderDock={false}> and ChatLauncher owns the dock.
- * - This file now forwards openChat() to ChatLauncher via window.openChat OR the 'open-chat' event.
- * - It also listens for both:
- *     - 'tryme:open-chat' (new / preferred)
- *     - 'open-chat' (legacy / used by existing code)
- */
-
 const ChatCtx = createContext({
   openChat: (_id, _name) => {},
   closeChat: () => {},
   me: null,
-  isOpen: false, // only meaningful when renderDock=true
+  isOpen: false,
   partner: { id: null, name: '' },
-  unreadBump: 0
+  unreadBump: 0,
 })
 
-export function ChatProvider({ children, renderDock = false }) {
-  // ---- Auth → me (lightweight) ----
+export function ChatProvider({ children, renderDock = true }) {
+  // ---- Auth → me ----
   const [me, setMe] = useState(null)
 
   useEffect(() => {
@@ -51,106 +38,76 @@ export function ChatProvider({ children, renderDock = false }) {
     return () => unsub?.unsubscribe?.()
   }, [])
 
-  // ---- Provider-owned dock state (ONLY if renderDock=true) ----
+  // ---- Provider-owned dock control (only used when renderDock=true) ----
   const [isOpen, setOpen] = useState(false)
   const [partner, setPartner] = useState({ id: null, name: '' })
 
-  // Optional unread bump (badges/etc. if you wire it up)
-  const [unreadBump, setUnreadBump] = useState(0)
-  const onUnreadChange = useCallback(() => setUnreadBump((n) => n + 1), [])
+  const forwardToLauncher = (partnerId, partnerName = '') => {
+    if (typeof window === 'undefined') return
 
-  /**
-   * Bubble-only open:
-   * - Always updates context partner (useful for UI/telemetry)
-   * - If renderDock=true, opens the provider-rendered dock
-   * - Otherwise forwards to ChatLauncher via window.openChat or 'open-chat' event
-   */
-  const openChat = useCallback(
-    (partnerId, partnerName = '') => {
-      if (!partnerId) return
+    // Prefer ChatLauncher’s global function if it exists
+    if (typeof window.openChat === 'function') {
+      window.openChat(partnerId, partnerName || '')
+      return
+    }
 
-      setPartner({ id: partnerId, name: partnerName || '' })
+    // Fallback: ChatLauncher listens to "open-chat"
+    window.dispatchEvent(
+      new CustomEvent('open-chat', { detail: { partnerId, partnerName: partnerName || '' } })
+    )
+  }
 
-      if (renderDock) {
-        setOpen(true)
-        return
-      }
+  const openChat = (partnerId, partnerName = '') => {
+    if (!partnerId) return
 
-      // Forward to ChatLauncher (preferred)
-      if (typeof window.openChat === 'function') {
-        window.openChat(partnerId, partnerName || '')
-        return
-      }
+    // Always keep partner in context (useful for debugging/other UI)
+    setPartner({ id: partnerId, name: partnerName })
 
-      // Legacy event fallback (ChatLauncher listens to this)
-      window.dispatchEvent(
-        new CustomEvent('open-chat', {
-          detail: { partnerId, partnerName: partnerName || '' }
-        })
-      )
-    },
-    [renderDock]
-  )
+    // If provider is rendering the dock, open it here
+    if (renderDock) {
+      setOpen(true)
+      return
+    }
 
-  const closeChat = useCallback(() => {
-    if (renderDock) setOpen(false)
-    // (Optional) could emit a close event if you ever want ChatLauncher to react
-    // window.dispatchEvent(new CustomEvent('close-chat'))
-  }, [renderDock])
+    // Otherwise: bubble-only -> forward to ChatLauncher
+    forwardToLauncher(partnerId, partnerName)
+  }
 
-  // Global event open (no imports) — support BOTH new + legacy names
+  const closeChat = () => setOpen(false)
+
+  // Listen for global "tryme:open-chat" event (no imports needed)
   useEffect(() => {
     const onOpen = (e) => {
-      const { partnerId, partnerName = '' } = e?.detail || {}
+      const { partnerId, partnerName = '' } = e.detail || {}
       if (partnerId) openChat(partnerId, partnerName)
     }
     window.addEventListener('tryme:open-chat', onOpen)
-    window.addEventListener('open-chat', onOpen) // legacy compatibility
-    return () => {
-      window.removeEventListener('tryme:open-chat', onOpen)
-      window.removeEventListener('open-chat', onOpen)
-    }
-  }, [openChat])
+    return () => window.removeEventListener('tryme:open-chat', onOpen)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderDock])
+
+  // Optional unread bump (for badges if you wire it up)
+  const [unreadBump, setUnreadBump] = useState(0)
+  const onUnreadChange = () => setUnreadBump((n) => n + 1)
 
   const value = useMemo(
     () => ({ openChat, closeChat, me, isOpen, partner, unreadBump }),
-    [openChat, closeChat, me, isOpen, partner, unreadBump]
+    [me, isOpen, partner, unreadBump]
   )
 
   return (
     <ChatCtx.Provider value={value}>
       {children}
 
-      {/* Optional: Provider renders the dock itself (only if you set renderDock=true). */}
-      {renderDock && isOpen && partner?.id && (
-        <div
-          style={{
-            position: 'fixed',
-            right: 16,
-            bottom: 80,
-            width: 360,
-            height: 480,
-            maxWidth: 'calc(100vw - 24px)',
-            zIndex: 1002
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-            <button
-              type="button"
-              onClick={closeChat}
-              className="btn btn-neutral"
-              style={{ padding: '4px 10px' }}
-              aria-label="Close chat"
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div style={{ height: 'calc(100% - 36px)' }}>
-            <ChatDock partnerId={partner.id} mode="widget" />
-          </div>
-        </div>
+      {/* Provider-owned dock (only used if renderDock=true) */}
+      {renderDock && isOpen && me && (
+        <ChatDock
+          me={me}
+          partnerId={partner.id}
+          partnerName={partner.name}
+          onClose={closeChat}
+          onUnreadChange={onUnreadChange}
+        />
       )}
     </ChatCtx.Provider>
   )
@@ -160,9 +117,6 @@ export function useChat() {
   return useContext(ChatCtx)
 }
 
-/**
- * Convenience button so you don’t have to wire onClick everywhere.
- */
 export function ChatButton({
   partnerId,
   partnerName = '',
@@ -183,4 +137,5 @@ export function ChatButton({
     </button>
   )
 }
+
 
