@@ -425,7 +425,7 @@ export default function ChatDock(props) {
 
   /* Accept peerId from route (prop) */
   useEffect(() => {
-    const incoming = peerIdProp || partnerId;
+    const incoming = toId(peerIdProp || partnerId);
     if (incoming && typeof incoming === "string") {
       setPeer(incoming);
     }
