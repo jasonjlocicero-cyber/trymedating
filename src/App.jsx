@@ -24,7 +24,6 @@ import PublicProfile from './pages/PublicProfile'
 import Contact from './pages/Contact'
 import Terms from './pages/Terms'
 import Privacy from './pages/Privacy'
-import ChatDockPage from './pages/ChatDockPage'
 import InviteQR from './pages/InviteQR'
 import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
@@ -186,10 +185,11 @@ function FeatureCard({ title, text, icon }) {
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [unread, setUnread] = useState(0)
+  const [unread, setUnread] = useState(0) // (kept; ChatLauncher controls its own badge)
   const { pathname } = useLocation()
 
-  // Hide the floating launcher on dedicated chat routes
+  // Bubble-only = we never want the dedicated /chat page UI to be reachable.
+  // Launcher can still hide on those paths just in case someone types them.
   const showChatLauncher = !pathname.startsWith('/chat')
 
   // ✅ Electron deep links: tryme://connect?token=... etc
@@ -205,10 +205,12 @@ export default function App() {
       const url = new URL(dl)
       if (url.protocol !== 'tryme:') return
 
+      // Bubble-only: do NOT route to /chat. Instead, route to home.
+      // (Connect flow still works; it triggers the chat bubble via openChatWith.)
       let next = '/'
       switch (url.host) {
         case 'chat':
-          next = `/chat${url.pathname || ''}`
+          next = '/'
           break
         case 'u':
           next = `/u${url.pathname || ''}`
@@ -283,9 +285,12 @@ export default function App() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
-            <Route path="/chat/:peerId" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/chat/handle/:handle" element={me ? <ChatDockPage /> : <Navigate to="/auth" replace />} />
+
+            {/* Bubble-only: disable dedicated chat routes */}
+            <Route path="/chat" element={<Navigate to="/" replace />} />
+            <Route path="/chat/:peerId" element={<Navigate to="/" replace />} />
+            <Route path="/chat/handle/:handle" element={<Navigate to="/" replace />} />
+
             <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
             <Route path="/admin/reports" element={<AdminReports />} />
             <Route path="/debug-qr" element={<DebugQR />} />
@@ -310,6 +315,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
