@@ -2,10 +2,12 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import { useChat } from "../chat/ChatContext";
 
 export default function PublicProfile() {
   const { handle } = useParams();
   const nav = useNavigate();
+  const { openChat } = useChat();
 
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,14 +25,17 @@ export default function PublicProfile() {
         if (alive) setMe(null);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Load public profile by handle
   useEffect(() => {
     let alive = true;
     if (!handle) return;
-    setLoading(true); setErr("");
+    setLoading(true);
+    setErr("");
     (async () => {
       try {
         const { data, error } = await supabase
@@ -38,29 +43,54 @@ export default function PublicProfile() {
           .select("user_id, handle, display_name, bio, avatar_url, is_public")
           .eq("handle", handle.toLowerCase())
           .maybeSingle();
+
         if (error) throw error;
         if (!data) throw new Error("Profile not found.");
-        if (!data.is_public) {
-          // show minimal “private” state but still render card without Message
-          setProfile({ ...data, is_public: false });
-        } else {
-          setProfile(data);
-        }
+
+        // show minimal “private” state but still render card without Message
+        if (!data.is_public) setProfile({ ...data, is_public: false });
+        else setProfile(data);
       } catch (e) {
         setErr(e.message || "Failed to load profile.");
       } finally {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [handle]);
 
   const isSelf = !!(me?.id && profile?.user_id && me.id === profile.user_id);
 
-  const openChat = () => {
+  const handleMessage = () => {
     if (!profile?.user_id) return;
-    // Chat routes are already auth-guarded in App.jsx; unauth users will be redirected to /auth.
-    nav(`/chat/${profile.user_id}`);
+
+    // If not signed in, send them to auth (bubble needs auth anyway)
+    if (!me?.id) {
+      nav("/auth");
+      return;
+    }
+
+    const partnerName =
+      profile.display_name || (profile.handle ? `@${profile.handle}` : "");
+
+    // Prefer context openChat (bubble-only). Fallback to global opener if needed.
+    if (typeof openChat === "function") {
+      openChat(profile.user_id, partnerName);
+      return;
+    }
+
+    if (typeof window.openChat === "function") {
+      window.openChat(profile.user_id, partnerName);
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("open-chat", {
+        detail: { partnerId: profile.user_id, partnerName },
+      })
+    );
   };
 
   if (loading) {
@@ -75,8 +105,12 @@ export default function PublicProfile() {
     return (
       <div className="container" style={{ padding: 24, maxWidth: 820 }}>
         <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
-        <div className="helper-error" style={{ marginBottom: 12 }}>{err || "Profile not found."}</div>
-        <Link className="btn btn-neutral btn-pill" to="/">← Back home</Link>
+        <div className="helper-error" style={{ marginBottom: 12 }}>
+          {err || "Profile not found."}
+        </div>
+        <Link className="btn btn-neutral btn-pill" to="/">
+          ← Back home
+        </Link>
       </div>
     );
   }
@@ -89,17 +123,29 @@ export default function PublicProfile() {
           border: "1px solid var(--border)",
           borderRadius: 12,
           background: "#fff",
-          padding: 18
+          padding: 18,
         }}
       >
         {/* Header row */}
-        <div style={{ display: "grid", gridTemplateColumns: "52px 1fr", gap: 12, alignItems: "center" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "52px 1fr",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
           {/* Avatar */}
           <div
             style={{
-              width: 52, height: 52, borderRadius: "50%",
-              overflow: "hidden", border: "1px solid var(--border)",
-              display: "grid", placeItems: "center", background: "#fff"
+              width: 52,
+              height: 52,
+              borderRadius: "50%",
+              overflow: "hidden",
+              border: "1px solid var(--border)",
+              display: "grid",
+              placeItems: "center",
+              background: "#fff",
             }}
           >
             {profile.avatar_url ? (
@@ -121,16 +167,16 @@ export default function PublicProfile() {
 
           {/* Name / handle */}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900 }}>{profile.display_name || profile.handle}</div>
+            <div style={{ fontWeight: 900 }}>
+              {profile.display_name || profile.handle}
+            </div>
             <div className="muted">@{profile.handle}</div>
           </div>
         </div>
 
         {/* Bio */}
         {profile.bio && (
-          <div style={{ marginTop: 12, color: "#111" }}>
-            {profile.bio}
-          </div>
+          <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>
         )}
 
         {!profile.is_public && (
@@ -140,17 +186,28 @@ export default function PublicProfile() {
         )}
 
         {/* Actions */}
-        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {!isSelf && (
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Only show Message if NOT self AND profile is public */}
+          {!isSelf && profile.is_public && (
             <button
               type="button"
               className="btn btn-accent btn-pill"
-              onClick={openChat}
+              onClick={handleMessage}
             >
               Message
             </button>
           )}
-          <Link className="btn btn-neutral btn-pill" to="/">Back home</Link>
+
+          <Link className="btn btn-neutral btn-pill" to="/">
+            Back home
+          </Link>
         </div>
       </div>
     </div>
