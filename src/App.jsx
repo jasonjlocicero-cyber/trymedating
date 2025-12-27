@@ -263,7 +263,7 @@ export default function App() {
 
   return (
     <ChatProvider renderDock={false}>
-      <Header me={me} unread={unread} onSignOut={handleSignOut} />
+      <Header me={me} onSignOut={handleSignOut} />
       {me?.id && <ConnectionToast me={me} />}
 
       <main style={{ minHeight: '60vh' }}>
