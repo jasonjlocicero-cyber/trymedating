@@ -287,7 +287,10 @@ export default function App() {
             <Route path="/privacy" element={<Privacy />} />
 
             {/* Bubble-only: disable dedicated chat routes */}
-
+            <Route path="/chat" element={<Navigate to="/" replace />} />
+            <Route path="/chat/:peerId" element={<Navigate to="/" replace />} />
+            <Route path="/chat/handle/:handle" element={<Navigate to="/" replace />} />
+            
             <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
             <Route path="/admin/reports" element={<AdminReports />} />
             <Route path="/debug-qr" element={<DebugQR />} />
