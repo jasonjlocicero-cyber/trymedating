@@ -2,10 +2,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
 export default function InviteQR() {
+  const nav = useNavigate();
+
   const [inviteUrl, setInviteUrl] = useState("");
-  const [publicUrl, setPublicUrl] = useState("");
+  const [publicHandle, setPublicHandle] = useState("");
   const [expUnix, setExpUnix] = useState(0); // seconds since epoch (from function)
   const [refreshing, setRefreshing] = useState(false);
 
@@ -18,7 +21,10 @@ export default function InviteQR() {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  const secsLeft = useMemo(() => Math.max(0, Math.floor(expUnix * 1000 - nowMs) / 1000 | 0), [expUnix, nowMs]);
+  const secsLeft = useMemo(
+    () => Math.max(0, (Math.floor(expUnix * 1000 - nowMs) / 1000) | 0),
+    [expUnix, nowMs]
+  );
 
   // show mm:ss for countdown
   const mmss = useMemo(() => {
@@ -30,29 +36,40 @@ export default function InviteQR() {
   // throttle guard for manual refresh
   const lastMintRef = useRef(0);
 
-  // load handle (for "Public profile" button)
+  // Load handle (for "Public profile" button)
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user || cancelled) return;
+
       try {
         const { data: prof } = await supabase
           .from("profiles")
           .select("handle")
           .eq("user_id", user.id)
           .maybeSingle();
+
         if (!cancelled && prof?.handle) {
-          setPublicUrl(`${location.origin}/u/${prof.handle}`);
+          setPublicHandle(prof.handle);
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // STATIC fallback url (no backend)
   async function loadStaticUrl() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) return;
     setInviteUrl(`${location.origin}/connect?u=${user.id}`);
     setExpUnix(0);
@@ -69,7 +86,8 @@ export default function InviteQR() {
       const base = import.meta.env.VITE_SUPA_FUNCTIONS_URL || "/functions/v1";
       // Forward the user's JWT (your mint_invite expects Authorization)
       const authToken =
-        JSON.parse(localStorage.getItem("sb-@supabase-auth-token") || "{}")?.currentSession?.access_token || "";
+        JSON.parse(localStorage.getItem("sb-@supabase-auth-token") || "{}")
+          ?.currentSession?.access_token || "";
 
       const res = await fetch(`${base}/mint_invite`, {
         method: "POST",
@@ -106,7 +124,7 @@ export default function InviteQR() {
       return;
     }
     mintShortLived();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   // auto-refresh shortly before expiry (under 5s)
@@ -149,8 +167,19 @@ export default function InviteQR() {
 
         {/* Countdown + controls (auto mode only) */}
         {mode !== "static" && expUnix > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-            <span className="muted">Expires in <strong>{mmss}</strong></span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              justifyContent: "center",
+            }}
+          >
+            <span className="muted">
+              Expires in <strong>{mmss}</strong>
+            </span>
+
             <button
               className="btn btn-neutral btn-pill"
               onClick={mintShortLived}
@@ -159,6 +188,7 @@ export default function InviteQR() {
             >
               {refreshing ? "Refreshing…" : "Refresh"}
             </button>
+
             <button
               className="btn btn-neutral btn-pill"
               onClick={() => navigator.clipboard.writeText(inviteUrl).catch(() => {})}
@@ -169,10 +199,15 @@ export default function InviteQR() {
           </div>
         )}
 
-        {publicUrl && (
-          <a className="btn btn-primary btn-pill" href={publicUrl} target="_blank" rel="noreferrer">
+        {/* Public profile (same-tab, in-app navigation) */}
+        {publicHandle && (
+          <button
+            type="button"
+            className="btn btn-primary btn-pill"
+            onClick={() => nav(`/u/${publicHandle}`)}
+          >
             Public profile
-          </a>
+          </button>
         )}
       </div>
     </div>
