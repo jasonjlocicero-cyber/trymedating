@@ -19,10 +19,14 @@ async function fetchProfileName(userId) {
 // Move the launcher up so it doesn't block the install banner.
 const LAUNCHER_BOTTOM = 96 // px (tweak 80–120 if you want)
 const PANEL_BOTTOM = LAUNCHER_BOTTOM + 64 // keeps same spacing you had (16 -> 80 was +64)
-const RIGHT_GUTTER = 16
 
-// Use your brand green if defined, otherwise fall back to a solid green.
-const BRAND_GREEN = 'var(--brand-green, var(--tmd-green, #16a34a))'
+// Nudge left by increasing the right gutter.
+const RIGHT_GUTTER = 28 // was 16
+
+// Brand teal/seafoam (matches your site better than bright green).
+// If you later define one of these CSS vars, it will auto-use it.
+// Otherwise it falls back to a good teal.
+const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
 // Simple error boundary so chat errors don't blank the whole app
 class DockErrorBoundary extends React.Component {
@@ -101,9 +105,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!alive) return
       setMe(user || null)
     })()
@@ -166,9 +168,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       if (!cancel) setPartnerName(n || '')
     }
     hydrateName()
-    return () => {
-      cancel = true
-    }
+    return () => { cancel = true }
   }, [partnerId, partnerName])
 
   // ------- recent list when open -------
@@ -213,11 +213,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
         const rank = new Map(order.map((id, i) => [id, i]))
         const list = (profs || [])
-          .map((p) => ({
-            id: p.user_id,
-            display_name: p.display_name || '',
-            handle: p.handle || ''
-          }))
+          .map((p) => ({ id: p.user_id, display_name: p.display_name || '', handle: p.handle || '' }))
           .sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999))
 
         if (!cancel) setRecent(list)
@@ -228,9 +224,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
       }
     }
     loadRecent()
-    return () => {
-      cancel = true
-    }
+    return () => { cancel = true }
   }, [open, me?.id, partnerId])
 
   // ------- unread count -------
@@ -292,7 +286,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
           setToast({
             fromId: m.sender,
             fromName: name || 'New message',
-            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : m.body || 'Message'
+            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
           })
         }
       )
@@ -330,7 +324,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
           height: 56,
           borderRadius: '50%',
           border: 'none',
-          background: BRAND_GREEN,
+          background: BRAND_TEAL,
           boxShadow: '0 10px 24px rgba(0,0,0,0.18)',
           display: 'grid',
           placeItems: 'center',
@@ -338,7 +332,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
           cursor: 'pointer'
         }}
       >
-        <span style={{ fontSize: 24, filter: 'grayscale(0)', color: '#fff' }}>💬</span>
+        <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
 
         {/* Unread badge */}
         {unreadLocal > 0 && (
@@ -398,14 +392,8 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom: 8 }}>
-                Pick a recent chat:
-              </div>
-              {err && (
-                <div className="helper-error" style={{ marginBottom: 8 }}>
-                  {err}
-                </div>
-              )}
+              <div className="helper-muted" style={{ marginBottom: 8 }}>Pick a recent chat:</div>
+              {err && <div className="helper-error" style={{ marginBottom: 8 }}>{err}</div>}
               {loadingList && <div className="muted">Loading…</div>}
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
@@ -484,9 +472,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
             >
               Open
             </button>
-            <button className="btn btn-neutral" onClick={() => setToast(null)}>
-              Dismiss
-            </button>
+            <button className="btn btn-neutral" onClick={() => setToast(null)}>Dismiss</button>
           </div>
         </div>
       )}
@@ -563,6 +549,7 @@ export default function ChatLauncher({ onUnreadChange = () => {} }) {
     </>
   )
 }
+
 
 
 
