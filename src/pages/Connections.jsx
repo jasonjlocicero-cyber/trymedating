@@ -56,7 +56,7 @@ export default function Connections() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("accepted");
   const [total, setTotal] = useState(null); // exact count (if available)
 
   useEffect(() => {
