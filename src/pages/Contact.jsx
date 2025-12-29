@@ -58,16 +58,23 @@ export default function Contact() {
     setSendErr("");
 
     try {
-      // Netlify expects the form-name field + the rest of your named fields
       const payload = {
         "form-name": "contact",
-        "bot-field": "", // honeypot (must exist)
+        "bot-field": "", // honeypot
         page: "/contact",
         reason,
         name: form.name,
         email: form.email,
         message: form.message,
       };
+
+      // ✅ Local dev: Netlify Forms doesn't run on localhost, so don't treat it as a failure.
+      // This lets you test the UI/flow without needing a deployed build.
+      if (import.meta.env.DEV) {
+        setSent(true);
+        setForm({ name: "", email: "", message: "" });
+        return;
+      }
 
       const res = await fetch("/", {
         method: "POST",
@@ -77,12 +84,8 @@ export default function Contact() {
 
       if (!res.ok) throw new Error("Message failed to send. Please try again.");
 
-      // Update UI + persist success in URL (so refresh keeps “thank you” state)
-      setForm({ name: "", email: "", message: "" });
       setSent(true);
-
-      const type = reason !== "general" ? `&type=${encodeURIComponent(reason)}` : "";
-      navigate(`/contact?sent=1${type}`, { replace: true });
+      setForm({ name: "", email: "", message: "" });
     } catch (err) {
       setSendErr(err?.message || "Message failed to send.");
     } finally {
@@ -93,8 +96,8 @@ export default function Contact() {
   function startNewMessage() {
     setSent(false);
     setSendErr("");
-
-    const type = reason !== "general" ? `?type=${encodeURIComponent(reason)}` : "";
+    // Keep the “type=feedback” behavior if that’s how they came in
+    const type = reason === "general" ? "" : `?type=${reason}`;
     navigate(`/contact${type}`, { replace: true });
   }
 
@@ -105,8 +108,8 @@ export default function Contact() {
 
       <h2>Email</h2>
       <p>
-        Reach us directly at{" "}
-        <a href="mailto:support@trymedating.com">support@trymedating.com</a>
+        Reach us directly at
+        <a href="mailto:support@trymedating.com"> support@trymedating.com</a>
       </p>
 
       <h2>Message</h2>
@@ -138,6 +141,7 @@ export default function Contact() {
         <form
           name="contact"
           method="POST"
+          action="/contact?sent=1"
           data-netlify="true"
           data-netlify-honeypot="bot-field"
           onSubmit={handleSubmit}
@@ -247,5 +251,6 @@ export default function Contact() {
     </div>
   );
 }
+
 
 
