@@ -1,40 +1,29 @@
 // src/lib/supabaseClient.js
 import { createClient } from '@supabase/supabase-js'
 
-function cleanEnv(value) {
-  if (value == null) return ''
-  return String(value)
-    .replace(/^\uFEFF/, '')          // strip BOM
-    .replace(/\u0000/g, '')          // strip null bytes (UTF-16 issues)
-    .trim()
-    .replace(/^['"]+|['"]+$/g, '')   // strip wrapping quotes
-}
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').trim()
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim()
 
-const SUPABASE_URL = cleanEnv(import.meta.env.VITE_SUPABASE_URL)
-const SUPABASE_ANON_KEY = cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY)
-
-console.log('[Supabase env]', {
+// Helpful debug without leaking the key
+console.log('[supabase env]', {
   mode: import.meta.env.MODE,
   hasUrl: !!SUPABASE_URL,
-  urlPreview: SUPABASE_URL ? SUPABASE_URL.slice(0, 32) + '…' : null,
+  urlHost: SUPABASE_URL ? (() => { try { return new URL(SUPABASE_URL).host } catch { return 'invalid' } })() : null,
   hasAnonKey: !!SUPABASE_ANON_KEY,
-  anonKeyPrefix: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.slice(0, 6) + '…' : null,
+  anonKeyLen: SUPABASE_ANON_KEY ? SUPABASE_ANON_KEY.length : 0,
 })
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error(
-    'Supabase is not configured locally.\n' +
-      'Make sure you have a .env.local in the project root with:\n' +
-      'VITE_SUPABASE_URL=...\n' +
-      'VITE_SUPABASE_ANON_KEY=...\n' +
-      'Then STOP and re-run npm run dev.'
+    'Supabase is not configured locally. ' +
+    'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local (repo root), then restart the dev server.'
   )
 }
 
 try {
   new URL(SUPABASE_URL)
 } catch {
-  throw new Error(`Invalid VITE_SUPABASE_URL: "${SUPABASE_URL}"`)
+  throw new Error(`Invalid VITE_SUPABASE_URL: ${SUPABASE_URL}`)
 }
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -43,5 +32,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     autoRefreshToken: true,
     detectSessionInUrl: true,
   },
+  global: {
+    fetch: (input, init) => fetch(input, { cache: 'no-store', ...init }),
+  },
 })
+
 
