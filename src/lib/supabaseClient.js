@@ -13,7 +13,6 @@ function cleanEnv(value) {
 const SUPABASE_URL = cleanEnv(import.meta.env.VITE_SUPABASE_URL)
 const SUPABASE_ANON_KEY = cleanEnv(import.meta.env.VITE_SUPABASE_ANON_KEY)
 
-// Helpful debug (does NOT print the full key)
 console.log('[Supabase env]', {
   mode: import.meta.env.MODE,
   hasUrl: !!SUPABASE_URL,
@@ -33,7 +32,6 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 }
 
 try {
-  // Validate before createClient so you get a clear error
   new URL(SUPABASE_URL)
 } catch {
   throw new Error(`Invalid VITE_SUPABASE_URL: "${SUPABASE_URL}"`)
