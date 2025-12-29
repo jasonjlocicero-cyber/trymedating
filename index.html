@@ -25,27 +25,22 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
-
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
 
-    <!--
-      Netlify Forms "form detection" for SPA builds:
-      This hidden form allows Netlify to register the form endpoint at deploy time.
-      Must match: name="contact" and input name="form-name" value="contact"
-    -->
-    <form name="contact" data-netlify="true" netlify-honeypot="bot-field" hidden>
+    <!-- Netlify Forms (hidden stub for SPA form detection) -->
+    <form
+      name="contact"
+      method="POST"
+      data-netlify="true"
+      data-netlify-honeypot="bot-field"
+      hidden
+    >
       <input type="hidden" name="form-name" value="contact" />
-      <input name="bot-field" />
-
-      <select name="reason">
-        <option>Feedback</option>
-        <option>Support</option>
-        <option>Bug</option>
-        <option>Other</option>
-      </select>
-
+      <input type="text" name="bot-field" />
+      <input type="text" name="page" />
+      <input type="text" name="reason" />
       <input type="text" name="name" />
       <input type="email" name="email" />
       <textarea name="message"></textarea>
@@ -55,6 +50,7 @@
     <script type="module" src="%BASE_URL%src/main.jsx"></script>
   </body>
 </html>
+
 
 
 
