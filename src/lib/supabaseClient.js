@@ -4,6 +4,24 @@ import { createClient } from '@supabase/supabase-js'
 // Read at build-time (Vite replaces these)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL?.trim()
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
+const rawUrl = import.meta.env.VITE_SUPABASE_URL
+const rawKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+const SUPABASE_URL = rawUrl?.trim()
+const SUPABASE_ANON_KEY = rawKey?.trim()
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('[Supabase] Missing env vars:', { SUPABASE_URL, anonLen: SUPABASE_ANON_KEY?.length })
+  throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY')
+}
+
+// Optional but helpful:
+try {
+  new URL(SUPABASE_URL)
+} catch (e) {
+  console.error('[Supabase] Invalid VITE_SUPABASE_URL:', SUPABASE_URL)
+  throw e
+}
 
 console.log("[supabase env]", {
   mode: import.meta.env.MODE,
