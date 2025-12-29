@@ -4,41 +4,40 @@ import { supabase } from '../lib/supabaseClient'
 
 const BUCKET = 'profile-photos'
 const MAX_PHOTOS = 6
+const MIN_PHOTOS = 3
 
-function getExt(filename) {
-  const parts = String(filename || '').split('.')
-  const ext = parts.length > 1 ? parts.pop().toLowerCase() : 'jpg'
-  return ext || 'jpg'
+function makeId() {
+  // browser-safe unique-ish id for filenames
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function makePath(userId, file) {
-  const ext = getExt(file?.name)
-  const id =
-    (typeof crypto !== 'undefined' && crypto.randomUUID && crypto.randomUUID()) ||
-    `${Date.now()}_${Math.random().toString(16).slice(2)}`
-  return `${userId}/${id}.${ext}`
-}
-
-async function signedUrlFor(path) {
-  // 1 hour signed url
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60)
-  if (error) throw error
-  return data?.signedUrl || ''
-}
-
-export default function ProfilePhotosManager({ userId, maxPhotos = MAX_PHOTOS }) {
+export default function ProfilePhotosManager({ userId }) {
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
-  const [photos, setPhotos] = useState([]) // rows from profile_photos
-  const [urls, setUrls] = useState({}) // path -> signedUrl
+  const [msg, setMsg] = useState('')
+  const [photos, setPhotos] = useState([])
 
-  const remaining = useMemo(() => Math.max(0, maxPhotos - photos.length), [maxPhotos, photos.length])
+  const canUploadMore = useMemo(() => photos.length < MAX_PHOTOS, [photos.length])
+
+  useEffect(() => {
+    if (!userId) return
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
+
+  async function signedUrl(path) {
+    // Works for both authed + anon, subject to your storage.objects SELECT policy
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60)
+    if (error) throw error
+    return data?.signedUrl || ''
+  }
 
   async function refresh() {
-    if (!userId) return
     setLoading(true)
     setErr('')
+    setMsg('')
     try {
       const { data, error } = await supabase
         .from('profile_photos')
@@ -48,261 +47,271 @@ export default function ProfilePhotosManager({ userId, maxPhotos = MAX_PHOTOS })
         .order('created_at', { ascending: true })
 
       if (error) throw error
-      setPhotos(data || [])
+
+      const rows = data || []
+      const withUrls = await Promise.all(
+        rows.map(async (p) => {
+          const url = await signedUrl(p.path)
+          return { ...p, url }
+        })
+      )
+
+      setPhotos(withUrls)
     } catch (e) {
       setErr(e.message || 'Failed to load photos')
-      setPhotos([])
     } finally {
       setLoading(false)
     }
   }
 
-  // Load rows
-  useEffect(() => {
-    refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId])
+  async function handleUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !userId) return
 
-  // Keep signed URLs in sync (only for current photos)
-  useEffect(() => {
-    let cancelled = false
+    setErr('')
+    setMsg('')
 
-    async function hydrateUrls() {
-      try {
-        const next = {}
-        for (const p of photos) {
-          try {
-            next[p.path] = await signedUrlFor(p.path)
-          } catch {
-            // ignore a broken file so the rest still render
-            next[p.path] = ''
-          }
-        }
-        if (!cancelled) setUrls(next)
-      } catch {
-        // noop
-      }
-    }
-
-    hydrateUrls()
-    return () => {
-      cancelled = true
-    }
-  }, [photos])
-
-  async function uploadFiles(ev) {
-    const files = Array.from(ev.target.files || [])
-    ev.target.value = ''
-    if (!userId || files.length === 0) return
-
-    if (remaining <= 0) {
-      setErr(`You already have ${maxPhotos} photos. Remove one to upload more.`)
+    if (!canUploadMore) {
+      setErr(`Max ${MAX_PHOTOS} photos.`)
       return
     }
 
-    const toUpload = files.slice(0, remaining)
-    setBusy(true)
-    setErr('')
-
+    setUploading(true)
     try {
-      // Upload + insert rows
-      for (let i = 0; i < toUpload.length; i++) {
-        const file = toUpload[i]
-        const path = makePath(userId, file)
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const path = `${userId}/${makeId()}.${ext}`
 
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
-          upsert: false,
-          contentType: file.type || 'image/jpeg'
-        })
-        if (upErr) throw upErr
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
+        upsert: true,
+        contentType: file.type || 'image/jpeg',
+      })
+      if (upErr) throw upErr
 
-        const sortOrder = (photos?.[photos.length - 1]?.sort_order ?? (photos.length - 1)) + 1
-
-        const { error: insErr } = await supabase.from('profile_photos').insert({
+      // create DB row
+      const nextOrder = photos.length + 1
+      const { data: created, error: insErr } = await supabase
+        .from('profile_photos')
+        .insert({
           user_id: userId,
           path,
           caption: '',
-          sort_order: sortOrder,
+          sort_order: nextOrder,
           show_on_profile: true,
-          show_on_public: false
+          show_on_public: false,
         })
-        if (insErr) throw insErr
-      }
+        .select('id, user_id, path, caption, sort_order, show_on_profile, show_on_public, created_at')
+        .single()
 
-      await refresh()
-    } catch (e) {
-      setErr(e.message || 'Upload failed')
+      if (insErr) throw insErr
+
+      const url = await signedUrl(created.path)
+      setPhotos((prev) => [...prev, { ...created, url }])
+      setMsg('Photo added.')
+    } catch (e2) {
+      setErr(e2.message || 'Upload failed')
     } finally {
-      setBusy(false)
+      setUploading(false)
     }
   }
 
   async function updatePhoto(id, patch) {
-    setBusy(true)
     setErr('')
+    setMsg('')
     try {
-      const { error } = await supabase.from('profile_photos').update(patch).eq('id', id)
+      const { data, error } = await supabase
+        .from('profile_photos')
+        .update(patch)
+        .eq('id', id)
+        .eq('user_id', userId)
+        .select('id, user_id, path, caption, sort_order, show_on_profile, show_on_public, created_at')
+        .single()
+
       if (error) throw error
-      await refresh()
+
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, ...data } : p))
+      )
+      setMsg('Saved.')
     } catch (e) {
       setErr(e.message || 'Update failed')
-    } finally {
-      setBusy(false)
     }
   }
 
-  async function removePhoto(photo) {
-    if (!photo?.id) return
-    setBusy(true)
-    setErr('')
+  async function persistOrder(next) {
+    // Re-number sort_order 1..N and persist (only 6 max, so simple loop is fine)
+    const normalized = next.map((p, idx) => ({ ...p, sort_order: idx + 1 }))
+    setPhotos(normalized)
+
     try {
-      // 1) delete row
-      const { error: delRowErr } = await supabase.from('profile_photos').delete().eq('id', photo.id)
+      for (const p of normalized) {
+        const { error } = await supabase
+          .from('profile_photos')
+          .update({ sort_order: p.sort_order })
+          .eq('id', p.id)
+          .eq('user_id', userId)
+        if (error) throw error
+      }
+    } catch (e) {
+      setErr(e.message || 'Failed to save order')
+    }
+  }
+
+  function move(id, dir) {
+    const idx = photos.findIndex((p) => p.id === id)
+    if (idx < 0) return
+    const swapWith = dir === 'up' ? idx - 1 : idx + 1
+    if (swapWith < 0 || swapWith >= photos.length) return
+
+    const next = [...photos]
+    const tmp = next[idx]
+    next[idx] = next[swapWith]
+    next[swapWith] = tmp
+
+    persistOrder(next)
+  }
+
+  async function removePhoto(p) {
+    if (!confirm('Remove this photo?')) return
+    setErr('')
+    setMsg('')
+    try {
+      // delete db row first
+      const { error: delRowErr } = await supabase
+        .from('profile_photos')
+        .delete()
+        .eq('id', p.id)
+        .eq('user_id', userId)
+
       if (delRowErr) throw delRowErr
 
-      // 2) delete file (best-effort)
-      await supabase.storage.from(BUCKET).remove([photo.path])
+      // then delete storage object
+      const { error: delObjErr } = await supabase.storage.from(BUCKET).remove([p.path])
+      if (delObjErr) {
+        // not fatal to UI if storage delete fails, but tell you
+        console.warn('Storage delete failed:', delObjErr)
+      }
 
-      await refresh()
+      const next = photos.filter((x) => x.id !== p.id)
+      await persistOrder(next)
+      setMsg('Removed.')
     } catch (e) {
-      setErr(e.message || 'Delete failed')
-    } finally {
-      setBusy(false)
+      setErr(e.message || 'Remove failed')
     }
   }
 
   return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-        <div>
-          <h2 style={{ fontWeight: 900, margin: 0 }}>Profile photos</h2>
-          <div className="muted" style={{ marginTop: 6 }}>
-            Upload up to {maxPhotos} photos. Toggle where each photo shows and add an optional caption.
-          </div>
-        </div>
+    <div style={{ marginTop: 24 }}>
+      <h2 style={{ fontWeight: 900, marginBottom: 6 }}>Profile photos</h2>
+      <div className="muted" style={{ marginBottom: 12 }}>
+        Upload {MIN_PHOTOS}–{MAX_PHOTOS} photos. Choose what shows on your Profile vs Public page.
+      </div>
 
-        <label className="btn btn-primary btn-pill" style={{ cursor: busy ? 'not-allowed' : 'pointer' }}>
-          {busy ? 'Working…' : `Upload (${remaining} left)`}
+      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
+      {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+        <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
+          {uploading ? 'Uploading…' : `Add photo (${photos.length}/${MAX_PHOTOS})`}
           <input
             type="file"
             accept="image/*"
-            multiple
-            onChange={uploadFiles}
-            disabled={busy || remaining <= 0}
+            onChange={handleUpload}
             style={{ display: 'none' }}
+            disabled={uploading || !canUploadMore}
           />
         </label>
+
+        <button type="button" className="btn btn-neutral btn-pill" onClick={refresh} disabled={loading || uploading}>
+          Refresh
+        </button>
       </div>
 
-      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
-
       {loading ? (
-        <div className="muted" style={{ marginTop: 14 }}>Loading photos…</div>
+        <div className="muted">Loading photos…</div>
       ) : photos.length === 0 ? (
-        <div className="muted" style={{ marginTop: 14 }}>No photos yet. Upload a few to get started.</div>
+        <div className="muted">No photos yet.</div>
       ) : (
         <div
           style={{
-            marginTop: 14,
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 14
+            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            gap: 14,
           }}
         >
-          {photos.map((p) => {
-            const url = urls[p.path] || ''
-            return (
+          {photos.map((p) => (
+            <div key={p.id} className="card" style={{ padding: 12, borderRadius: 14 }}>
               <div
-                key={p.id}
                 style={{
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  borderRadius: 14,
-                  padding: 12,
-                  background: '#fff'
+                  width: '100%',
+                  aspectRatio: '1 / 1',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: '#f3f4f6',
+                  marginBottom: 10,
                 }}
               >
-                <div
-                  style={{
-                    width: '100%',
-                    aspectRatio: '1 / 1',
-                    borderRadius: 12,
-                    overflow: 'hidden',
-                    background: 'rgba(0,0,0,0.04)',
-                    display: 'grid',
-                    placeItems: 'center'
-                  }}
-                >
-                  {url ? (
-                    <img
-                      src={url}
-                      alt="Profile"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="muted" style={{ padding: 12, textAlign: 'center' }}>
-                      Image not available
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
-                  <label className="form-label" style={{ margin: 0 }}>
-                    Caption (optional)
-                    <input
-                      className="input"
-                      value={p.caption || ''}
-                      onChange={(e) => updatePhoto(p.id, { caption: e.target.value })}
-                      placeholder="Say something about this photo…"
-                      disabled={busy}
-                    />
-                  </label>
-
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={!!p.show_on_profile}
-                        onChange={(e) => updatePhoto(p.id, { show_on_profile: e.target.checked })}
-                        disabled={busy}
-                      />
-                      Show on profile
-                    </label>
-
-                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={!!p.show_on_public}
-                        onChange={(e) => updatePhoto(p.id, { show_on_public: e.target.checked })}
-                        disabled={busy}
-                      />
-                      Show on public profile
-                    </label>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
-                    <button
-                      type="button"
-                      className="btn btn-neutral btn-pill"
-                      onClick={() => removePhoto(p)}
-                      disabled={busy}
-                    >
-                      Delete
-                    </button>
-                    <div className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>
-                      {p.show_on_public ? 'Public' : 'Private'}
-                    </div>
-                  </div>
-                </div>
+                {p.url ? (
+                  <img
+                    src={p.url}
+                    alt="Profile"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <div className="muted" style={{ padding: 12 }}>No preview</div>
+                )}
               </div>
-            )
-          })}
+
+              <label className="form-label" style={{ display: 'grid', gap: 6 }}>
+                Caption (optional)
+                <input
+                  className="input"
+                  value={p.caption || ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setPhotos((prev) => prev.map((x) => (x.id === p.id ? { ...x, caption: v } : x)))
+                  }}
+                  onBlur={() => updatePhoto(p.id, { caption: p.caption || '' })}
+                  placeholder="Say something about this photo…"
+                />
+              </label>
+
+              <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!p.show_on_profile}
+                    onChange={(e) => updatePhoto(p.id, { show_on_profile: e.target.checked })}
+                  />
+                  Show on Profile page
+                </label>
+
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!p.show_on_public}
+                    onChange={(e) => updatePhoto(p.id, { show_on_public: e.target.checked })}
+                  />
+                  Show on Public page
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                <button type="button" className="btn btn-neutral btn-pill" onClick={() => move(p.id, 'up')}>
+                  ↑
+                </button>
+                <button type="button" className="btn btn-neutral btn-pill" onClick={() => move(p.id, 'down')}>
+                  ↓
+                </button>
+                <button type="button" className="btn btn-danger btn-pill" onClick={() => removePhoto(p)}>
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-
-  );
-}
