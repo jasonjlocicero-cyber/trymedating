@@ -26,14 +26,10 @@ export default function Footer() {
             justifyContent: "center",
           }}
         >
-          {/* Teal, Teal, Coral, Coral */}
           <Link to="/terms" className="btn btn-primary btn-pill">Terms</Link>
           <Link to="/privacy" className="btn btn-primary btn-pill">Privacy</Link>
 
-          {/* Contact works today */}
-          <Link to="/contact" className="btn btn-accent btn-pill">Contact</Link>
-
-          {/* Merge Feedback into Contact */}
+          {/* Single combined button */}
           <Link to="/contact?type=feedback" className="btn btn-accent btn-pill">
             Contact / Feedback
           </Link>
@@ -46,4 +42,5 @@ export default function Footer() {
     </footer>
   );
 }
+
 
