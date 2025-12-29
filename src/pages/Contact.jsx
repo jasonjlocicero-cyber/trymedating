@@ -1,3 +1,4 @@
+// src/pages/Contact.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -57,9 +58,10 @@ export default function Contact() {
     setSendErr("");
 
     try {
+      // Netlify expects the form-name field + the rest of your named fields
       const payload = {
         "form-name": "contact",
-        "bot-field": "", // honeypot
+        "bot-field": "", // honeypot (must exist)
         page: "/contact",
         reason,
         name: form.name,
@@ -75,8 +77,12 @@ export default function Contact() {
 
       if (!res.ok) throw new Error("Message failed to send. Please try again.");
 
-      setSent(true);
+      // Update UI + persist success in URL (so refresh keeps “thank you” state)
       setForm({ name: "", email: "", message: "" });
+      setSent(true);
+
+      const type = reason !== "general" ? `&type=${encodeURIComponent(reason)}` : "";
+      navigate(`/contact?sent=1${type}`, { replace: true });
     } catch (err) {
       setSendErr(err?.message || "Message failed to send.");
     } finally {
@@ -87,8 +93,8 @@ export default function Contact() {
   function startNewMessage() {
     setSent(false);
     setSendErr("");
-    // Keep the “type=feedback” behavior if that’s how they came in
-    const type = reason === "general" ? "" : `?type=${reason}`;
+
+    const type = reason !== "general" ? `?type=${encodeURIComponent(reason)}` : "";
     navigate(`/contact${type}`, { replace: true });
   }
 
@@ -99,8 +105,8 @@ export default function Contact() {
 
       <h2>Email</h2>
       <p>
-        Reach us directly at
-        <a href="mailto:support@trymedating.com"> support@trymedating.com</a>
+        Reach us directly at{" "}
+        <a href="mailto:support@trymedating.com">support@trymedating.com</a>
       </p>
 
       <h2>Message</h2>
@@ -117,9 +123,7 @@ export default function Contact() {
           aria-live="polite"
         >
           <div style={{ fontWeight: 800, marginBottom: 6 }}>Thank you — we got it.</div>
-          <div style={{ opacity: 0.85 }}>
-            We’ll review your message as soon as possible.
-          </div>
+          <div style={{ opacity: 0.85 }}>We’ll review your message as soon as possible.</div>
 
           <button
             type="button"
@@ -134,7 +138,6 @@ export default function Contact() {
         <form
           name="contact"
           method="POST"
-          action="/contact?sent=1"
           data-netlify="true"
           data-netlify-honeypot="bot-field"
           onSubmit={handleSubmit}
@@ -244,4 +247,5 @@ export default function Contact() {
     </div>
   );
 }
+
 
