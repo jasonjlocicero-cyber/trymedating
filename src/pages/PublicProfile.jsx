@@ -1,217 +1,187 @@
 // src/pages/PublicProfile.jsx
-import React, { useEffect, useState, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { supabase } from "../lib/supabaseClient";
-import { useChat } from "../chat/ChatContext";
+import React, { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
-  const { handle } = useParams();
-  const nav = useNavigate();
-  const { openChat } = useChat();
+  const { handle } = useParams()
 
-  const safeHandle = useMemo(
-    () => (handle || "").trim().replace(/^@/, "").toLowerCase(),
-    [handle]
-  );
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [profile, setProfile] = useState(null)
+  const [photos, setPhotos] = useState([])
 
-  const [me, setMe] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [profile, setProfile] = useState(null);
-
-  // Load viewer
   useEffect(() => {
-    let alive = true;
-    (async () => {
+    let mounted = true
+
+    ;(async () => {
+      setLoading(true)
+      setErr('')
+      setProfile(null)
+      setPhotos([])
+
       try {
-        const { data } = await supabase.auth.getUser();
-        if (alive) setMe(data?.user || null);
-      } catch {
-        if (alive) setMe(null);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+        // 1) Load profile by handle
+        const { data: p, error: pErr } = await supabase
+          .from('profiles')
+          .select('handle, display_name, bio, avatar_url, is_public')
+          .eq('handle', handle)
+          .maybeSingle()
 
-  // Load public profile by handle
-  useEffect(() => {
-    let alive = true;
-    if (!safeHandle) return;
+        if (pErr) throw pErr
+        if (!p || !p.is_public) {
+          if (mounted) setProfile(null)
+          return
+        }
+        if (mounted) setProfile(p)
 
-    setLoading(true);
-    setErr("");
+        // 2) Load public photos for that handle
+        const { data: rows, error: rErr } = await supabase
+          .from('profile_photos')
+          .select('id, path, caption, sort_order')
+          .eq('handle', handle)
+          .eq('show_on_public', true)
+          .order('sort_order', { ascending: true })
 
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("user_id, handle, display_name, bio, avatar_url, is_public")
-          .eq("handle", safeHandle)
-          .maybeSingle();
+        if (rErr) throw rErr
 
-        if (error) throw error;
-        if (!data) throw new Error("Profile not found.");
+        const list = rows || []
+        if (!list.length) {
+          if (mounted) setPhotos([])
+          return
+        }
 
-        // Still render the card, but if private, we won't show Message button
-        if (!data.is_public) setProfile({ ...data, is_public: false });
-        else setProfile(data);
+        // 3) Turn storage paths into signed URLs (works for private buckets)
+        const paths = list.map((x) => x.path)
+        const { data: signed, error: sErr } = await supabase.storage
+          .from('profile-photos')
+          .createSignedUrls(paths, 60 * 60) // 1 hour
+
+        if (sErr) throw sErr
+
+        const signedByPath = Object.fromEntries(
+          (signed || [])
+            .filter((x) => x?.signedUrl && x?.path)
+            .map((x) => [x.path, x.signedUrl])
+        )
+
+        const merged = list
+          .map((x) => ({
+            ...x,
+            url: signedByPath[x.path] || ''
+          }))
+          .filter((x) => !!x.url)
+
+        if (mounted) setPhotos(merged)
       } catch (e) {
-        setErr(e.message || "Failed to load profile.");
+        if (mounted) setErr(e?.message || 'Failed to load public profile')
       } finally {
-        if (alive) setLoading(false);
+        if (mounted) setLoading(false)
       }
-    })();
+    })()
 
     return () => {
-      alive = false;
-    };
-  }, [safeHandle]);
-
-  const isSelf = !!(me?.id && profile?.user_id && me.id === profile.user_id);
-
-  const openChatBubble = () => {
-    if (!profile?.user_id) return;
-
-    // If not signed in, send them to auth
-    if (!me?.id) {
-      nav("/auth");
-      return;
+      mounted = false
     }
-
-    const label =
-      profile.display_name ||
-      (profile.handle ? `@${profile.handle}` : "") ||
-      "";
-
-    // Preferred: context openChat
-    if (typeof openChat === "function") {
-      openChat(profile.user_id, label);
-      return;
-    }
-
-    // Fallbacks (kept for safety)
-    if (typeof window.openChat === "function") {
-      window.openChat(profile.user_id, label);
-      return;
-    }
-
-    // Use the canonical event name
-    window.dispatchEvent(
-      new CustomEvent("tryme:open-chat", {
-        detail: { partnerId: profile.user_id, partnerName: label },
-      })
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="container" style={{ padding: 24 }}>
-        <div className="muted">Loading…</div>
-      </div>
-    );
-  }
-
-  if (err || !profile) {
-    return (
-      <div className="container" style={{ padding: 24, maxWidth: 820 }}>
-        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
-        <div className="helper-error" style={{ marginBottom: 12 }}>
-          {err || "Profile not found."}
-        </div>
-        <Link className="btn btn-neutral btn-pill" to="/">
-          ← Back home
-        </Link>
-      </div>
-    );
-  }
-
-  const canMessage = !isSelf && !!profile.is_public;
+  }, [handle])
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 820 }}>
-      <div
-        className="card"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          background: "#fff",
-          padding: 18,
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "52px 1fr",
-            gap: 12,
-            alignItems: "center",
-          }}
-        >
+    <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <h1 style={{ fontWeight: 900, margin: 0 }}>Profile</h1>
+        <Link className="btn btn-neutral btn-pill" to="/">
+          Back home
+        </Link>
+      </div>
+
+      {loading && <div className="muted" style={{ marginTop: 12 }}>Loading…</div>}
+      {err && <div className="helper-error" style={{ marginTop: 12 }}>{err}</div>}
+
+      {!loading && !profile && !err && (
+        <div className="muted" style={{ marginTop: 12 }}>
+          This profile isn’t public (or doesn’t exist).
+        </div>
+      )}
+
+      {!loading && profile && (
+        <>
           <div
             style={{
-              width: 52,
-              height: 52,
-              borderRadius: "50%",
-              overflow: "hidden",
-              border: "1px solid var(--border)",
-              display: "grid",
-              placeItems: "center",
-              background: "#fff",
+              marginTop: 16,
+              background: '#fff',
+              border: '1px solid rgba(0,0,0,0.08)',
+              borderRadius: 14,
+              padding: 18,
+              display: 'flex',
+              gap: 14,
+              alignItems: 'center'
             }}
           >
-            {profile.avatar_url ? (
-              <img
-                src={profile.avatar_url}
-                alt={`${profile.display_name || profile.handle} avatar`}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                draggable={false}
-              />
+            <div className="avatar-frame" style={{ width: 56, height: 56 }}>
+              {profile.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt="Avatar"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
+                />
+              ) : (
+                <div className="avatar-initials">
+                  {(profile.display_name || profile.handle || 'U').slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800 }}>{profile.display_name || profile.handle}</div>
+              <div className="muted">@{profile.handle}</div>
+              {profile.bio ? <div style={{ marginTop: 6 }}>{profile.bio}</div> : null}
+            </div>
+          </div>
+
+          {/* PUBLIC PHOTOS */}
+          <div style={{ marginTop: 22 }}>
+            <h2 style={{ fontWeight: 900, marginBottom: 8 }}>Photos</h2>
+
+            {photos.length === 0 ? (
+              <div className="muted">No public photos yet.</div>
             ) : (
-              <img
-                src="/logo-mark.png"
-                alt=""
-                style={{ width: 32, height: 32, opacity: 0.9 }}
-                draggable={false}
-              />
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                  gap: 12
+                }}
+              >
+                {photos.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: 14,
+                      overflow: 'hidden',
+                      background: '#fff'
+                    }}
+                  >
+                    <img
+                      src={p.url}
+                      alt={p.caption || 'Photo'}
+                      style={{ width: '100%', height: 220, objectFit: 'cover', display: 'block' }}
+                      loading="lazy"
+                    />
+                    {p.caption ? (
+                      <div style={{ padding: 10, fontSize: 13 }} className="muted">
+                        {p.caption}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900 }}>
-              {profile.display_name || profile.handle}
-            </div>
-            <div className="muted">@{profile.handle}</div>
-          </div>
-        </div>
-
-        {profile.bio && (
-          <div style={{ marginTop: 12, color: "#111" }}>{profile.bio}</div>
-        )}
-
-        {!profile.is_public && (
-          <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-            This profile is private.
-          </div>
-        )}
-
-        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {canMessage && (
-            <button
-              type="button"
-              className="btn btn-accent btn-pill"
-              onClick={openChatBubble}
-            >
-              Message
-            </button>
-          )}
-          <Link className="btn btn-neutral btn-pill" to="/">
-            Back home
-          </Link>
-        </div>
-      </div>
+        </>
+      )}
     </div>
-  );
+  )
 }
 
 
