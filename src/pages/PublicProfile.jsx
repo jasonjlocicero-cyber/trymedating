@@ -21,10 +21,10 @@ export default function PublicProfile() {
       setPhotos([])
 
       try {
-        // 1) Load profile by handle
+        // 1) Load profile by handle (IMPORTANT: include user_id)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('handle, display_name, bio, avatar_url, is_public')
+          .select('user_id, handle, display_name, bio, avatar_url, is_public')
           .eq('handle', handle)
           .maybeSingle()
 
@@ -35,11 +35,11 @@ export default function PublicProfile() {
         }
         if (mounted) setProfile(p)
 
-        // 2) Load public photos for that handle
+        // 2) Load public photos by user_id (NOT handle)
         const { data: rows, error: rErr } = await supabase
           .from('profile_photos')
           .select('id, path, caption, sort_order')
-          .eq('handle', handle)
+          .eq('user_id', p.user_id)
           .eq('show_on_public', true)
           .order('sort_order', { ascending: true })
 
@@ -51,7 +51,7 @@ export default function PublicProfile() {
           return
         }
 
-        // 3) Turn storage paths into signed URLs (works for private buckets)
+        // 3) Signed URLs (works even if the bucket is private)
         const paths = list.map((x) => x.path)
         const { data: signed, error: sErr } = await supabase.storage
           .from('profile-photos')
@@ -66,10 +66,7 @@ export default function PublicProfile() {
         )
 
         const merged = list
-          .map((x) => ({
-            ...x,
-            url: signedByPath[x.path] || ''
-          }))
+          .map((x) => ({ ...x, url: signedByPath[x.path] || '' }))
           .filter((x) => !!x.url)
 
         if (mounted) setPhotos(merged)
@@ -138,7 +135,6 @@ export default function PublicProfile() {
             </div>
           </div>
 
-          {/* PUBLIC PHOTOS */}
           <div style={{ marginTop: 22 }}>
             <h2 style={{ fontWeight: 900, marginBottom: 8 }}>Photos</h2>
 
