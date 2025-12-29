@@ -1,6 +1,7 @@
 // src/pages/ProfilePage.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import ProfilePhotosManager from '../components/ProfilePhotosManager'
 
 function sanitizeHandle(s) {
   const base = (s || '')
