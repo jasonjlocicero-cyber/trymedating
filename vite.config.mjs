@@ -58,8 +58,21 @@ export default defineConfig(({ command }) => {
           // Offline fallback page (web only)
           navigateFallback: '/offline.html',
 
-          // Never try to “offline-fallback” auth/API-like routes
+          /**
+           * CRITICAL:
+           * Never serve the offline fallback for manifest/icons/screenshots/favicon/etc.
+           * If Workbox returns offline.html for the manifest URL, Chrome marks the PWA as invalid
+           * and the install button disappears.
+           */
           navigateFallbackDenylist: [
+            // PWA + static assets that must NOT become "offline.html"
+            /^\/manifest\.webmanifest$/i,
+            /^\/icons\/.*$/i,
+            /^\/favicon\.ico$/i,
+            /^\/robots\.txt$/i,
+            /^\/sitemap\.xml$/i,
+
+            // Never try to “offline-fallback” auth/API-like routes
             /\/auth\//i,
             /\/rest\//i,
             /\/functions\//i,
