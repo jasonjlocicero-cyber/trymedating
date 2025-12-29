@@ -32,10 +32,14 @@ export default function ProfilePage() {
   useEffect(() => {
     let mounted = true
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
       if (mounted) setMe(user || null)
     })()
-    return () => { mounted = false }
+    return () => {
+      mounted = false
+    }
   }, [])
 
   // Ensure we have a profile row
@@ -44,7 +48,9 @@ export default function ProfilePage() {
     let mounted = true
 
     async function ensureProfile() {
-      setLoading(true); setErr(''); setMsg('')
+      setLoading(true)
+      setErr('')
+      setMsg('')
       try {
         // 1) Try to fetch existing
         const { data: existing, error: selErr } = await supabase
@@ -52,7 +58,9 @@ export default function ProfilePage() {
           .select('handle, display_name, bio, is_public, avatar_url')
           .eq('user_id', me.id)
           .maybeSingle()
+
         if (selErr) throw selErr
+
         if (existing) {
           if (mounted) setProfile(existing)
           return
@@ -61,6 +69,7 @@ export default function ProfilePage() {
         // 2) Auto-provision if missing
         const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
         let attempt = 0
+
         while (true) {
           const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
           const toInsert = {
@@ -71,20 +80,24 @@ export default function ProfilePage() {
             bio: '',
             avatar_url: ''
           }
+
           const { data: created, error: insErr } = await supabase
             .from('profiles')
             .insert(toInsert)
             .select('handle, display_name, bio, is_public, avatar_url')
             .single()
+
           if (!insErr) {
             if (mounted) setProfile(created)
             break
           }
+
           if (insErr?.code === '23505') {
             attempt += 1
             if (attempt > 30) throw new Error('Could not generate a unique handle.')
             continue
           }
+
           throw insErr
         }
       } catch (e) {
@@ -95,15 +108,23 @@ export default function ProfilePage() {
     }
 
     ensureProfile()
-    return () => { mounted = false }
+    return () => {
+      mounted = false
+    }
   }, [me?.id])
 
-  const canSave = useMemo(() => !!me?.id && !!profile.handle?.trim() && !saving, [me?.id, profile, saving])
+  const canSave = useMemo(
+    () => !!me?.id && !!profile.handle?.trim() && !saving,
+    [me?.id, profile.handle, saving]
+  )
 
   async function saveProfile(e) {
     e?.preventDefault?.()
     if (!canSave) return
-    setSaving(true); setErr(''); setMsg('')
+    setSaving(true)
+    setErr('')
+    setMsg('')
+
     try {
       const payload = {
         handle: profile.handle.trim(),
@@ -112,12 +133,14 @@ export default function ProfilePage() {
         is_public: !!profile.is_public,
         avatar_url: profile.avatar_url || null
       }
+
       const { data, error } = await supabase
         .from('profiles')
         .update(payload)
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
         .single()
+
       if (error) throw error
       setProfile(data)
       setMsg('Saved!')
@@ -132,7 +155,9 @@ export default function ProfilePage() {
     try {
       const file = ev.target.files?.[0]
       if (!file || !me?.id) return
-      setUploading(true); setErr(''); setMsg('')
+      setUploading(true)
+      setErr('')
+      setMsg('')
 
       const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
       const path = `${me.id}/${Date.now()}.${ext}`
@@ -153,6 +178,7 @@ export default function ProfilePage() {
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
         .single()
+
       if (error) throw error
       setProfile(data)
       setMsg('Photo updated!')
@@ -167,13 +193,17 @@ export default function ProfilePage() {
   async function handleRemoveAvatar() {
     try {
       if (!me?.id) return
-      setUploading(true); setErr(''); setMsg('')
+      setUploading(true)
+      setErr('')
+      setMsg('')
+
       const { data, error } = await supabase
         .from('profiles')
         .update({ avatar_url: null })
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
         .single()
+
       if (error) throw error
       setProfile(data)
       setMsg('Photo removed.')
@@ -247,6 +277,7 @@ export default function ProfilePage() {
                 disabled={uploading}
               />
             </label>
+
             {profile.avatar_url && (
               <button
                 type="button"
@@ -267,7 +298,7 @@ export default function ProfilePage() {
             <input
               className="input"
               value={profile.handle}
-              onChange={(e) => setProfile(p => ({ ...p, handle: e.target.value.toLowerCase() }))}
+              onChange={(e) => setProfile((p) => ({ ...p, handle: e.target.value.toLowerCase() }))}
               placeholder="yourname"
               required
             />
@@ -281,7 +312,7 @@ export default function ProfilePage() {
             <input
               className="input"
               value={profile.display_name}
-              onChange={(e) => setProfile(p => ({ ...p, display_name: e.target.value }))}
+              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
               placeholder="Your name"
             />
           </label>
@@ -292,7 +323,7 @@ export default function ProfilePage() {
               className="input"
               rows={4}
               value={profile.bio || ''}
-              onChange={(e) => setProfile(p => ({ ...p, bio: e.target.value }))}
+              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
               placeholder="A short intro…"
             />
           </label>
@@ -301,7 +332,7 @@ export default function ProfilePage() {
             <input
               type="checkbox"
               checked={!!profile.is_public}
-              onChange={(e) => setProfile(p => ({ ...p, is_public: e.target.checked }))}
+              onChange={(e) => setProfile((p) => ({ ...p, is_public: e.target.checked }))}
             />
             Public profile
           </label>
@@ -312,6 +343,11 @@ export default function ProfilePage() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* ✅ Multi-photo manager lives on the profile page */}
+      <div style={{ marginTop: 26 }}>
+        <ProfilePhotosManager userId={me.id} />
       </div>
     </div>
   )
