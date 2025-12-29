@@ -26,11 +26,17 @@ export default function Footer() {
             justifyContent: "center",
           }}
         >
-          {/* Teal, Teal, Coral, Coral (kept exactly as-is) */}
+          {/* Teal, Teal, Coral, Coral */}
           <Link to="/terms" className="btn btn-primary btn-pill">Terms</Link>
           <Link to="/privacy" className="btn btn-primary btn-pill">Privacy</Link>
+
+          {/* Contact works today */}
           <Link to="/contact" className="btn btn-accent btn-pill">Contact</Link>
-          <Link to="/feedback" className="btn btn-accent btn-pill">Feedback</Link>
+
+          {/* Merge Feedback into Contact */}
+          <Link to="/contact?type=feedback" className="btn btn-accent btn-pill">
+            Contact / Feedback
+          </Link>
         </nav>
 
         <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>
@@ -40,3 +46,4 @@ export default function Footer() {
     </footer>
   );
 }
+
