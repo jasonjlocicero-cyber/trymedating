@@ -379,16 +379,11 @@ export default function ChatDock(props) {
     partnerName = "",
     onClose,
     mode,
-    onRead, // NEW: notify launcher after marking messages read
   } = props;
 
-  // Modes:
-  // - "page": embedded in a page
-  // - "widget": standalone fixed widget (legacy / optional)
-  // - "embedded": rendered inside an already-positioned container (ChatLauncher panel)
+  // If ChatLauncher passes onClose, default to widget mode automatically.
   const resolvedMode = mode || (typeof onClose === "function" ? "widget" : "page");
   const isWidget = resolvedMode === "widget";
-  const isEmbedded = resolvedMode === "embedded";
 
   // auth
   const [me, setMe] = useState(null);
@@ -554,7 +549,7 @@ export default function ChatDock(props) {
   const fetchMessages = useCallback(async () => {
     if (!myId || !peer) return;
     const connIds = await fetchAllConnIdsForPair();
-    setSessionCount(connIds.length);
+    setSessionCount(connIds.length); // banner count
     if (!connIds.length) {
       setItems([]);
       return;
@@ -576,11 +571,11 @@ export default function ChatDock(props) {
       .eq("recipient", myId)
       .is("read_at", null);
 
-    // NEW: force launcher badge refresh even if UPDATE realtime doesn’t fire
+    // 🔥 NEW: tell ChatLauncher to recompute unread (clears the red badge)
     try {
-      onRead?.();
+      window.dispatchEvent(new CustomEvent("tmd:unread-refresh"));
     } catch {}
-  }, [fetchAllConnIdsForPair, myId, peer, onRead]);
+  }, [fetchAllConnIdsForPair, myId, peer]);
 
   useEffect(() => {
     if (!conn?.id) return;
@@ -632,7 +627,7 @@ export default function ChatDock(props) {
   const sendTyping = () => {
     const now = Date.now();
     if (!typingChannelRef.current) return;
-    if (now - lastTypingSentRef.current < 1000) return;
+    if (now - lastTypingSentRef.current < 1000) return; // 1s throttle
     typingChannelRef.current.send({
       type: "broadcast",
       event: "typing",
@@ -667,6 +662,7 @@ export default function ChatDock(props) {
 
   const isMine = (m) => m.sender === myId || m.sender_id === myId;
 
+  // COPY: clipboard helper
   const copyBody = async (txt) => {
     try {
       await navigator.clipboard.writeText(txt || "");
@@ -766,11 +762,12 @@ export default function ChatDock(props) {
     [conn?.id] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  /* ---------- actions ---------- */
+  /* ---------- actions (defined BEFORE connControls) ---------- */
   const requestConnect = async () => {
     if (!myId || !peer || myId === peer) return;
     setBusy(true);
     try {
+      // Reuse existing row if previously disconnected/rejected
       const pairOr =
         `and(${C.requester}.eq.${myId},${C.addressee}.eq.${peer}),` +
         `and(${C.requester}.eq.${peer},${C.addressee}.eq.${myId})`;
@@ -796,6 +793,7 @@ export default function ChatDock(props) {
         return;
       }
 
+      // If the other side already requested me, accept that one
       if (
         row &&
         row[C.status] === "pending" &&
@@ -806,6 +804,7 @@ export default function ChatDock(props) {
         return;
       }
 
+      // Otherwise, create fresh pending
       const payload = { [C.requester]: myId, [C.addressee]: peer, [C.status]: "pending" };
       const { data, error } = await supabase.from(CONN_TABLE).insert(payload).select();
       if (error) throw error;
@@ -883,6 +882,7 @@ export default function ChatDock(props) {
     }
   };
 
+  // Reuse the SAME row on reconnect so connection_id stays stable
   const reconnect = async () => {
     if (!conn || !myId || !peer) return;
     setBusy(true);
@@ -917,8 +917,7 @@ export default function ChatDock(props) {
     try {
       const { error } = await supabase.rpc("tmd_delete_last_message", { p_connection_id: conn.id });
       if (error) throw error;
-      await fetchMessages();
-      onRead?.();
+      await fetchMessages(); // refresh list
     } catch (e) {
       alert(e?.message || "Failed to delete last message.");
       console.error("[delete last message]", e);
@@ -927,7 +926,7 @@ export default function ChatDock(props) {
     }
   };
 
-  /* connection controls */
+  /* connection controls (AFTER actions) */
   const connControls = (
     <div style={{ marginBottom: 10 }}>
       {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
@@ -948,21 +947,12 @@ export default function ChatDock(props) {
     </div>
   );
 
-  /* -------- wrapper styles -------- */
-  const outerStyle = isEmbedded
-    ? {
-        width: "100%",
-        height: "100%",
-        padding: 12,
-        display: "flex",
-        flexDirection: "column",
-        background: "#fff",
-      }
-    : isWidget
+  /* -------- widget wrapper styles (this is what makes it a true floating window) -------- */
+  const outerStyle = isWidget
     ? {
         position: "fixed",
-        right: "calc(16px + env(safe-area-inset-right, 0px))",
-        bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+        right: 16,
+        bottom: 80,
         width: 360,
         maxWidth: "calc(100vw - 24px)",
         height: "min(560px, calc(100vh - 120px))",
@@ -971,7 +961,7 @@ export default function ChatDock(props) {
         background: "#fff",
         boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
         padding: 12,
-        zIndex: 10040,
+        zIndex: 100001,
         display: "flex",
         flexDirection: "column",
       }
@@ -997,11 +987,10 @@ export default function ChatDock(props) {
               aria-label="Close"
               title="Close"
               style={{
-                width: 44,
-                height: 44,
                 border: "1px solid var(--border)",
                 background: "#fff",
-                borderRadius: 12,
+                borderRadius: 10,
+                padding: "4px 10px",
                 cursor: "pointer",
                 fontWeight: 800,
               }}
@@ -1029,11 +1018,10 @@ export default function ChatDock(props) {
               aria-label="Close"
               title="Close"
               style={{
-                width: 44,
-                height: 44,
                 border: "1px solid var(--border)",
                 background: "#fff",
-                borderRadius: 12,
+                borderRadius: 10,
+                padding: "4px 10px",
                 cursor: "pointer",
                 fontWeight: 800,
               }}
@@ -1053,7 +1041,7 @@ export default function ChatDock(props) {
   /* UI */
   return (
     <div onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} style={outerStyle}>
-      {/* widget topbar (NOT in embedded mode, because ChatLauncher already has a header) */}
+      {/* widget topbar */}
       {isWidget && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1071,11 +1059,10 @@ export default function ChatDock(props) {
               aria-label="Close"
               title="Close"
               style={{
-                width: 44,
-                height: 44,
                 border: "1px solid var(--border)",
                 background: "#fff",
-                borderRadius: 12,
+                borderRadius: 10,
+                padding: "4px 10px",
                 cursor: "pointer",
                 fontWeight: 800,
               }}
@@ -1107,13 +1094,13 @@ export default function ChatDock(props) {
           style={{
             paddingTop: 10,
             borderTop: "1px solid var(--border)",
-            flex: 1,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
+            flex: isWidget ? 1 : undefined,
+            minHeight: isWidget ? 0 : undefined,
+            display: isWidget ? "flex" : "block",
+            flexDirection: isWidget ? "column" : undefined,
           }}
         >
-          {/* sessions banner */}
+          {/* sessions banner (dismissible, persisted per pair) */}
           {sessionCount > 1 && !hidePrevBanner && (
             <div
               style={{
@@ -1139,10 +1126,10 @@ export default function ChatDock(props) {
                   border: "1px solid var(--border)",
                   background: "#fff",
                   color: "#111",
-                  borderRadius: 8,
-                  padding: "6px 10px",
+                  borderRadius: 6,
+                  padding: "2px 8px",
                   cursor: "pointer",
-                  fontWeight: 800,
+                  fontWeight: 700,
                   fontSize: 12,
                   lineHeight: 1,
                 }}
@@ -1158,7 +1145,7 @@ export default function ChatDock(props) {
               display: "grid",
               gridTemplateRows: "1fr auto",
               gap: 8,
-              flex: 1,
+              flex: isWidget ? 1 : undefined,
               minHeight: 0,
             }}
           >
@@ -1241,6 +1228,7 @@ export default function ChatDock(props) {
                             gap: 8,
                           }}
                         >
+                          {/* COPY button */}
                           <button
                             type="button"
                             onClick={() => copyBody(m.body)}
@@ -1250,10 +1238,10 @@ export default function ChatDock(props) {
                               background: "#fff",
                               color: "#111",
                               borderRadius: 8,
-                              padding: "6px 10px",
+                              padding: "2px 8px",
                               fontSize: 12,
                               cursor: "pointer",
-                              fontWeight: 800,
+                              fontWeight: 700,
                             }}
                           >
                             Copy
@@ -1276,12 +1264,14 @@ export default function ChatDock(props) {
               })}
             </div>
 
+            {/* TYPING hint */}
             {peerTyping && (
               <div style={{ fontSize: 12, color: "#6b7280", margin: "0 0 0 6px" }}>
                 The other person is typing…
               </div>
             )}
 
+            {/* composer (Enter=send, Shift+Enter=newline) */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
@@ -1340,7 +1330,7 @@ export default function ChatDock(props) {
                   color: "#fff",
                   border: "none",
                   cursor: !canSend || uploading ? "not-allowed" : "pointer",
-                  fontWeight: 700,
+                  fontWeight: 600,
                 }}
               >
                 Send
