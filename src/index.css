@@ -24,6 +24,10 @@ button { font-family: inherit; cursor: pointer; }
   --brand-coral: var(--brand-coral-500);
 
   --border:#ddd; --muted:#666; --bg-light:#fff;
+
+  /* safe-area helpers */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
 /* Layout */
@@ -168,9 +172,11 @@ textarea.input{
   min-height:110px;
   resize:vertical;
 }
+
 @keyframes tmd-bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: .6; }
   40% { transform: translateY(-4px); opacity: 1; }
 }
+
 
 
