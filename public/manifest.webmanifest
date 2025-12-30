@@ -1,9 +1,9 @@
 {
-  "id": "/?source=pwa",
+  "id": "/",
   "name": "TryMeDating",
   "short_name": "TMD",
   "description": "Meet intentionally with people you actually know. Private 1:1 connections and messaging.",
-  "start_url": "/?source=pwa",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -22,6 +22,7 @@
     { "src": "/icons/screenshot-wide.png", "sizes": "1920x1080", "type": "image/png", "form_factor": "wide" }
   ]
 }
+
 
 
 
