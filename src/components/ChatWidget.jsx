@@ -1,31 +1,12 @@
 // src/components/ChatWidget.jsx
-import React, { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import React from "react";
 import ChatLauncher from "./ChatLauncher";
-import ChatDock from "./ChatDock";
 
+/**
+ * ChatLauncher now owns the full “floating button + panel” behavior.
+ * Keeping ChatWidget as a thin wrapper avoids the old portal/fixed stacking conflicts.
+ */
 export default function ChatWidget({ disabled = false }) {
-  const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  const close = () => setOpen(false);
-  const toggle = () => setOpen((v) => !v);
-
-  return (
-    <>
-      <ChatLauncher
-        open={open}
-        onToggle={toggle}
-        disabled={disabled}
-      />
-
-      {mounted && open &&
-        createPortal(
-          <ChatDock onClose={close} />,
-          document.body
-        )}
-    </>
-  );
+  return <ChatLauncher disabled={disabled} />;
 }
+
