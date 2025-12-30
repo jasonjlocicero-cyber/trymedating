@@ -5,11 +5,11 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 /**
  * Notes:
- * - We always include VitePWA so `virtual:pwa-register` resolves in DEV (5173) and BUILD.
- * - We keep SW behavior OFF in dev via devOptions.enabled = false.
+ * - Keep VitePWA so `virtual:pwa-register` resolves in DEV and BUILD.
+ * - Keep SW behavior OFF in dev via devOptions.enabled = false.
  * - Electron builds should not register SW (your main.jsx already prevents this).
  */
-export default defineConfig(({ command }) => {
+export default defineConfig(() => {
   const isElectronBuild =
     process.env.TMD_ELECTRON === '1' ||
     process.env.TMD_ELECTRON === 'true' ||
@@ -26,22 +26,14 @@ export default defineConfig(({ command }) => {
     plugins: [
       react(),
 
-      // Keep plugin present in both dev + build so `virtual:pwa-register` exists.
       VitePWA({
-        // We register manually via `virtual:pwa-register` in code (not auto injected).
         injectRegister: null,
-
-        // Auto-update SW when it *is* registered (web build).
         registerType: 'autoUpdate',
-
-        // Name of generated SW file in dist/
         filename: 'sw.js',
 
         // Using a static manifest file in /public (manifest.webmanifest)
-        // so we don't generate one from config.
         manifest: false,
 
-        // Keep SW OFF in dev server (but still provide the virtual module).
         devOptions: {
           enabled: false
         },
@@ -55,24 +47,15 @@ export default defineConfig(({ command }) => {
         ],
 
         workbox: {
-          // Offline fallback page (web only)
-          navigateFallback: '/offline.html',
-
           /**
-           * CRITICAL:
-           * Never serve the offline fallback for manifest/icons/screenshots/favicon/etc.
-           * If Workbox returns offline.html for the manifest URL, Chrome marks the PWA as invalid
-           * and the install button disappears.
+           * IMPORTANT:
+           * navigateFallback should be your SPA shell (index.html),
+           * NOT offline.html — otherwise the installed app opens "offline" every time.
            */
-          navigateFallbackDenylist: [
-            // PWA + static assets that must NOT become "offline.html"
-            /^\/manifest\.webmanifest$/i,
-            /^\/icons\/.*$/i,
-            /^\/favicon\.ico$/i,
-            /^\/robots\.txt$/i,
-            /^\/sitemap\.xml$/i,
+          navigateFallback: '/index.html',
 
-            // Never try to “offline-fallback” auth/API-like routes
+          // Never try to “fallback-route” auth/API-like routes
+          navigateFallbackDenylist: [
             /\/auth\//i,
             /\/rest\//i,
             /\/functions\//i,
@@ -80,8 +63,12 @@ export default defineConfig(({ command }) => {
             /supabase\.co/i
           ],
 
-          // Let VitePWA use outDir automatically; only keep patterns.
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
+          // Ensure we precache typical build assets + the webmanifest
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
+
+          // Make updates apply faster (helps installed app stop using old SW)
+          skipWaiting: true,
+          clientsClaim: true,
 
           runtimeCaching: [
             // Supabase public storage: cache for performance
@@ -132,6 +119,7 @@ export default defineConfig(({ command }) => {
     }
   }
 })
+
 
 
 
