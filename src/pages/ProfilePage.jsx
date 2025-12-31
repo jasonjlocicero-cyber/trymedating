@@ -28,6 +28,11 @@ export default function ProfilePage() {
     avatar_url: ''
   })
 
+  // Delete account UI
+  const [showDelete, setShowDelete] = useState(false)
+  const [deleteText, setDeleteText] = useState('')
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
   // Load auth user
   useEffect(() => {
     let mounted = true
@@ -214,6 +219,34 @@ export default function ProfilePage() {
     }
   }
 
+  async function doDeleteAccount() {
+    if (deleteText !== 'DELETE') return
+
+    const second = confirm('This will permanently delete your account and data. Continue?')
+    if (!second) return
+
+    setDeleteBusy(true)
+    setErr('')
+    setMsg('')
+
+    try {
+      // Calls your Supabase Edge Function: delete-account
+      const { data, error } = await supabase.functions.invoke('delete-account')
+      if (error) throw error
+      if (!data?.ok) throw new Error(data?.error || 'Delete failed')
+
+      await supabase.auth.signOut()
+      window.location.href = '/'
+    } catch (e) {
+      alert(e.message || 'Delete failed')
+      console.error('[delete-account]', e)
+    } finally {
+      setDeleteBusy(false)
+      setShowDelete(false)
+      setDeleteText('')
+    }
+  }
+
   if (!me) {
     return (
       <div className="container" style={{ padding: '28px 0' }}>
@@ -242,9 +275,9 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <div className="profile-hero">
+      <div className="profile-page-grid">
         {/* Avatar column */}
-        <div className="profile-hero__left">
+        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
           <div className="avatar-frame" style={{ width: 140, height: 140 }}>
             {profile.avatar_url ? (
               <img
@@ -259,11 +292,8 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div className="actions-row" style={{ justifyContent: 'center' }}>
-            <label
-              className="btn btn-primary btn-pill"
-              style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}
-            >
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
               {uploading ? 'Uploading…' : 'Upload photo'}
               <input
                 type="file"
@@ -288,43 +318,41 @@ export default function ProfilePage() {
         </div>
 
         {/* Right-side form */}
-        <form onSubmit={saveProfile} className="profile-hero__right">
-          <div className="profile-fields">
-            <label className="form-label">
-              Handle
-              <input
-                className="input"
-                value={profile.handle}
-                onChange={(e) => setProfile((p) => ({ ...p, handle: e.target.value.toLowerCase() }))}
-                placeholder="yourname"
-                required
-              />
-              <div className="helper-muted" style={{ fontSize: 12 }}>
-                Your public URL will be <code>/u/{profile.handle || '…'}</code>
-              </div>
-            </label>
+        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
+          <label className="form-label">
+            Handle
+            <input
+              className="input"
+              value={profile.handle}
+              onChange={(e) => setProfile((p) => ({ ...p, handle: e.target.value.toLowerCase() }))}
+              placeholder="yourname"
+              required
+            />
+            <div className="helper-muted" style={{ fontSize: 12 }}>
+              Your public URL will be <code>/u/{profile.handle || '…'}</code>
+            </div>
+          </label>
 
-            <label className="form-label">
-              Display name
-              <input
-                className="input"
-                value={profile.display_name}
-                onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
-                placeholder="Your name"
-              />
-            </label>
+          <label className="form-label">
+            Display name
+            <input
+              className="input"
+              value={profile.display_name}
+              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
+              placeholder="Your name"
+            />
+          </label>
 
-            <label className="form-label profile-field--bio">
-              Bio
-              <textarea
-                className="input"
-                rows={4}
-                value={profile.bio || ''}
-                onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
-                placeholder="A short intro…"
-              />
-            </label>
-          </div>
+          <label className="form-label">
+            Bio
+            <textarea
+              className="input"
+              rows={4}
+              value={profile.bio || ''}
+              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+              placeholder="A short intro…"
+            />
+          </label>
 
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
@@ -335,7 +363,7 @@ export default function ProfilePage() {
             Public profile
           </label>
 
-          <div className="actions-row">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
@@ -347,6 +375,84 @@ export default function ProfilePage() {
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
+
+      {/* ✅ Danger zone: Delete account (out of the way) */}
+      <div className="danger-zone">
+        <div className="danger-zone__title">Danger zone</div>
+        <div className="helper-muted" style={{ marginBottom: 10 }}>
+          Deleting your account is permanent. Your profile, photos, connections, messages, and uploads will be removed.
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-danger-outline btn-pill"
+          onClick={() => {
+            setShowDelete(true)
+            setDeleteText('')
+          }}
+        >
+          Delete account
+        </button>
+      </div>
+
+      {/* Modal */}
+      {showDelete && (
+        <div
+          className="danger-modal"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => {
+            // click outside closes
+            if (e.target === e.currentTarget) {
+              setShowDelete(false)
+              setDeleteText('')
+            }
+          }}
+        >
+          <div className="danger-modal__card">
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Confirm deletion</div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
+              Type <b>DELETE</b> to confirm. This cannot be undone.
+            </div>
+
+            <input
+              className="input"
+              value={deleteText}
+              onChange={(e) => setDeleteText(e.target.value)}
+              placeholder="Type DELETE"
+              autoFocus
+            />
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                className="btn btn-neutral btn-pill"
+                type="button"
+                onClick={() => {
+                  setShowDelete(false)
+                  setDeleteText('')
+                }}
+                disabled={deleteBusy}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="btn btn-danger btn-pill"
+                type="button"
+                disabled={deleteText !== 'DELETE' || deleteBusy}
+                onClick={doDeleteAccount}
+                style={{ opacity: deleteText !== 'DELETE' || deleteBusy ? 0.65 : 1 }}
+              >
+                {deleteBusy ? 'Deleting…' : 'Permanently delete'}
+              </button>
+            </div>
+
+            <div className="helper-muted" style={{ marginTop: 10 }}>
+              Note: Minimal records may be retained only where required for legal compliance and investigations by proper authorities.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
