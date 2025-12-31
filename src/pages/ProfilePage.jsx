@@ -242,16 +242,9 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '180px 1fr',
-          gap: 18,
-          alignItems: 'start'
-        }}
-      >
+      <div className="profile-hero">
         {/* Avatar column */}
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
+        <div className="profile-hero__left">
           <div className="avatar-frame" style={{ width: 140, height: 140 }}>
             {profile.avatar_url ? (
               <img
@@ -266,8 +259,11 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-            <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
+          <div className="actions-row" style={{ justifyContent: 'center' }}>
+            <label
+              className="btn btn-primary btn-pill"
+              style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}
+            >
               {uploading ? 'Uploading…' : 'Upload photo'}
               <input
                 type="file"
@@ -292,41 +288,43 @@ export default function ProfilePage() {
         </div>
 
         {/* Right-side form */}
-        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
-          <label className="form-label">
-            Handle
-            <input
-              className="input"
-              value={profile.handle}
-              onChange={(e) => setProfile((p) => ({ ...p, handle: e.target.value.toLowerCase() }))}
-              placeholder="yourname"
-              required
-            />
-            <div className="helper-muted" style={{ fontSize: 12 }}>
-              Your public URL will be <code>/u/{profile.handle || '…'}</code>
-            </div>
-          </label>
+        <form onSubmit={saveProfile} className="profile-hero__right">
+          <div className="profile-fields">
+            <label className="form-label">
+              Handle
+              <input
+                className="input"
+                value={profile.handle}
+                onChange={(e) => setProfile((p) => ({ ...p, handle: e.target.value.toLowerCase() }))}
+                placeholder="yourname"
+                required
+              />
+              <div className="helper-muted" style={{ fontSize: 12 }}>
+                Your public URL will be <code>/u/{profile.handle || '…'}</code>
+              </div>
+            </label>
 
-          <label className="form-label">
-            Display name
-            <input
-              className="input"
-              value={profile.display_name}
-              onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
-              placeholder="Your name"
-            />
-          </label>
+            <label className="form-label">
+              Display name
+              <input
+                className="input"
+                value={profile.display_name}
+                onChange={(e) => setProfile((p) => ({ ...p, display_name: e.target.value }))}
+                placeholder="Your name"
+              />
+            </label>
 
-          <label className="form-label">
-            Bio
-            <textarea
-              className="input"
-              rows={4}
-              value={profile.bio || ''}
-              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
-              placeholder="A short intro…"
-            />
-          </label>
+            <label className="form-label profile-field--bio">
+              Bio
+              <textarea
+                className="input"
+                rows={4}
+                value={profile.bio || ''}
+                onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+                placeholder="A short intro…"
+              />
+            </label>
+          </div>
 
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
@@ -337,7 +335,7 @@ export default function ProfilePage() {
             Public profile
           </label>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="actions-row">
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
