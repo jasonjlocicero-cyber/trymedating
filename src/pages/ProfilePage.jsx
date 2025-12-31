@@ -28,10 +28,12 @@ export default function ProfilePage() {
     avatar_url: ''
   })
 
-  // Delete account UI
+  // Delete account UI state
   const [showDelete, setShowDelete] = useState(false)
   const [deleteText, setDeleteText] = useState('')
-  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteChecked, setDeleteChecked] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteErr, setDeleteErr] = useState('')
 
   // Load auth user
   useEffect(() => {
@@ -220,30 +222,29 @@ export default function ProfilePage() {
   }
 
   async function doDeleteAccount() {
-    if (deleteText !== 'DELETE') return
+    setDeleteErr('')
+    if (deleteText.trim().toUpperCase() !== 'DELETE') {
+      setDeleteErr('Type DELETE to confirm.')
+      return
+    }
+    if (!deleteChecked) {
+      setDeleteErr('Please check the confirmation box.')
+      return
+    }
 
-    const second = confirm('This will permanently delete your account and data. Continue?')
-    if (!second) return
-
-    setDeleteBusy(true)
-    setErr('')
-    setMsg('')
-
+    setDeleting(true)
     try {
-      // Calls your Supabase Edge Function: delete-account
-      const { data, error } = await supabase.functions.invoke('delete-account')
+      // Calls the SECURITY DEFINER RPC you added in Supabase SQL
+      const { error } = await supabase.rpc('tmd_delete_account')
       if (error) throw error
-      if (!data?.ok) throw new Error(data?.error || 'Delete failed')
 
+      // Session may still exist client-side; sign out + go home
       await supabase.auth.signOut()
-      window.location.href = '/'
+      window.location.assign('/')
     } catch (e) {
-      alert(e.message || 'Delete failed')
-      console.error('[delete-account]', e)
+      setDeleteErr(e.message || 'Failed to delete account.')
     } finally {
-      setDeleteBusy(false)
-      setShowDelete(false)
-      setDeleteText('')
+      setDeleting(false)
     }
   }
 
@@ -266,7 +267,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
+    <div className="container profile-page" style={{ padding: '28px 0', maxWidth: 920 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Keep it simple. Your handle is public; toggle visibility anytime.
@@ -275,10 +276,10 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <div className="profile-page-grid">
+      <div className="profile-grid">
         {/* Avatar column */}
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
-          <div className="avatar-frame" style={{ width: 140, height: 140 }}>
+        <div className="profile-avatar-col">
+          <div className="avatar-frame profile-avatar-frame">
             {profile.avatar_url ? (
               <img
                 src={profile.avatar_url}
@@ -292,7 +293,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="profile-avatar-actions">
             <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
               {uploading ? 'Uploading…' : 'Upload photo'}
               <input
@@ -318,7 +319,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Right-side form */}
-        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
+        <form onSubmit={saveProfile} className="profile-form-grid">
           <label className="form-label">
             Handle
             <input
@@ -354,7 +355,7 @@ export default function ProfilePage() {
             />
           </label>
 
-          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label className="form-label profile-public-row">
             <input
               type="checkbox"
               checked={!!profile.is_public}
@@ -376,43 +377,45 @@ export default function ProfilePage() {
         <ProfilePhotosManager userId={me.id} />
       </div>
 
-      {/* ✅ Danger zone: Delete account (out of the way) */}
-      <div className="danger-zone">
-        <div className="danger-zone__title">Danger zone</div>
-        <div className="helper-muted" style={{ marginBottom: 10 }}>
-          Deleting your account is permanent. Your profile, photos, connections, messages, and uploads will be removed.
+      {/* ✅ Danger zone */}
+      <div className="danger-zone" style={{ marginTop: 22 }}>
+        <div>
+          <div className="danger-zone__title">Danger zone</div>
+          <div className="danger-zone__text">
+            Deleting your account permanently removes your profile, photos, connections, and messages.
+            (Some records may be retained where legally required for investigations.)
+          </div>
         </div>
 
         <button
           type="button"
-          className="btn btn-danger-outline btn-pill"
+          className="btn btn-danger btn-pill"
           onClick={() => {
             setShowDelete(true)
+            setDeleteErr('')
             setDeleteText('')
+            setDeleteChecked(false)
           }}
         >
           Delete account
         </button>
       </div>
 
-      {/* Modal */}
+      {/* Delete modal */}
       {showDelete && (
         <div
-          className="danger-modal"
+          className="modal-backdrop"
           role="dialog"
           aria-modal="true"
+          aria-label="Delete account"
           onMouseDown={(e) => {
-            // click outside closes
-            if (e.target === e.currentTarget) {
-              setShowDelete(false)
-              setDeleteText('')
-            }
+            if (e.target === e.currentTarget && !deleting) setShowDelete(false)
           }}
         >
-          <div className="danger-modal__card">
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Confirm deletion</div>
-            <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-              Type <b>DELETE</b> to confirm. This cannot be undone.
+          <div className="modal-card">
+            <div className="modal-title">Delete account</div>
+            <div className="modal-body">
+              This action is permanent. Type <b>DELETE</b> to confirm.
             </div>
 
             <input
@@ -420,35 +423,39 @@ export default function ProfilePage() {
               value={deleteText}
               onChange={(e) => setDeleteText(e.target.value)}
               placeholder="Type DELETE"
-              autoFocus
+              disabled={deleting}
             />
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+            <label className="modal-check">
+              <input
+                type="checkbox"
+                checked={deleteChecked}
+                onChange={(e) => setDeleteChecked(e.target.checked)}
+                disabled={deleting}
+              />
+              I understand this cannot be undone.
+            </label>
+
+            {deleteErr && <div className="helper-error" style={{ marginTop: 8 }}>{deleteErr}</div>}
+
+            <div className="modal-actions">
               <button
-                className="btn btn-neutral btn-pill"
                 type="button"
-                onClick={() => {
-                  setShowDelete(false)
-                  setDeleteText('')
-                }}
-                disabled={deleteBusy}
+                className="btn btn-neutral btn-pill"
+                onClick={() => setShowDelete(false)}
+                disabled={deleting}
               >
                 Cancel
               </button>
-
               <button
-                className="btn btn-danger btn-pill"
                 type="button"
-                disabled={deleteText !== 'DELETE' || deleteBusy}
+                className="btn btn-danger btn-pill"
                 onClick={doDeleteAccount}
-                style={{ opacity: deleteText !== 'DELETE' || deleteBusy ? 0.65 : 1 }}
+                disabled={deleting}
+                title="Permanently delete your account"
               >
-                {deleteBusy ? 'Deleting…' : 'Permanently delete'}
+                {deleting ? 'Deleting…' : 'Yes, delete'}
               </button>
-            </div>
-
-            <div className="helper-muted" style={{ marginTop: 10 }}>
-              Note: Minimal records may be retained only where required for legal compliance and investigations by proper authorities.
             </div>
           </div>
         </div>
