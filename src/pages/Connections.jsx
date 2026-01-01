@@ -1,6 +1,6 @@
 // src/pages/Connections.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useChat } from "../chat/ChatContext";
 
@@ -47,6 +47,7 @@ function StatusPill({ status }) {
 
 export default function Connections() {
   const { openChat } = useChat();
+  const navigate = useNavigate();
 
   const [me, setMe] = useState(null);
   const myId = me?.id || null;
@@ -90,10 +91,20 @@ export default function Connections() {
       }
 
       window.dispatchEvent(
-        new CustomEvent("open-chat", { detail: { partnerId: peerId, partnerName: peerName || "" } })
+        new CustomEvent("open-chat", {
+          detail: { partnerId: peerId, partnerName: peerName || "" },
+        })
       );
     },
     [openChat]
+  );
+
+  const goToPublicProfile = useCallback(
+    (handle) => {
+      if (!handle) return;
+      navigate(`/u/${handle}`, { state: { from: "connections" } });
+    },
+    [navigate]
   );
 
   const loadPage = useCallback(
@@ -139,13 +150,14 @@ export default function Connections() {
         const connIds = rows.map((r) => r.id);
         const otherIds = rows.map((r) => otherIdOf(r, myId)).filter(Boolean);
 
-        // Hydrate peer profiles (stable avatar/name)
+        // Hydrate peer profiles (stable avatar/name + public handle)
         const profMap = new Map();
         if (otherIds.length) {
           const { data: profs, error: profErr } = await supabase
             .from("profiles")
-            .select("user_id, handle, display_name, avatar_url")
+            .select("user_id, handle, display_name, avatar_url, is_public")
             .in("user_id", otherIds);
+
           if (!profErr) {
             for (const p of profs || []) profMap.set(p.user_id, p);
           }
@@ -186,6 +198,7 @@ export default function Connections() {
             otherHandle: prof?.handle || "",
             otherDisplay: prof?.display_name || "",
             otherAvatar: prof?.avatar_url || "",
+            otherIsPublic: !!prof?.is_public,
             lastAt,
             snippet,
           };
@@ -254,7 +267,7 @@ export default function Connections() {
         <div>
           <h1 style={{ fontWeight: 900, marginBottom: 4 }}>Connections</h1>
           <div className="muted" style={{ fontSize: 13 }}>
-            Your recent connections sorted by latest activity. Click a card to open chat.
+            Your recent connections sorted by latest activity. Tap a card to view their public profile.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -315,11 +328,33 @@ export default function Connections() {
           const partnerName =
             it.otherDisplay || (it.otherHandle ? `@${it.otherHandle}` : "");
 
+          const canViewProfile = !!it.otherIsPublic && !!it.otherHandle;
+
+          const handleCardClick = () => {
+            // Main new behavior:
+            // - If public profile exists => go to /u/:handle
+            // - Otherwise fallback to opening chat
+            if (canViewProfile) {
+              goToPublicProfile(it.otherHandle);
+            } else {
+              openChatBubble(it.otherId, partnerName);
+            }
+          };
+
+          const handleCardKey = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleCardClick();
+            }
+          };
+
           return (
-            <button
+            <div
               key={it.id}
-              type="button"
-              onClick={() => openChatBubble(it.otherId, partnerName)}
+              role="button"
+              tabIndex={0}
+              onClick={handleCardClick}
+              onKeyDown={handleCardKey}
               style={{
                 textAlign: "left",
                 display: "grid",
@@ -332,7 +367,7 @@ export default function Connections() {
                 background: "#fff",
                 cursor: "pointer",
               }}
-              aria-label={`Open chat with ${title}`}
+              aria-label={`View profile for ${title}`}
             >
               {avatar ? (
                 <img
@@ -384,6 +419,11 @@ export default function Connections() {
                       • {new Date(it.lastAt).toLocaleDateString()}
                     </span>
                   )}
+                  {canViewProfile ? (
+                    <span title="Public profile available">• Public profile</span>
+                  ) : (
+                    <span title="No public profile">• Private</span>
+                  )}
                 </div>
 
                 {it.snippet && (
@@ -403,10 +443,38 @@ export default function Connections() {
                 )}
               </div>
 
-              <div>
-                <span className="btn btn-primary btn-pill">Open chat</span>
+              <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-pill"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openChatBubble(it.otherId, partnerName);
+                  }}
+                  aria-label={`Open chat with ${title}`}
+                >
+                  Open chat
+                </button>
+
+                {canViewProfile ? (
+                  <button
+                    type="button"
+                    className="btn btn-neutral btn-pill"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goToPublicProfile(it.otherHandle);
+                    }}
+                    aria-label={`View public profile for ${title}`}
+                  >
+                    View profile
+                  </button>
+                ) : (
+                  <span className="muted" style={{ fontSize: 12, paddingRight: 6 }}>
+                    {/* keep empty space subtle */}
+                  </span>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
 
@@ -462,6 +530,7 @@ export default function Connections() {
     </div>
   );
 }
+
 
 
 
