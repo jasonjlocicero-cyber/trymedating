@@ -1,15 +1,20 @@
 // src/pages/PublicProfile.jsx
 import React, { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 
 export default function PublicProfile() {
   const { handle } = useParams()
+  const location = useLocation()
 
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [profile, setProfile] = useState(null)
   const [photos, setPhotos] = useState([])
+
+  // If we navigated here from Connections, show a "Back to connections" button
+  const backTo = location?.state?.from === 'connections' ? '/connections' : '/'
+  const backLabel = location?.state?.from === 'connections' ? 'Back to connections' : 'Back home'
 
   useEffect(() => {
     let mounted = true
@@ -86,8 +91,8 @@ export default function PublicProfile() {
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <h1 style={{ fontWeight: 900, margin: 0 }}>Profile</h1>
-        <Link className="btn btn-neutral btn-pill" to="/">
-          Back home
+        <Link className="btn btn-neutral btn-pill" to={backTo}>
+          {backLabel}
         </Link>
       </div>
 
@@ -179,6 +184,7 @@ export default function PublicProfile() {
     </div>
   )
 }
+
 
 
 
