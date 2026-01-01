@@ -29,6 +29,9 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
+import BuyWristband from "./pages/BuyWristband";
+import PurchaseSuccess from "./pages/PurchaseSuccess";
+import PurchaseCancel from "./pages/PurchaseCancel";
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -285,6 +288,9 @@ export default function App() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/buy" element={<BuyWristband />} />
+            <Route path="/purchase/success" element={<PurchaseSuccess />} />
+            <Route path="/purchase/cancel" element={<PurchaseCancel />} />
 
             {/* Bubble-only: disable dedicated chat routes */}
             <Route path="/chat*" element={<Navigate to="/" replace />} />
