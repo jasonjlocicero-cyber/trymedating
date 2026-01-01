@@ -111,6 +111,17 @@ export default function Header({ me, onSignOut }) {
             Home
           </NavLink>
 
+          <NavLink
+            to="/buy"
+            className="btn btn-accent btn-pill"
+            style={({ isActive }) => ({
+              // keep it “accent” but let active state look intentional
+              boxShadow: isActive ? "0 0 0 4px rgba(244,63,94,0.15)" : undefined,
+            })}
+          >
+            Buy wristband
+          </NavLink>
+
           {me ? (
             <button
               type="button"
@@ -130,6 +141,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
