@@ -188,7 +188,6 @@ function FeatureCard({ title, text, icon }) {
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [unread, setUnread] = useState(0) // (kept; ChatLauncher controls its own badge)
   const { pathname } = useLocation()
 
   // Bubble-only = we never want the dedicated /chat page UI to be reachable.
@@ -296,7 +295,7 @@ export default function App() {
             <Route path="/chat*" element={<Navigate to="/" replace />} />
             <Route path="/chat/:peerId" element={<Navigate to="/" replace />} />
             <Route path="/chat/handle/:handle" element={<Navigate to="/" replace />} />
-            
+
             <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
             <Route path="/admin/reports" element={<AdminReports />} />
             <Route path="/debug-qr" element={<DebugQR />} />
@@ -310,14 +309,7 @@ export default function App() {
       <Footer />
 
       {/* Floating chat launcher (widget). Keep it off /chat routes. */}
-      {showChatLauncher && (
-        <ChatLauncher
-          onUnreadChange={(n) => {
-            // ✅ avoid stale closure bugs
-            setUnread((prev) => (typeof n === 'number' ? n : prev))
-          }}
-        />
-      )}
+      {showChatLauncher && <ChatLauncher />}
     </ChatProvider>
   )
 }
