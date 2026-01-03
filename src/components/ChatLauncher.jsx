@@ -1,5 +1,5 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
@@ -26,7 +26,7 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (the key fix: launcher always above the panel)
+// Layering (launcher always above the panel)
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -72,7 +72,7 @@ class DockErrorBoundary extends React.Component {
   }
 }
 
-export default function ChatLauncher({ disabled = false, onUnreadChange = () => {} }) {
+export default function ChatLauncher({ disabled = false }) {
   const [me, setMe] = useState(null)
 
   const [open, setOpen] = useState(false)
@@ -82,8 +82,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const [loadingList, setLoadingList] = useState(false)
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
-
-  const [unreadLocal, setUnreadLocal] = useState(0)
 
   // New-message toast (shows only when dock is closed)
   const [toast, setToast] = useState(null)
@@ -116,59 +114,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       sub?.subscription?.unsubscribe?.()
     }
   }, [])
-
-  // ------- unread count -------
-  const computeUnread = useCallback(async (userId) => {
-    if (!userId) {
-      setUnreadLocal(0)
-      onUnreadChange(0)
-      return
-    }
-
-    const { count, error } = await supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('recipient', userId)
-      .is('read_at', null)
-
-    if (error) {
-      // don’t leave stale badges around if realtime glitches
-      setUnreadLocal(0)
-      onUnreadChange(0)
-      return
-    }
-
-    const n = typeof count === 'number' ? count : 0
-    setUnreadLocal(n)
-    onUnreadChange(n)
-  }, [onUnreadChange])
-
-  useEffect(() => {
-    computeUnread(me?.id)
-  }, [me?.id, computeUnread])
-
-  // Live bump on my recipient messages only
-  useEffect(() => {
-    if (!me?.id) return
-    const channel = supabase
-      .channel(`messages-unread-${me.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
-        () => computeUnread(me.id)
-      )
-      .subscribe()
-
-    return () => supabase.removeChannel(channel)
-  }, [me?.id, computeUnread])
-
-  // When opening/closing the panel, force a refresh so badge clears even if UPDATE events don’t fire
-  useEffect(() => {
-    if (!me?.id) return
-    if (!open) return
-    const t = setTimeout(() => computeUnread(me.id), 350)
-    return () => clearTimeout(t)
-  }, [open, me?.id, computeUnread])
 
   // Esc to close (desktop)
   useEffect(() => {
@@ -312,7 +257,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
 
   const canChat = !!(me?.id && partnerId)
 
-  // helper for safe-area offsets (works even if CSS var isn’t present)
+  // safe-area offsets
   const bottomCss = `calc(${LAUNCHER_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
   const rightCss = `calc(${RIGHT_GUTTER}px + env(safe-area-inset-right, 0px))`
   const panelBottomCss = `calc(${PANEL_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
@@ -333,7 +278,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         />
       )}
 
-      {/* Floating launcher button (ALWAYS on top) */}
+      {/* Floating launcher button */}
       <button
         type="button"
         disabled={disabled}
@@ -369,29 +314,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         }}
       >
         <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
-
-        {/* Unread badge */}
-        {unreadLocal > 0 && (
-          <span
-            style={{
-              position: 'absolute',
-              transform: 'translate(18px, -18px)',
-              minWidth: 18,
-              height: 18,
-              padding: '0 6px',
-              borderRadius: 999,
-              background: '#dc2626',
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 800,
-              display: 'grid',
-              placeItems: 'center',
-              border: '2px solid #fff'
-            }}
-          >
-            {unreadLocal > 99 ? '99+' : unreadLocal}
-          </span>
-        )}
+        {/* ✅ unread badge intentionally removed */}
       </button>
 
       {/* Inbox picker */}
@@ -542,7 +465,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header (bigger touch targets for mobile) */}
           <div
             style={{
               display: 'flex',
@@ -606,7 +528,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 partnerId={partnerId}
                 partnerName={partnerName}
                 mode="embedded"
-                onRead={() => computeUnread(me?.id)}
               />
             </div>
           </DockErrorBoundary>
@@ -615,6 +536,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     </>
   )
 }
+
 
 
 
