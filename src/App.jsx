@@ -29,9 +29,9 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
-import BuyWristband from "./pages/BuyWristband";
-import PurchaseSuccess from "./pages/PurchaseSuccess";
-import PurchaseCancel from "./pages/PurchaseCancel";
+import BuyWristband from './pages/BuyWristband'
+import PurchaseSuccess from './pages/PurchaseSuccess'
+import PurchaseCancel from './pages/PurchaseCancel'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
@@ -85,15 +85,25 @@ function Home({ me }) {
           >
             {!authed ? (
               <>
-                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
-                <a className="btn btn-accent btn-pill" href="#how-it-works">How it works</a>
+                <Link className="btn btn-primary btn-pill" to="/auth">
+                  Sign in / Sign up
+                </Link>
+                <a className="btn btn-accent btn-pill" href="#how-it-works">
+                  How it works
+                </a>
                 <InstallPWAButton />
               </>
             ) : (
               <>
-                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
-                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
+                <Link className="btn btn-primary btn-pill" to="/profile">
+                  Go to Profile
+                </Link>
+                <Link className="btn btn-accent btn-pill" to="/connections">
+                  Connections
+                </Link>
+                <Link className="btn btn-accent btn-pill" to="/invite">
+                  My Invite QR
+                </Link>
                 <InstallPWAButton />
               </>
             )}
@@ -164,23 +174,37 @@ function Home({ me }) {
 
 function FeatureCard({ title, text, icon }) {
   return (
-    <div className="card" style={{
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-      padding: 16,
-      background: '#fff',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-    }}>
+    <div
+      className="card"
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        padding: 16,
+        background: '#fff',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
-          background: '#f8fafc', border: '1px solid var(--border)', fontSize: 16
-        }} aria-hidden>
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            display: 'grid',
+            placeItems: 'center',
+            background: '#f8fafc',
+            border: '1px solid var(--border)',
+            fontSize: 16
+          }}
+          aria-hidden
+        >
           <span>{icon}</span>
         </div>
         <div style={{ fontWeight: 800 }}>{title}</div>
       </div>
-      <div className="muted" style={{ lineHeight: 1.55 }}>{text}</div>
+      <div className="muted" style={{ lineHeight: 1.55 }}>
+        {text}
+      </div>
     </div>
   )
 }
@@ -190,14 +214,13 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true)
   const { pathname } = useLocation()
 
-  // Bubble-only = we never want the dedicated /chat page UI to be reachable.
-  // Launcher can still hide on those paths just in case someone types them.
+  // Bubble-only: keep launcher off /chat paths
   const showChatLauncher = !pathname.startsWith('/chat')
 
-  // ✅ Electron deep links: tryme://connect?token=... etc
+  // Electron deep links
   useDesktopDeepLinks()
 
-  // --- URL query deep-link handler: supports ?deeplink=tryme://... (optional/testing) ---
+  // Optional URL query deep-link handler
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search)
@@ -207,8 +230,6 @@ export default function App() {
       const url = new URL(dl)
       if (url.protocol !== 'tryme:') return
 
-      // Bubble-only: do NOT route to /chat. Instead, route to home.
-      // (Connect flow still works; it triggers the chat bubble via openChatWith.)
       let next = '/'
       switch (url.host) {
         case 'chat':
@@ -232,7 +253,7 @@ export default function App() {
     }
   }, [])
 
-  // --- Auth bootstrap ---
+  // Auth bootstrap
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -308,7 +329,6 @@ export default function App() {
       <InstallNudgeMobile />
       <Footer />
 
-      {/* Floating chat launcher (widget). Keep it off /chat routes. */}
       {showChatLauncher && <ChatLauncher />}
     </ChatProvider>
   )
