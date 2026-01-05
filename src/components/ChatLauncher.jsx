@@ -10,6 +10,7 @@ async function fetchProfileName(userId) {
     .from('profiles')
     .select('display_name, handle, user_id')
     .eq('user_id', userId)
+    .limit(1)
     .maybeSingle()
   if (error || !data) return ''
   return data.display_name || (data.handle ? `@${data.handle}` : '')
@@ -26,7 +27,7 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (launcher always above the panel)
+// Layering
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -59,9 +60,7 @@ class DockErrorBoundary extends React.Component {
           }}
         >
           <div style={{ fontWeight: 900 }}>Chat failed to load</div>
-          <div className="muted">
-            A component crashed while opening chat. Check console for details.
-          </div>
+          <div className="muted">A component crashed while opening chat. Check console for details.</div>
           <button className="btn btn-neutral" onClick={this.props.onClose}>
             Close
           </button>
@@ -102,7 +101,9 @@ export default function ChatLauncher({ disabled = false }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
       if (!alive) return
       setMe(user || null)
     })()
@@ -173,7 +174,9 @@ export default function ChatLauncher({ disabled = false }) {
       if (!cancel) setPartnerName(n || '')
     }
     hydrateName()
-    return () => { cancel = true }
+    return () => {
+      cancel = true
+    }
   }, [partnerId, partnerName])
 
   // ------- recent list when open -------
@@ -229,7 +232,9 @@ export default function ChatLauncher({ disabled = false }) {
       }
     }
     loadRecent()
-    return () => { cancel = true }
+    return () => {
+      cancel = true
+    }
   }, [open, me?.id, partnerId])
 
   // ------- new-message toast when dock is closed -------
@@ -246,7 +251,7 @@ export default function ChatLauncher({ disabled = false }) {
           setToast({
             fromId: m.sender,
             fromName: name || 'New message',
-            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
+            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : m.body || 'Message'
           })
         }
       )
@@ -314,7 +319,6 @@ export default function ChatLauncher({ disabled = false }) {
         }}
       >
         <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
-        {/* ✅ unread badge intentionally removed */}
       </button>
 
       {/* Inbox picker */}
@@ -359,7 +363,9 @@ export default function ChatLauncher({ disabled = false }) {
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom: 8 }}>Pick a recent chat:</div>
+              <div className="helper-muted" style={{ marginBottom: 8 }}>
+                Pick a recent chat:
+              </div>
               {err && <div className="helper-error" style={{ marginBottom: 8 }}>{err}</div>}
               {loadingList && <div className="muted">Loading…</div>}
               {!loadingList && recent.length === 0 && (
@@ -439,7 +445,9 @@ export default function ChatLauncher({ disabled = false }) {
             >
               Open
             </button>
-            <button className="btn btn-neutral" onClick={() => setToast(null)}>Dismiss</button>
+            <button className="btn btn-neutral" onClick={() => setToast(null)}>
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -465,6 +473,7 @@ export default function ChatLauncher({ disabled = false }) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -524,11 +533,7 @@ export default function ChatLauncher({ disabled = false }) {
 
           <DockErrorBoundary onClose={closeAll}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <ChatDock
-                partnerId={partnerId}
-                partnerName={partnerName}
-                mode="embedded"
-              />
+              <ChatDock partnerId={partnerId} partnerName={partnerName} mode="embedded" />
             </div>
           </DockErrorBoundary>
         </div>
@@ -536,6 +541,7 @@ export default function ChatLauncher({ disabled = false }) {
     </>
   )
 }
+
 
 
 
