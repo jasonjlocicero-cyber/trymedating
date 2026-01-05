@@ -28,13 +28,6 @@ export default function ProfilePage() {
     avatar_url: ''
   })
 
-  // Delete account UI state
-  const [showDelete, setShowDelete] = useState(false)
-  const [deleteText, setDeleteText] = useState('')
-  const [deleteChecked, setDeleteChecked] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [deleteErr, setDeleteErr] = useState('')
-
   // Load auth user
   useEffect(() => {
     let mounted = true
@@ -49,7 +42,7 @@ export default function ProfilePage() {
     }
   }, [])
 
-  // Ensure we have a profile row
+  // Ensure we have a profile row (and don’t crash if duplicates exist)
   useEffect(() => {
     if (!me?.id) return
     let mounted = true
@@ -59,11 +52,12 @@ export default function ProfilePage() {
       setErr('')
       setMsg('')
       try {
-        // 1) Try to fetch existing
+        // 1) Try to fetch existing (SAFE: limit(1) so maybeSingle can’t error on duplicates)
         const { data: existing, error: selErr } = await supabase
           .from('profiles')
           .select('handle, display_name, bio, is_public, avatar_url')
           .eq('user_id', me.id)
+          .limit(1)
           .maybeSingle()
 
         if (selErr) throw selErr
@@ -92,10 +86,9 @@ export default function ProfilePage() {
             .from('profiles')
             .insert(toInsert)
             .select('handle, display_name, bio, is_public, avatar_url')
-            .single()
 
-          if (!insErr) {
-            if (mounted) setProfile(created)
+          if (!insErr && created?.length) {
+            if (mounted) setProfile(created[0])
             break
           }
 
@@ -141,15 +134,16 @@ export default function ProfilePage() {
         avatar_url: profile.avatar_url || null
       }
 
+      // ✅ Avoid .single() (it throws if duplicates exist)
       const { data, error } = await supabase
         .from('profiles')
         .update(payload)
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
-        .single()
 
       if (error) throw error
-      setProfile(data)
+
+      if (data?.length) setProfile(data[0])
       setMsg('Saved!')
     } catch (e) {
       setErr(e.message || 'Failed to save')
@@ -166,13 +160,17 @@ export default function ProfilePage() {
       setErr('')
       setMsg('')
 
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const ext = file.name?.split('.').pop()?.toLowerCase() || 'jpg'
       const path = `${me.id}/${Date.now()}.${ext}`
+
+      const contentType =
+        file.type ||
+        (ext === 'heic' ? 'image/heic' : ext === 'png' ? 'image/png' : 'image/jpeg')
 
       // ensure bucket "avatars" exists in your project
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
-        contentType: file.type || 'image/jpeg'
+        contentType
       })
       if (upErr) throw upErr
 
@@ -184,16 +182,16 @@ export default function ProfilePage() {
         .update({ avatar_url: url })
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
-        .single()
 
       if (error) throw error
-      setProfile(data)
+
+      if (data?.length) setProfile(data[0])
       setMsg('Photo updated!')
     } catch (e) {
       setErr(e.message || 'Upload failed')
     } finally {
       setUploading(false)
-      ev.target.value = ''
+      if (ev?.target) ev.target.value = ''
     }
   }
 
@@ -209,42 +207,15 @@ export default function ProfilePage() {
         .update({ avatar_url: null })
         .eq('user_id', me.id)
         .select('handle, display_name, bio, is_public, avatar_url')
-        .single()
 
       if (error) throw error
-      setProfile(data)
+
+      if (data?.length) setProfile(data[0])
       setMsg('Photo removed.')
     } catch (e) {
       setErr(e.message || 'Failed to remove photo')
     } finally {
       setUploading(false)
-    }
-  }
-
-  async function doDeleteAccount() {
-    setDeleteErr('')
-    if (deleteText.trim().toUpperCase() !== 'DELETE') {
-      setDeleteErr('Type DELETE to confirm.')
-      return
-    }
-    if (!deleteChecked) {
-      setDeleteErr('Please check the confirmation box.')
-      return
-    }
-
-    setDeleting(true)
-    try {
-      // Calls the SECURITY DEFINER RPC you added in Supabase SQL
-      const { error } = await supabase.rpc('tmd_delete_account')
-      if (error) throw error
-
-      // Session may still exist client-side; sign out + go home
-      await supabase.auth.signOut()
-      window.location.assign('/')
-    } catch (e) {
-      setDeleteErr(e.message || 'Failed to delete account.')
-    } finally {
-      setDeleting(false)
     }
   }
 
@@ -267,19 +238,34 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="container profile-page" style={{ padding: '28px 0', maxWidth: 920 }}>
+    <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Keep it simple. Your handle is public; toggle visibility anytime.
       </p>
 
-      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
-      {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
+      {err && (
+        <div className="helper-error" style={{ marginBottom: 12 }}>
+          {err}
+        </div>
+      )}
+      {msg && (
+        <div className="helper-success" style={{ marginBottom: 12 }}>
+          {msg}
+        </div>
+      )}
 
-      <div className="profile-grid">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '180px 1fr',
+          gap: 18,
+          alignItems: 'start'
+        }}
+      >
         {/* Avatar column */}
-        <div className="profile-avatar-col">
-          <div className="avatar-frame profile-avatar-frame">
+        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
+          <div className="avatar-frame" style={{ width: 140, height: 140 }}>
             {profile.avatar_url ? (
               <img
                 src={profile.avatar_url}
@@ -293,7 +279,7 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div className="profile-avatar-actions">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
             <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
               {uploading ? 'Uploading…' : 'Upload photo'}
               <input
@@ -319,7 +305,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Right-side form */}
-        <form onSubmit={saveProfile} className="profile-form-grid">
+        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
           <label className="form-label">
             Handle
             <input
@@ -355,7 +341,7 @@ export default function ProfilePage() {
             />
           </label>
 
-          <label className="form-label profile-public-row">
+          <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
               checked={!!profile.is_public}
@@ -372,94 +358,10 @@ export default function ProfilePage() {
         </form>
       </div>
 
-      {/* ✅ Multi-photo manager lives on the profile page */}
+      {/* Multi-photo manager */}
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
-
-      {/* ✅ Danger zone */}
-      <div className="danger-zone" style={{ marginTop: 22 }}>
-        <div>
-          <div className="danger-zone__title">Danger zone</div>
-          <div className="danger-zone__text">
-            Deleting your account permanently removes your profile, photos, connections, and messages.
-            (Some records may be retained where legally required for investigations.)
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className="btn btn-danger btn-pill"
-          onClick={() => {
-            setShowDelete(true)
-            setDeleteErr('')
-            setDeleteText('')
-            setDeleteChecked(false)
-          }}
-        >
-          Delete account
-        </button>
-      </div>
-
-      {/* Delete modal */}
-      {showDelete && (
-        <div
-          className="modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Delete account"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !deleting) setShowDelete(false)
-          }}
-        >
-          <div className="modal-card">
-            <div className="modal-title">Delete account</div>
-            <div className="modal-body">
-              This action is permanent. Type <b>DELETE</b> to confirm.
-            </div>
-
-            <input
-              className="input"
-              value={deleteText}
-              onChange={(e) => setDeleteText(e.target.value)}
-              placeholder="Type DELETE"
-              disabled={deleting}
-            />
-
-            <label className="modal-check">
-              <input
-                type="checkbox"
-                checked={deleteChecked}
-                onChange={(e) => setDeleteChecked(e.target.checked)}
-                disabled={deleting}
-              />
-              I understand this cannot be undone.
-            </label>
-
-            {deleteErr && <div className="helper-error" style={{ marginTop: 8 }}>{deleteErr}</div>}
-
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="btn btn-neutral btn-pill"
-                onClick={() => setShowDelete(false)}
-                disabled={deleting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-danger btn-pill"
-                onClick={doDeleteAccount}
-                disabled={deleting}
-                title="Permanently delete your account"
-              >
-                {deleting ? 'Deleting…' : 'Yes, delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
