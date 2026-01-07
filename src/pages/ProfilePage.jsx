@@ -14,60 +14,46 @@ function sanitizeHandle(s) {
   return base || 'user'
 }
 
-// Hard rule: never rely on `.single()`.
-// Always ensure a row exists, then re-fetch with maybeSingle().
+async function fetchMyProfile(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) throw error
+  return data || null
+}
+
+// Guarantee a row exists (never use .single()).
+// IMPORTANT: default new users to PRIVATE so we don’t violate public_requires_avatar.
 async function ensureProfileRow(me) {
   if (!me?.id) return null
 
-  // 1) Try fetch
-  const { data: existing, error: selErr } = await supabase
-    .from('profiles')
-    .select(PROFILE_SELECT)
-    .eq('user_id', me.id)
-    .maybeSingle()
-
-  if (selErr) throw selErr
+  const existing = await fetchMyProfile(me.id)
   if (existing) return existing
 
-  // 2) If missing, create one (handle must be unique)
   const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
 
   for (let attempt = 0; attempt <= 30; attempt += 1) {
     const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
+
     const toInsert = {
       user_id: me.id,
       handle: candidate,
       display_name: me.user_metadata?.full_name || candidate,
-      is_public: true,
+      // ✅ start private until avatar exists (constraint: public_requires_avatar)
+      is_public: false,
       bio: '',
       avatar_url: null
     }
 
     const { error: insErr } = await supabase.from('profiles').insert(toInsert)
-
     if (!insErr) {
-      // Re-fetch safely
-      const { data: created, error: refErr } = await supabase
-        .from('profiles')
-        .select(PROFILE_SELECT)
-        .eq('user_id', me.id)
-        .maybeSingle()
-
-      if (refErr) throw refErr
-      if (created) return created
-
-      // Extremely rare: insert ok but read blocked by RLS/replication delay
-      // Try one more fetch:
-      const { data: created2 } = await supabase
-        .from('profiles')
-        .select(PROFILE_SELECT)
-        .eq('user_id', me.id)
-        .maybeSingle()
-
-      return created2 || null
+      const created = await fetchMyProfile(me.id)
+      return created
     }
 
-    // Handle collisions
+    // Unique conflict (handle/user_id/etc)
     if (insErr?.code === '23505') continue
 
     throw insErr
@@ -89,7 +75,7 @@ export default function ProfilePage() {
     handle: '',
     display_name: '',
     bio: '',
-    is_public: true,
+    is_public: false,
     avatar_url: ''
   })
 
@@ -103,7 +89,7 @@ export default function ProfilePage() {
     return () => { mounted = false }
   }, [])
 
-  // Ensure profile row exists + load it
+  // Ensure we have a profile row
   useEffect(() => {
     if (!me?.id) return
     let mounted = true
@@ -112,7 +98,6 @@ export default function ProfilePage() {
       setLoading(true)
       setErr('')
       setMsg('')
-
       try {
         const row = await ensureProfileRow(me)
         if (!mounted) return
@@ -135,21 +120,24 @@ export default function ProfilePage() {
     return () => { mounted = false }
   }, [me?.id])
 
-  const canSave = useMemo(
-    () => !!me?.id && !!profile.handle?.trim() && !saving,
-    [me?.id, profile.handle, saving]
-  )
+  const canSave = useMemo(() => {
+    if (!me?.id) return false
+    if (!profile.handle?.trim()) return false
+    if (saving) return false
+    // ✅ enforce your DB rule client-side too
+    if (profile.is_public && !profile.avatar_url) return false
+    return true
+  }, [me?.id, profile.handle, profile.is_public, profile.avatar_url, saving])
 
   async function saveProfile(e) {
     e?.preventDefault?.()
-    if (!canSave) return
+    if (!me?.id) return
 
     setSaving(true)
     setErr('')
     setMsg('')
 
     try {
-      // Guarantee row exists before update
       await ensureProfileRow(me)
 
       const payload = {
@@ -160,21 +148,14 @@ export default function ProfilePage() {
         avatar_url: profile.avatar_url || null
       }
 
-      const { error: upErr } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('user_id', me.id)
+      if (payload.is_public && !payload.avatar_url) {
+        throw new Error('Upload a profile photo before making your profile public.')
+      }
 
+      const { error: upErr } = await supabase.from('profiles').update(payload).eq('user_id', me.id)
       if (upErr) throw upErr
 
-      // Re-fetch safely
-      const { data: fresh, error: refErr } = await supabase
-        .from('profiles')
-        .select(PROFILE_SELECT)
-        .eq('user_id', me.id)
-        .maybeSingle()
-
-      if (refErr) throw refErr
+      const fresh = await fetchMyProfile(me.id)
       if (fresh) {
         setProfile({
           handle: fresh.handle || '',
@@ -202,7 +183,6 @@ export default function ProfilePage() {
       setErr('')
       setMsg('')
 
-      // Guarantee row exists BEFORE upload/update
       await ensureProfileRow(me)
 
       const extFromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
@@ -232,14 +212,7 @@ export default function ProfilePage() {
 
       if (dbErr) throw dbErr
 
-      // Re-fetch
-      const { data: fresh, error: refErr } = await supabase
-        .from('profiles')
-        .select(PROFILE_SELECT)
-        .eq('user_id', me.id)
-        .maybeSingle()
-
-      if (refErr) throw refErr
+      const fresh = await fetchMyProfile(me.id)
       if (fresh) {
         setProfile({
           handle: fresh.handle || '',
@@ -269,20 +242,15 @@ export default function ProfilePage() {
 
       await ensureProfileRow(me)
 
-      const { error: dbErr } = await supabase
-        .from('profiles')
-        .update({ avatar_url: null })
-        .eq('user_id', me.id)
+      // ✅ if public_requires_avatar exists, removing the avatar must make them private
+      const updates = profile.is_public
+        ? { avatar_url: null, is_public: false }
+        : { avatar_url: null }
 
+      const { error: dbErr } = await supabase.from('profiles').update(updates).eq('user_id', me.id)
       if (dbErr) throw dbErr
 
-      const { data: fresh, error: refErr } = await supabase
-        .from('profiles')
-        .select(PROFILE_SELECT)
-        .eq('user_id', me.id)
-        .maybeSingle()
-
-      if (refErr) throw refErr
+      const fresh = await fetchMyProfile(me.id)
       if (fresh) {
         setProfile({
           handle: fresh.handle || '',
@@ -293,7 +261,7 @@ export default function ProfilePage() {
         })
       }
 
-      setMsg('Photo removed.')
+      setMsg(profile.is_public ? 'Photo removed. Your profile is now private.' : 'Photo removed.')
     } catch (e) {
       setErr(e?.message || 'Failed to remove photo')
     } finally {
@@ -323,7 +291,7 @@ export default function ProfilePage() {
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
-        Keep it simple. Your handle is public; toggle visibility anytime.
+        Upload a photo first if you want your profile to be public.
       </p>
 
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
@@ -419,10 +387,24 @@ export default function ProfilePage() {
             <input
               type="checkbox"
               checked={!!profile.is_public}
-              onChange={(e) => setProfile((p) => ({ ...p, is_public: e.target.checked }))}
+              onChange={(e) => {
+                const next = e.target.checked
+                if (next && !profile.avatar_url) {
+                  setErr('Upload a profile photo before making your profile public.')
+                  setProfile((p) => ({ ...p, is_public: false }))
+                  return
+                }
+                setProfile((p) => ({ ...p, is_public: next }))
+              }}
             />
             Public profile
           </label>
+
+          {!profile.avatar_url && (
+            <div className="helper-muted" style={{ fontSize: 12 }}>
+              Public profiles require a profile photo.
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
