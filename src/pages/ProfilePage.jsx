@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ProfilePhotosManager from '../components/ProfilePhotosManager'
 
+const PROFILE_SELECT = 'user_id, handle, display_name, bio, is_public, avatar_url'
+
 function sanitizeHandle(s) {
   const base = (s || '')
     .toLowerCase()
@@ -10,6 +12,68 @@ function sanitizeHandle(s) {
     .slice(0, 24)
     .replace(/^_+|_+$/g, '')
   return base || 'user'
+}
+
+// Hard rule: never rely on `.single()`.
+// Always ensure a row exists, then re-fetch with maybeSingle().
+async function ensureProfileRow(me) {
+  if (!me?.id) return null
+
+  // 1) Try fetch
+  const { data: existing, error: selErr } = await supabase
+    .from('profiles')
+    .select(PROFILE_SELECT)
+    .eq('user_id', me.id)
+    .maybeSingle()
+
+  if (selErr) throw selErr
+  if (existing) return existing
+
+  // 2) If missing, create one (handle must be unique)
+  const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
+
+  for (let attempt = 0; attempt <= 30; attempt += 1) {
+    const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
+    const toInsert = {
+      user_id: me.id,
+      handle: candidate,
+      display_name: me.user_metadata?.full_name || candidate,
+      is_public: true,
+      bio: '',
+      avatar_url: null
+    }
+
+    const { error: insErr } = await supabase.from('profiles').insert(toInsert)
+
+    if (!insErr) {
+      // Re-fetch safely
+      const { data: created, error: refErr } = await supabase
+        .from('profiles')
+        .select(PROFILE_SELECT)
+        .eq('user_id', me.id)
+        .maybeSingle()
+
+      if (refErr) throw refErr
+      if (created) return created
+
+      // Extremely rare: insert ok but read blocked by RLS/replication delay
+      // Try one more fetch:
+      const { data: created2 } = await supabase
+        .from('profiles')
+        .select(PROFILE_SELECT)
+        .eq('user_id', me.id)
+        .maybeSingle()
+
+      return created2 || null
+    }
+
+    // Handle collisions
+    if (insErr?.code === '23505') continue
+
+    throw insErr
+  }
+
+  throw new Error('Could not generate a unique handle.')
 }
 
 export default function ProfilePage() {
@@ -20,6 +84,7 @@ export default function ProfilePage() {
 
   const [me, setMe] = useState(null)
   const [uploading, setUploading] = useState(false)
+
   const [profile, setProfile] = useState({
     handle: '',
     display_name: '',
@@ -32,103 +97,42 @@ export default function ProfilePage() {
   useEffect(() => {
     let mounted = true
     ;(async () => {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (mounted) setMe(user || null)
     })()
-    return () => {
-      mounted = false
-    }
+    return () => { mounted = false }
   }, [])
 
-  // Ensure we have a profile row
+  // Ensure profile row exists + load it
   useEffect(() => {
     if (!me?.id) return
     let mounted = true
 
-    async function ensureProfile() {
+    ;(async () => {
       setLoading(true)
       setErr('')
       setMsg('')
+
       try {
-        // 1) Try to fetch existing (limit(1) prevents "single JSON object" crashes)
-        const { data: existing, error: selErr } = await supabase
-          .from('profiles')
-          .select('handle, display_name, bio, is_public, avatar_url')
-          .eq('user_id', me.id)
-          .limit(1)
-          .maybeSingle()
-
-        if (selErr) throw selErr
-
-        if (existing) {
-          if (mounted) setProfile(existing)
-          return
-        }
-
-        // 2) Auto-provision if missing
-        const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
-        let attempt = 0
-
-        while (true) {
-          const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
-          const toInsert = {
-            user_id: me.id,
-            handle: candidate,
-            display_name: me.user_metadata?.full_name || candidate,
-            is_public: true,
-            bio: '',
-            avatar_url: ''
-          }
-
-          // IMPORTANT: do NOT use .single() here (it crashes if backend returns array)
-          const { data: createdArr, error: insErr } = await supabase
-            .from('profiles')
-            .insert(toInsert)
-            .select('handle, display_name, bio, is_public, avatar_url')
-
-          if (!insErr) {
-            const created = Array.isArray(createdArr) ? createdArr[0] : createdArr
-            if (created && mounted) setProfile(created)
-            break
-          }
-
-          // Unique violation: could be handle or (after we add it) user_id unique
-          if (insErr?.code === '23505') {
-            // If user_id is already there (race condition), just fetch and use it
-            const msgText = String(insErr?.message || insErr?.details || '')
-            if (msgText.includes('profiles_user_id_key')) {
-              const { data: existing2, error: selErr2 } = await supabase
-                .from('profiles')
-                .select('handle, display_name, bio, is_public, avatar_url')
-                .eq('user_id', me.id)
-                .limit(1)
-                .maybeSingle()
-              if (selErr2) throw selErr2
-              if (existing2 && mounted) setProfile(existing2)
-              break
-            }
-
-            // Otherwise assume handle conflict and try another
-            attempt += 1
-            if (attempt > 30) throw new Error('Could not generate a unique handle.')
-            continue
-          }
-
-          throw insErr
+        const row = await ensureProfileRow(me)
+        if (!mounted) return
+        if (row) {
+          setProfile({
+            handle: row.handle || '',
+            display_name: row.display_name || '',
+            bio: row.bio || '',
+            is_public: !!row.is_public,
+            avatar_url: row.avatar_url || ''
+          })
         }
       } catch (e) {
-        if (mounted) setErr(e.message || 'Failed to load profile')
+        if (mounted) setErr(e?.message || 'Failed to load profile')
       } finally {
         if (mounted) setLoading(false)
       }
-    }
+    })()
 
-    ensureProfile()
-    return () => {
-      mounted = false
-    }
+    return () => { mounted = false }
   }, [me?.id])
 
   const canSave = useMemo(
@@ -139,11 +143,15 @@ export default function ProfilePage() {
   async function saveProfile(e) {
     e?.preventDefault?.()
     if (!canSave) return
+
     setSaving(true)
     setErr('')
     setMsg('')
 
     try {
+      // Guarantee row exists before update
+      await ensureProfileRow(me)
+
       const payload = {
         handle: profile.handle.trim(),
         display_name: (profile.display_name || '').trim(),
@@ -152,21 +160,34 @@ export default function ProfilePage() {
         avatar_url: profile.avatar_url || null
       }
 
-      // DON'T use .single() (can crash if duplicates exist)
-      const { data: rows, error } = await supabase
+      const { error: upErr } = await supabase
         .from('profiles')
         .update(payload)
         .eq('user_id', me.id)
-        .select('handle, display_name, bio, is_public, avatar_url')
 
-      if (error) throw error
+      if (upErr) throw upErr
 
-      const row = Array.isArray(rows) ? rows[0] : rows
-      if (!row) throw new Error('No profile row found to update.')
-      setProfile(row)
+      // Re-fetch safely
+      const { data: fresh, error: refErr } = await supabase
+        .from('profiles')
+        .select(PROFILE_SELECT)
+        .eq('user_id', me.id)
+        .maybeSingle()
+
+      if (refErr) throw refErr
+      if (fresh) {
+        setProfile({
+          handle: fresh.handle || '',
+          display_name: fresh.display_name || '',
+          bio: fresh.bio || '',
+          is_public: !!fresh.is_public,
+          avatar_url: fresh.avatar_url || ''
+        })
+      }
+
       setMsg('Saved!')
-    } catch (e) {
-      setErr(e.message || 'Failed to save')
+    } catch (e2) {
+      setErr(e2?.message || 'Failed to save')
     } finally {
       setSaving(false)
     }
@@ -174,16 +195,26 @@ export default function ProfilePage() {
 
   async function handleUploadAvatar(ev) {
     try {
-      const file = ev?.target?.files?.[0]
+      const file = ev.target.files?.[0]
       if (!file || !me?.id) return
+
       setUploading(true)
       setErr('')
       setMsg('')
 
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      // Guarantee row exists BEFORE upload/update
+      await ensureProfileRow(me)
+
+      const extFromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
+      const ext =
+        extFromName ||
+        (file.type === 'image/png' ? 'png' : '') ||
+        (file.type === 'image/webp' ? 'webp' : '') ||
+        (file.type === 'image/heic' ? 'heic' : '') ||
+        'jpg'
+
       const path = `${me.id}/${Date.now()}.${ext}`
 
-      // ensure bucket "avatars" exists in your project
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
         contentType: file.type || 'image/jpeg'
@@ -192,50 +223,79 @@ export default function ProfilePage() {
 
       const { data: pub } = await supabase.storage.from('avatars').getPublicUrl(path)
       const url = pub?.publicUrl || ''
+      if (!url) throw new Error('Upload succeeded, but could not get avatar URL.')
 
-      // DON'T use .single() here
-      const { data: rows, error } = await supabase
+      const { error: dbErr } = await supabase
         .from('profiles')
         .update({ avatar_url: url })
         .eq('user_id', me.id)
-        .select('handle, display_name, bio, is_public, avatar_url')
 
-      if (error) throw error
+      if (dbErr) throw dbErr
 
-      const row = Array.isArray(rows) ? rows[0] : rows
-      if (!row) throw new Error('No profile row found to update avatar.')
-      setProfile(row)
+      // Re-fetch
+      const { data: fresh, error: refErr } = await supabase
+        .from('profiles')
+        .select(PROFILE_SELECT)
+        .eq('user_id', me.id)
+        .maybeSingle()
+
+      if (refErr) throw refErr
+      if (fresh) {
+        setProfile({
+          handle: fresh.handle || '',
+          display_name: fresh.display_name || '',
+          bio: fresh.bio || '',
+          is_public: !!fresh.is_public,
+          avatar_url: fresh.avatar_url || ''
+        })
+      }
+
       setMsg('Photo updated!')
     } catch (e) {
-      setErr(e.message || 'Upload failed')
+      setErr(e?.message || 'Upload failed')
     } finally {
       setUploading(false)
-      if (ev?.target) ev.target.value = ''
+      ev.target.value = ''
     }
   }
 
   async function handleRemoveAvatar() {
     try {
       if (!me?.id) return
+
       setUploading(true)
       setErr('')
       setMsg('')
 
-      // DON'T use .single() here
-      const { data: rows, error } = await supabase
+      await ensureProfileRow(me)
+
+      const { error: dbErr } = await supabase
         .from('profiles')
         .update({ avatar_url: null })
         .eq('user_id', me.id)
-        .select('handle, display_name, bio, is_public, avatar_url')
 
-      if (error) throw error
+      if (dbErr) throw dbErr
 
-      const row = Array.isArray(rows) ? rows[0] : rows
-      if (!row) throw new Error('No profile row found to remove avatar.')
-      setProfile(row)
+      const { data: fresh, error: refErr } = await supabase
+        .from('profiles')
+        .select(PROFILE_SELECT)
+        .eq('user_id', me.id)
+        .maybeSingle()
+
+      if (refErr) throw refErr
+      if (fresh) {
+        setProfile({
+          handle: fresh.handle || '',
+          display_name: fresh.display_name || '',
+          bio: fresh.bio || '',
+          is_public: !!fresh.is_public,
+          avatar_url: fresh.avatar_url || ''
+        })
+      }
+
       setMsg('Photo removed.')
     } catch (e) {
-      setErr(e.message || 'Failed to remove photo')
+      setErr(e?.message || 'Failed to remove photo')
     } finally {
       setUploading(false)
     }
@@ -372,13 +432,14 @@ export default function ProfilePage() {
         </form>
       </div>
 
-      {/* ✅ Multi-photo manager lives on the profile page */}
+      {/* Multi-photo manager */}
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
     </div>
   )
 }
+
 
 
 
