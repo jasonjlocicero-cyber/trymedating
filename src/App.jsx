@@ -88,6 +88,12 @@ function Home({ me }) {
                 <Link className="btn btn-primary btn-pill" to="/auth">
                   Sign in / Sign up
                 </Link>
+
+                {/* ✅ Buy button available even when logged out */}
+                <Link className="btn btn-accent btn-pill" to="/buy">
+                  Buy wristband
+                </Link>
+
                 <a className="btn btn-accent btn-pill" href="#how-it-works">
                   How it works
                 </a>
@@ -98,6 +104,12 @@ function Home({ me }) {
                 <Link className="btn btn-primary btn-pill" to="/profile">
                   Go to Profile
                 </Link>
+
+                {/* ✅ Placed right next to Go to Profile */}
+                <Link className="btn btn-accent btn-pill" to="/buy">
+                  Buy wristband
+                </Link>
+
                 <Link className="btn btn-accent btn-pill" to="/connections">
                   Connections
                 </Link>
@@ -212,15 +224,17 @@ function FeatureCard({ title, text, icon }) {
 export default function App() {
   const [me, setMe] = useState(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
+  const [unread, setUnread] = useState(0) // (kept; ChatLauncher controls its own badge)
   const { pathname } = useLocation()
 
-  // Bubble-only: keep launcher off /chat paths
+  // Bubble-only = we never want the dedicated /chat page UI to be reachable.
+  // Launcher can still hide on those paths just in case someone types them.
   const showChatLauncher = !pathname.startsWith('/chat')
 
-  // Electron deep links
+  // ✅ Electron deep links: tryme://connect?token=... etc
   useDesktopDeepLinks()
 
-  // Optional URL query deep-link handler
+  // --- URL query deep-link handler: supports ?deeplink=tryme://... (optional/testing) ---
   useEffect(() => {
     try {
       const sp = new URLSearchParams(window.location.search)
@@ -230,6 +244,8 @@ export default function App() {
       const url = new URL(dl)
       if (url.protocol !== 'tryme:') return
 
+      // Bubble-only: do NOT route to /chat. Instead, route to home.
+      // (Connect flow still works; it triggers the chat bubble via openChatWith.)
       let next = '/'
       switch (url.host) {
         case 'chat':
@@ -253,7 +269,7 @@ export default function App() {
     }
   }, [])
 
-  // Auth bootstrap
+  // --- Auth bootstrap ---
   useEffect(() => {
     let alive = true
     const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
@@ -308,6 +324,7 @@ export default function App() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+
             <Route path="/buy" element={<BuyWristband />} />
             <Route path="/purchase/success" element={<PurchaseSuccess />} />
             <Route path="/purchase/cancel" element={<PurchaseCancel />} />
@@ -329,7 +346,15 @@ export default function App() {
       <InstallNudgeMobile />
       <Footer />
 
-      {showChatLauncher && <ChatLauncher />}
+      {/* Floating chat launcher (widget). Keep it off /chat routes. */}
+      {showChatLauncher && (
+        <ChatLauncher
+          onUnreadChange={(n) => {
+            // ✅ avoid stale closure bugs
+            setUnread((prev) => (typeof n === 'number' ? n : prev))
+          }}
+        />
+      )}
     </ChatProvider>
   )
 }
