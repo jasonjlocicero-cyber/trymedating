@@ -6,8 +6,7 @@ export default function Footer({ me }) {
   const authed = !!me?.id;
   const { pathname } = useLocation();
 
-  // Optional: hide footer on auth screen if you want a cleaner auth page
-  // (you can remove this if you want the footer everywhere)
+  // Optional: hide footer on auth screen (remove if you want it everywhere)
   const hideOnAuth = pathname.startsWith("/auth");
   if (hideOnAuth) return null;
 
@@ -37,20 +36,24 @@ export default function Footer({ me }) {
           padding: "10px 0",
         }}
       >
-        <Link to="/terms" className="btn btn-neutral btn-pill">
+        {/* Teal */}
+        <Link to="/terms" className="btn btn-primary btn-pill">
           Terms
         </Link>
 
-        <Link to="/privacy" className="btn btn-neutral btn-pill">
+        {/* Teal */}
+        <Link to="/privacy" className="btn btn-primary btn-pill">
           Privacy
         </Link>
 
+        {/* Coral */}
         <Link to="/contact" className="btn btn-accent btn-pill">
           Contact / Feedback
         </Link>
 
+        {/* Coral (when signed in) */}
         {authed ? (
-          <Link to="/settings" className="btn btn-primary btn-pill">
+          <Link to="/settings" className="btn btn-accent btn-pill">
             Settings
           </Link>
         ) : (
@@ -62,6 +65,7 @@ export default function Footer({ me }) {
     </footer>
   );
 }
+
 
 
 
