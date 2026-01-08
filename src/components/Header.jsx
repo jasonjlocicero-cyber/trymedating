@@ -1,114 +1,160 @@
-/* eslint-disable no-restricted-globals */
-import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
-import { clientsClaim } from 'workbox-core'
-import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkOnly } from 'workbox-strategies'
-import { ExpirationPlugin } from 'workbox-expiration'
-import { CacheableResponsePlugin } from 'workbox-cacheable-response'
+// src/components/Header.jsx
+import React from "react";
+import { Link, NavLink } from "react-router-dom";
 
-// Take control quickly
-self.skipWaiting()
-clientsClaim()
+export default function Header({ me, onSignOut }) {
+  const navBtnStyle = ({ isActive }) => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
+    background: isActive ? "var(--brand-teal)" : undefined,
+    color: isActive ? "#fff" : undefined,
+    borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+  });
 
-cleanupOutdatedCaches()
-precacheAndRoute(self.__WB_MANIFEST || [])
+  return (
+    <header
+      className="site-header"
+      style={{
+        background: "var(--bg-light)",
+        borderBottom: "1px solid var(--border)",
+        boxShadow: "0 2px 4px rgba(0,0,0,.04)",
+      }}
+    >
+      <div
+        className="container"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
 
-// SPA navigation fallback (same denylist you had)
-const denylist = [
-  /\/auth\//i,
-  /\/rest\//i,
-  /\/functions\//i,
-  /\/realtime\//i,
-  /supabase\.co/i
-]
+          // ✅ iOS/PWA safe-area: pushes header content below the notch/status bar
+          padding: `calc(10px + env(safe-area-inset-top, 0px)) 0 10px`,
+        }}
+      >
+        {/* Brand (icon + wordmark) */}
+        <Link
+          to="/"
+          aria-label="TryMeDating home"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontWeight: 900,
+            fontSize: 22,
+            letterSpacing: "-0.2px",
+            lineHeight: 1,
+            textDecoration: "none",
+            color: "inherit",
+          }}
+        >
+          {/* Heart + wristband logo (inline SVG) */}
+          <svg
+            width="30"
+            height="30"
+            viewBox="0 0 64 64"
+            aria-hidden="true"
+            focusable="false"
+            style={{ display: "block", flex: "0 0 auto" }}
+          >
+            <path
+              d="M32 55
+                 C29 52 21 46 16 42
+                 C9 36 6 31 6 25
+                 C6 19 11 14 17 14
+                 C21 14 25 16 28 20
+                 C31 16 35 14 39 14
+                 C45 14 50 19 50 25
+                 C50 33 44 38 37 43
+                 C35 45 33.5 46.1 32 47.2
+                 Z"
+              fill="none"
+              stroke="var(--brand-coral)"
+              strokeWidth="4.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <g transform="rotate(-18 40 42)">
+              <ellipse
+                cx="40"
+                cy="42"
+                rx="18"
+                ry="9"
+                fill="none"
+                stroke="var(--brand-teal)"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+              <ellipse cx="40" cy="42" rx="13" ry="6.5" fill="var(--bg-light)" />
+            </g>
+            <path
+              d="M21 39 C23 40 25 42 27 44"
+              fill="none"
+              stroke="var(--bg-light)"
+              strokeWidth="6"
+              strokeLinecap="round"
+            />
+          </svg>
 
-registerRoute(
-  ({ request, url }) => {
-    if (request.mode !== 'navigate') return false
-    const full = url.href
-    const path = url.pathname
-    return !denylist.some((rx) => rx.test(full) || rx.test(path))
-  },
-  createHandlerBoundToURL('/index.html')
-)
+          <span>
+            <span style={{ color: "var(--brand-teal)" }}>Try</span>
+            <span style={{ color: "var(--brand-teal)" }}>Me</span>
+            <span style={{ color: "var(--brand-coral)" }}>Dating</span>
+          </span>
+        </Link>
 
-// Supabase public storage: cache for performance
-registerRoute(
-  ({ url }) =>
-    /supabase\.co$/i.test(url.hostname) &&
-    /\/storage\/v1\/object\/public\//i.test(url.pathname),
-  new CacheFirst({
-    cacheName: 'supabase-public',
-    plugins: [
-      new CacheableResponsePlugin({ statuses: [0, 200] }),
-      new ExpirationPlugin({ maxEntries: 60, maxAgeSeconds: 7 * 24 * 3600 })
-    ]
-  })
-)
+        {/* Nav */}
+        <nav
+          aria-label="Main"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <NavLink to="/" end className="btn btn-neutral btn-pill" style={navBtnStyle}>
+            Home
+          </NavLink>
 
-// Supabase auth/rest: NEVER cache
-registerRoute(
-  ({ url }) => /supabase\.co$/i.test(url.hostname) && /\/auth\/v1\//i.test(url.pathname),
-  new NetworkOnly({ cacheName: 'supabase-auth' })
-)
+          {me ? (
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="btn btn-accent btn-pill"
+              title="Sign out"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 1,
+              }}
+            >
+              Sign out
+            </button>
+          ) : (
+            <NavLink
+              to="/auth"
+              className="btn btn-primary btn-pill"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 1,
+              }}
+            >
+              Sign in
+            </NavLink>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
 
-registerRoute(
-  ({ url }) => /supabase\.co$/i.test(url.hostname) && /\/rest\/v1\//i.test(url.pathname),
-  new NetworkOnly({ cacheName: 'supabase-rest' })
-)
-
-// ===== PUSH NOTIFICATIONS (works when app is closed) =====
-self.addEventListener('push', (event) => {
-  let data = {}
-  try {
-    data = event.data ? event.data.json() : {}
-  } catch {
-    data = { title: 'TryMeDating', body: event.data ? event.data.text() : 'New notification' }
-  }
-
-  const title = data.title || 'TryMeDating'
-  const body = data.body || 'New message'
-  const url = data.url || '/connections'
-
-  const options = {
-    body,
-    tag: data.tag || 'tmd:msg',
-    renotify: true,
-    data: { url },
-    // Optional icons if you have them in /public/icons
-    icon: '/icons/pwa-192.png',
-    badge: '/icons/pwa-192.png'
-  }
-
-  event.waitUntil(self.registration.showNotification(title, options))
-})
-
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close()
-  const url = event.notification?.data?.url || '/'
-
-  event.waitUntil(
-    (async () => {
-      const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-
-      // If a tab/PWA is already open, focus it
-      for (const client of allClients) {
-        try {
-          const u = new URL(client.url)
-          if (u.origin === self.location.origin) {
-            await client.focus()
-            // Navigate to target URL inside the focused client
-            client.navigate(url).catch(() => {})
-            return
-          }
-        } catch {}
-      }
-
-      // Otherwise open a new window
-      await self.clients.openWindow(url)
-    })()
-  )
-})
 
 
 
