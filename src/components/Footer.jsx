@@ -1,46 +1,67 @@
 // src/components/Footer.jsx
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
-export default function Footer() {
-  const year = new Date().getFullYear();
+export default function Footer({ me }) {
+  const authed = !!me?.id;
+  const { pathname } = useLocation();
+
+  // Optional: hide footer on auth screen if you want a cleaner auth page
+  // (you can remove this if you want the footer everywhere)
+  const hideOnAuth = pathname.startsWith("/auth");
+  if (hideOnAuth) return null;
 
   return (
-    <footer className="site-footer" role="contentinfo">
+    <footer
+      className="site-footer"
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: "#fff",
+        borderTop: "1px solid var(--border)",
+        boxShadow: "0 -2px 10px rgba(0,0,0,0.04)",
+        zIndex: 9990,
+        paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
       <div
         className="container"
         style={{
           display: "flex",
-          flexDirection: "column",
           gap: 10,
+          justifyContent: "center",
           alignItems: "center",
-          padding: "12px 0",
+          flexWrap: "wrap",
+          padding: "10px 0",
         }}
       >
-        <nav
-          aria-label="Footer"
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            justifyContent: "center",
-          }}
-        >
-          <Link to="/terms" className="btn btn-primary btn-pill">Terms</Link>
-          <Link to="/privacy" className="btn btn-primary btn-pill">Privacy</Link>
+        <Link to="/terms" className="btn btn-neutral btn-pill">
+          Terms
+        </Link>
 
-          {/* Single combined button */}
-          <Link to="/contact?type=feedback" className="btn btn-accent btn-pill">
-            Contact / Feedback
+        <Link to="/privacy" className="btn btn-neutral btn-pill">
+          Privacy
+        </Link>
+
+        <Link to="/contact" className="btn btn-accent btn-pill">
+          Contact / Feedback
+        </Link>
+
+        {authed ? (
+          <Link to="/settings" className="btn btn-primary btn-pill">
+            Settings
           </Link>
-        </nav>
-
-        <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>
-          © {year} TryMeDating. All rights reserved.
-        </div>
+        ) : (
+          <Link to="/auth" className="btn btn-primary btn-pill">
+            Sign in
+          </Link>
+        )}
       </div>
     </footer>
   );
 }
+
 
 
