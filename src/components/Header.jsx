@@ -3,16 +3,6 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, onSignOut }) {
-  const navBtnStyle = ({ isActive }) => ({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    lineHeight: 1,
-    background: isActive ? "var(--brand-teal)" : undefined,
-    color: isActive ? "#fff" : undefined,
-    borderColor: isActive ? "var(--brand-teal-700)" : undefined,
-  });
-
   return (
     <header
       className="site-header"
@@ -20,6 +10,8 @@ export default function Header({ me, onSignOut }) {
         background: "var(--bg-light)",
         borderBottom: "1px solid var(--border)",
         boxShadow: "0 2px 4px rgba(0,0,0,.04)",
+        // ✅ keeps header content below iPhone notch/status bar
+        paddingTop: "env(safe-area-inset-top, 0px)",
       }}
     >
       <div
@@ -29,10 +21,8 @@ export default function Header({ me, onSignOut }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          flexWrap: "wrap",
-
-          // ✅ iOS/PWA safe-area: pushes header content below the notch/status bar
-          padding: `calc(10px + env(safe-area-inset-top, 0px)) 0 10px`,
+          // ✅ a touch more vertical padding so buttons aren’t cramped
+          padding: "12px 0",
         }}
       >
         {/* Brand (icon + wordmark) */}
@@ -49,7 +39,8 @@ export default function Header({ me, onSignOut }) {
             lineHeight: 1,
             textDecoration: "none",
             color: "inherit",
-          }}
+            minWidth: 0,
+        }}
         >
           {/* Heart + wristband logo (inline SVG) */}
           <svg
@@ -99,7 +90,7 @@ export default function Header({ me, onSignOut }) {
             />
           </svg>
 
-          <span>
+          <span style={{ whiteSpace: "nowrap" }}>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
             <span style={{ color: "var(--brand-teal)" }}>Me</span>
             <span style={{ color: "var(--brand-coral)" }}>Dating</span>
@@ -112,11 +103,29 @@ export default function Header({ me, onSignOut }) {
           style={{
             display: "flex",
             alignItems: "center",
+            justifyContent: "flex-end",
             gap: 10,
             flexWrap: "wrap",
           }}
         >
-          <NavLink to="/" end className="btn btn-neutral btn-pill" style={navBtnStyle}>
+          <NavLink
+            to="/"
+            end
+            className="btn btn-neutral btn-pill"
+            style={({ isActive }) => ({
+              // ✅ force true centering for the label on all devices
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: 1,
+              background: isActive ? "var(--brand-teal)" : undefined,
+              color: isActive ? "#fff" : undefined,
+              borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+              // ✅ slightly larger tap target without pushing into the notch
+              minHeight: 44,
+              padding: "10px 14px",
+            })}
+          >
             Home
           </NavLink>
 
@@ -131,6 +140,8 @@ export default function Header({ me, onSignOut }) {
                 alignItems: "center",
                 justifyContent: "center",
                 lineHeight: 1,
+                minHeight: 44,
+                padding: "10px 14px",
               }}
             >
               Sign out
@@ -144,6 +155,8 @@ export default function Header({ me, onSignOut }) {
                 alignItems: "center",
                 justifyContent: "center",
                 lineHeight: 1,
+                minHeight: 44,
+                padding: "10px 14px",
               }}
             >
               Sign in
@@ -154,6 +167,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
