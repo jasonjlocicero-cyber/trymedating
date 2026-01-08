@@ -3,6 +3,9 @@ import React from "react";
 import { Link, NavLink } from "react-router-dom";
 
 export default function Header({ me, onSignOut }) {
+  // iOS notch / dynamic island safe-area
+  const SAFE_TOP = "env(safe-area-inset-top, 0px)";
+
   return (
     <header
       className="site-header"
@@ -10,6 +13,16 @@ export default function Header({ me, onSignOut }) {
         background: "var(--bg-light)",
         borderBottom: "1px solid var(--border)",
         boxShadow: "0 2px 4px rgba(0,0,0,.04)",
+
+        // ✅ Push everything below the notch area (works on iOS PWA + modern Safari)
+        paddingTop: `calc(${SAFE_TOP} + 8px)`,
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+
+        // Optional but nice: keeps header stable on scroll
+        position: "sticky",
+        top: 0,
+        zIndex: 1000,
       }}
     >
       <div
@@ -19,7 +32,7 @@ export default function Header({ me, onSignOut }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          padding: "10px 0",
+          padding: "10px 0 12px",
         }}
       >
         {/* Brand (icon + wordmark) */}
@@ -96,7 +109,12 @@ export default function Header({ me, onSignOut }) {
         {/* Nav */}
         <nav
           aria-label="Main"
-          style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
         >
           <NavLink
             to="/"
@@ -106,20 +124,14 @@ export default function Header({ me, onSignOut }) {
               background: isActive ? "var(--brand-teal)" : undefined,
               color: isActive ? "#fff" : undefined,
               borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+
+              // ✅ better tap target on mobile
+              minHeight: 44,
+              paddingTop: 10,
+              paddingBottom: 10,
             })}
           >
             Home
-          </NavLink>
-
-          <NavLink
-            to="/buy"
-            className="btn btn-accent btn-pill"
-            style={({ isActive }) => ({
-              // keep it “accent” but let active state look intentional
-              boxShadow: isActive ? "0 0 0 4px rgba(244,63,94,0.15)" : undefined,
-            })}
-          >
-            Buy wristband
           </NavLink>
 
           {me ? (
@@ -128,11 +140,25 @@ export default function Header({ me, onSignOut }) {
               onClick={onSignOut}
               className="btn btn-accent btn-pill"
               title="Sign out"
+              style={{
+                // ✅ better tap target on mobile
+                minHeight: 44,
+                paddingTop: 10,
+                paddingBottom: 10,
+              }}
             >
               Sign out
             </button>
           ) : (
-            <NavLink to="/auth" className="btn btn-primary btn-pill">
+            <NavLink
+              to="/auth"
+              className="btn btn-primary btn-pill"
+              style={{
+                minHeight: 44,
+                paddingTop: 10,
+                paddingBottom: 10,
+              }}
+            >
               Sign in
             </NavLink>
           )}
