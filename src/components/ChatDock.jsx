@@ -22,8 +22,8 @@ const ALLOWED = /^(image\/.*|application\/pdf)$/; // allowed attachments
 const bannerKey = (myId, peer) => `tmd_prev_sessions_banner_hidden:${myId || ""}:${peer || ""}`;
 
 /* open/close tokens built programmatically to avoid parser tripping on [[...]] */
-const OPEN = "[".repeat(2);     // "[["
-const CLOSE = "]".repeat(2);    // "]]"
+const OPEN = "[".repeat(2); // "[["
+const CLOSE = "]".repeat(2); // "]]"
 const tagStart = (t) => OPEN + t + ":"; // e.g. "[[file:"
 const betweenTags = (body, t) => body.slice(tagStart(t).length, -CLOSE.length);
 
@@ -212,6 +212,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
           display: "grid",
           placeItems: "center",
           background: "#fff",
+          flex: "0 0 auto",
         }}
       >
         <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>
@@ -222,7 +223,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
           </text>
         </svg>
       </div>
-      <div style={{ display: "grid" }}>
+      <div style={{ display: "grid", minWidth: 0 }}>
         <span
           style={{
             fontWeight: 600,
@@ -279,24 +280,28 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   return (
     <div
       style={{
-        maxWidth: 520,
+        // ✅ CRITICAL: clamp to panel width
+        maxWidth: "78%",
+        minWidth: 0,
+        boxSizing: "border-box",
+        overflowWrap: "anywhere",
+        wordBreak: "break-word",
         padding: "8px 10px",
         borderRadius: 12,
         border: "1px solid var(--border)",
         background: mine ? "#eef6ff" : "#f8fafc",
         whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
         fontSize: 14,
         lineHeight: 1.4,
       }}
     >
       {/* header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <div style={{ fontSize: 13 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, minWidth: 0 }}>
           Attachment: {meta?.name || "file"}
           {meta?.size ? ` (${humanSize(meta.size)})` : ""}
         </div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {meta?.path && (
             <button
               type="button"
@@ -350,7 +355,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               src={url}
               alt={meta?.name || "image"}
               onError={handleImgError}
-              style={{ maxWidth: 360, borderRadius: 8 }}
+              // ✅ never exceed bubble width (prevents horizontal overflow)
+              style={{ maxWidth: "100%", height: "auto", borderRadius: 8, display: "block" }}
             />
           ) : (
             <a
@@ -373,14 +379,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 
 /* ------------------------------ ChatDock ------------------------------ */
 export default function ChatDock(props) {
-  const {
-    peerId: peerIdProp,
-    partnerId,
-    partnerName = "",
-    onClose,
-    mode,
-    onRead, // NEW: notify launcher after marking messages read
-  } = props;
+  const { peerId: peerIdProp, partnerId, partnerName = "", onClose, mode, onRead } = props;
 
   // Modes:
   // - "page": embedded in a page
@@ -427,6 +426,62 @@ export default function ChatDock(props) {
 
   // Delete-last state
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  /* -------------------- layout constants (fix overflow) -------------------- */
+  const listStyle = {
+    border: "1px solid var(--border)",
+    borderRadius: 12,
+    padding: 12,
+    overflowY: "auto",
+    overflowX: "hidden", // ✅ kills horizontal scrollbar
+    background: "#fff",
+    minHeight: 140,
+
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  };
+
+  const rowStyle = (mine) => ({
+    display: "flex",
+    justifyContent: mine ? "flex-end" : "flex-start",
+    maxWidth: "100%", // ✅ row can’t exceed panel width
+  });
+
+  const bubbleBase = {
+    maxWidth: "78%", // ✅ critical: prevents off-screen bubbles
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+    whiteSpace: "pre-wrap",
+    padding: "8px 10px",
+    borderRadius: 12,
+    border: "1px solid var(--border)",
+    fontSize: 14,
+    lineHeight: 1.4,
+  };
+
+  const bubbleStyle = (mine) => ({
+    ...bubbleBase,
+    background: mine ? "#eef6ff" : "#f8fafc",
+    marginLeft: mine ? "auto" : undefined, // extra safety
+  });
+
+  const deletedBubble = {
+    ...bubbleBase,
+    background: "#f3f4f6",
+    fontSize: 13,
+  };
+
+  const metaRow = (mine) => ({
+    marginTop: 6,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap", // ✅ prevents width blowout
+    justifyContent: mine ? "flex-end" : "space-between",
+  });
 
   /* Accept peerId from route (prop) */
   useEffect(() => {
@@ -598,7 +653,11 @@ export default function ChatDock(props) {
 
   useEffect(() => {
     const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    // ensure scroll after DOM paint
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
   }, [items.length]);
 
   /* ----------------------- TYPING: realtime broadcast --------------------- */
@@ -763,7 +822,8 @@ export default function ChatDock(props) {
       const f = e.dataTransfer?.files?.[0];
       if (f) pickAttachment(f);
     },
-    [conn?.id] // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conn?.id]
   );
 
   /* ---------- actions ---------- */
@@ -957,6 +1017,8 @@ export default function ChatDock(props) {
         display: "flex",
         flexDirection: "column",
         background: "#fff",
+        minWidth: 0,
+        overflow: "hidden", // ✅ safety
       }
     : isWidget
     ? {
@@ -974,6 +1036,8 @@ export default function ChatDock(props) {
         zIndex: 10040,
         display: "flex",
         flexDirection: "column",
+        minWidth: 0,
+        overflow: "hidden", // ✅ safety
       }
     : {
         maxWidth: 720,
@@ -982,6 +1046,8 @@ export default function ChatDock(props) {
         borderRadius: 12,
         padding: 12,
         background: "#fff",
+        minWidth: 0,
+        overflow: "hidden", // ✅ safety
       };
 
   /* UI guards */
@@ -1111,6 +1177,8 @@ export default function ChatDock(props) {
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
+            minWidth: 0,
+            overflow: "hidden", // ✅ prevents any horizontal bleed
           }}
         >
           {/* sessions banner */}
@@ -1160,21 +1228,11 @@ export default function ChatDock(props) {
               gap: 8,
               flex: 1,
               minHeight: 0,
+              minWidth: 0,
+              overflow: "hidden",
             }}
           >
-            <div
-              ref={scrollerRef}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 12,
-                padding: 12,
-                overflowY: "auto",
-                background: "#fff",
-                minHeight: 140,
-              }}
-            >
+            <div ref={scrollerRef} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} style={listStyle}>
               {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
 
               {items.map((m) => {
@@ -1183,20 +1241,8 @@ export default function ChatDock(props) {
                 if (isDeletedAttachment(m.body)) {
                   const meta = parseDeleted(m.body);
                   return (
-                    <div
-                      key={m.id}
-                      style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
-                    >
-                      <div
-                        style={{
-                          maxWidth: 520,
-                          padding: "8px 10px",
-                          borderRadius: 12,
-                          border: "1px solid var(--border)",
-                          background: "#f3f4f6",
-                          fontSize: 13,
-                        }}
-                      >
+                    <div key={m.id} style={rowStyle(mine)}>
+                      <div style={{ ...deletedBubble, marginLeft: mine ? "auto" : undefined }}>
                         Attachment deleted{meta?.name ? `: ${meta.name}` : ""}.
                       </div>
                     </div>
@@ -1205,10 +1251,7 @@ export default function ChatDock(props) {
 
                 const meta = getAttachmentMeta(m.body);
                 return (
-                  <div
-                    key={m.id}
-                    style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 8 }}
-                  >
+                  <div key={m.id} style={rowStyle(mine)}>
                     {meta ? (
                       <AttachmentPreview
                         meta={meta}
@@ -1217,30 +1260,10 @@ export default function ChatDock(props) {
                         deleting={deletingPaths.has(meta?.path)}
                       />
                     ) : (
-                      <div
-                        style={{
-                          maxWidth: 520,
-                          padding: "8px 10px",
-                          borderRadius: 12,
-                          border: "1px solid var(--border)",
-                          background: mine ? "#eef6ff" : "#f8fafc",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          fontSize: 14,
-                          lineHeight: 1.4,
-                        }}
-                      >
+                      <div style={bubbleStyle(mine)}>
                         {linkifyJSX(m.body)}
 
-                        <div
-                          style={{
-                            marginTop: 6,
-                            display: "flex",
-                            justifyContent: mine ? "flex-end" : "space-between",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
+                        <div style={metaRow(mine)}>
                           <button
                             type="button"
                             onClick={() => copyBody(m.body)}
@@ -1264,6 +1287,10 @@ export default function ChatDock(props) {
                               fontSize: 11,
                               opacity: 0.6,
                               textAlign: mine ? "right" : "left",
+                              // ✅ ensure timestamp doesn’t force width
+                              maxWidth: "100%",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
                             }}
                           >
                             {new Date(m.created_at).toLocaleString()} {m.read_at ? "• Read" : ""}
@@ -1286,7 +1313,7 @@ export default function ChatDock(props) {
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
+              style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}
             >
               <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
               <textarea
@@ -1306,6 +1333,7 @@ export default function ChatDock(props) {
                 disabled={uploading}
                 style={{
                   flex: 1,
+                  minWidth: 0, // ✅ prevents composer overflow
                   border: "1px solid var(--border)",
                   borderRadius: 12,
                   padding: "10px 12px",
@@ -1325,6 +1353,7 @@ export default function ChatDock(props) {
                 className="btn btn-neutral btn-pill"
                 style={{
                   opacity: !canDeleteLast || deleteBusy || uploading ? 0.6 : 1,
+                  flex: "0 0 auto",
                 }}
               >
                 {deleteBusy ? "Deleting…" : "Delete last"}
@@ -1341,6 +1370,7 @@ export default function ChatDock(props) {
                   border: "none",
                   cursor: !canSend || uploading ? "not-allowed" : "pointer",
                   fontWeight: 700,
+                  flex: "0 0 auto",
                 }}
               >
                 Send
