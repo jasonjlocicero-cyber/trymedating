@@ -89,8 +89,8 @@ function Home({ me }) {
                   Sign in / Sign up
                 </Link>
 
-                {/* ✅ Buy button available even when logged out */}
-                <Link className="btn btn-accent btn-pill" to="/buy">
+                {/* ✅ Seafoam/teal */}
+                <Link className="btn btn-primary btn-pill" to="/buy">
                   Buy wristband
                 </Link>
 
@@ -105,8 +105,8 @@ function Home({ me }) {
                   Go to Profile
                 </Link>
 
-                {/* ✅ Placed right next to Go to Profile */}
-                <Link className="btn btn-accent btn-pill" to="/buy">
+                {/* ✅ Seafoam/teal */}
+                <Link className="btn btn-primary btn-pill" to="/buy">
                   Buy wristband
                 </Link>
 
@@ -358,6 +358,7 @@ export default function App() {
     </ChatProvider>
   )
 }
+
 
 
 
