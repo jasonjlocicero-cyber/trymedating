@@ -3,6 +3,8 @@ import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
+const LS_NOTIF_ENABLED = 'tmd_notifications_enabled'
+
 // Small helper to fetch a display name/handle for a user id
 async function fetchProfileName(userId) {
   if (!userId) return ''
@@ -10,7 +12,6 @@ async function fetchProfileName(userId) {
     .from('profiles')
     .select('display_name, handle, user_id')
     .eq('user_id', userId)
-    .limit(1)
     .maybeSingle()
   if (error || !data) return ''
   return data.display_name || (data.handle ? `@${data.handle}` : '')
@@ -27,7 +28,7 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering
+// Layering (launcher always above the panel)
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -60,7 +61,9 @@ class DockErrorBoundary extends React.Component {
           }}
         >
           <div style={{ fontWeight: 900 }}>Chat failed to load</div>
-          <div className="muted">A component crashed while opening chat. Check console for details.</div>
+          <div className="muted">
+            A component crashed while opening chat. Check console for details.
+          </div>
           <button className="btn btn-neutral" onClick={this.props.onClose}>
             Close
           </button>
@@ -71,7 +74,26 @@ class DockErrorBoundary extends React.Component {
   }
 }
 
-export default function ChatLauncher({ disabled = false }) {
+async function showSystemNotification({ title, body, url }) {
+  try {
+    if (!('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+    if (!('serviceWorker' in navigator)) return
+
+    const reg = await navigator.serviceWorker.ready
+    await reg.showNotification(title || 'TryMeDating', {
+      body: body || 'New message',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: 'tmd-message',
+      data: { url: url || '/' }
+    })
+  } catch {
+    // ignore notification failures
+  }
+}
+
+export default function ChatLauncher({ disabled = false, onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null)
 
   const [open, setOpen] = useState(false)
@@ -81,6 +103,9 @@ export default function ChatLauncher({ disabled = false }) {
   const [loadingList, setLoadingList] = useState(false)
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
+
+  // We still compute unread (useful for analytics / future UI), but we do NOT show a red badge anymore.
+  const [unreadLocal, setUnreadLocal] = useState(0)
 
   // New-message toast (shows only when dock is closed)
   const [toast, setToast] = useState(null)
@@ -101,9 +126,7 @@ export default function ChatLauncher({ disabled = false }) {
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser()
+      const { data: { user } } = await supabase.auth.getUser()
       if (!alive) return
       setMe(user || null)
     })()
@@ -116,6 +139,50 @@ export default function ChatLauncher({ disabled = false }) {
     }
   }, [])
 
+  // ------- unread count -------
+  const computeUnread = useCallback(async (userId) => {
+    if (!userId) {
+      setUnreadLocal(0)
+      onUnreadChange(0)
+      return
+    }
+
+    const { count, error } = await supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('recipient', userId)
+      .is('read_at', null)
+
+    if (error) {
+      setUnreadLocal(0)
+      onUnreadChange(0)
+      return
+    }
+
+    const n = typeof count === 'number' ? count : 0
+    setUnreadLocal(n)
+    onUnreadChange(n)
+  }, [onUnreadChange])
+
+  useEffect(() => {
+    computeUnread(me?.id)
+  }, [me?.id, computeUnread])
+
+  // Live bump on my recipient messages only
+  useEffect(() => {
+    if (!me?.id) return
+    const channel = supabase
+      .channel(`messages-unread-${me.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
+        () => computeUnread(me.id)
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [me?.id, computeUnread])
+
   // Esc to close (desktop)
   useEffect(() => {
     if (!open) return
@@ -126,7 +193,7 @@ export default function ChatLauncher({ disabled = false }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, closeAll])
 
-  // ------- global opener + events (supports BOTH names) -------
+  // ------- global opener + events -------
   useEffect(() => {
     function openFromEvent(ev) {
       const d = ev?.detail || {}
@@ -174,9 +241,7 @@ export default function ChatLauncher({ disabled = false }) {
       if (!cancel) setPartnerName(n || '')
     }
     hydrateName()
-    return () => {
-      cancel = true
-    }
+    return () => { cancel = true }
   }, [partnerId, partnerName])
 
   // ------- recent list when open -------
@@ -232,27 +297,50 @@ export default function ChatLauncher({ disabled = false }) {
       }
     }
     loadRecent()
-    return () => {
-      cancel = true
-    }
+    return () => { cancel = true }
   }, [open, me?.id, partnerId])
 
-  // ------- new-message toast when dock is closed -------
+  // ------- new-message toast + system notification when dock is closed -------
   useEffect(() => {
     if (!me?.id) return
+
     const ch = supabase
       .channel(`toast-${me.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
         async ({ new: m }) => {
-          if (open) return
           const name = await fetchProfileName(m.sender)
-          setToast({
-            fromId: m.sender,
-            fromName: name || 'New message',
-            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : m.body || 'Message'
-          })
+          const text = m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
+
+          // Show toast (in-app)
+          if (!open) {
+            setToast({
+              fromId: m.sender,
+              fromName: name || 'New message',
+              text
+            })
+          }
+
+          // System notification (device-level) if user enabled it
+          const enabled = (() => {
+            try { return localStorage.getItem(LS_NOTIF_ENABLED) === '1' } catch { return false }
+          })()
+
+          // Avoid spamming notifications when chat is open and visible
+          const shouldNotify =
+            enabled &&
+            Notification?.permission === 'granted' &&
+            (!open || document.visibilityState !== 'visible')
+
+          if (shouldNotify) {
+            const url = `/connections?openChat=${encodeURIComponent(String(m.sender))}`
+            await showSystemNotification({
+              title: name || 'TryMeDating',
+              body: text,
+              url
+            })
+          }
         }
       )
       .subscribe()
@@ -262,14 +350,14 @@ export default function ChatLauncher({ disabled = false }) {
 
   const canChat = !!(me?.id && partnerId)
 
-  // safe-area offsets
+  // helper for safe-area offsets
   const bottomCss = `calc(${LAUNCHER_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
   const rightCss = `calc(${RIGHT_GUTTER}px + env(safe-area-inset-right, 0px))`
   const panelBottomCss = `calc(${PANEL_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
 
   return (
     <>
-      {/* Backdrop to make closing easy (tap outside) */}
+      {/* Backdrop to make closing easy */}
       {open && (
         <div
           onClick={closeAll}
@@ -319,6 +407,7 @@ export default function ChatLauncher({ disabled = false }) {
         }}
       >
         <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
+        {/* 🚫 unread badge intentionally removed */}
       </button>
 
       {/* Inbox picker */}
@@ -363,9 +452,7 @@ export default function ChatLauncher({ disabled = false }) {
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom: 8 }}>
-                Pick a recent chat:
-              </div>
+              <div className="helper-muted" style={{ marginBottom: 8 }}>Pick a recent chat:</div>
               {err && <div className="helper-error" style={{ marginBottom: 8 }}>{err}</div>}
               {loadingList && <div className="muted">Loading…</div>}
               {!loadingList && recent.length === 0 && (
@@ -445,9 +532,7 @@ export default function ChatLauncher({ disabled = false }) {
             >
               Open
             </button>
-            <button className="btn btn-neutral" onClick={() => setToast(null)}>
-              Dismiss
-            </button>
+            <button className="btn btn-neutral" onClick={() => setToast(null)}>Dismiss</button>
           </div>
         </div>
       )}
@@ -473,7 +558,6 @@ export default function ChatLauncher({ disabled = false }) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -533,7 +617,12 @@ export default function ChatLauncher({ disabled = false }) {
 
           <DockErrorBoundary onClose={closeAll}>
             <div style={{ flex: 1, minHeight: 0 }}>
-              <ChatDock partnerId={partnerId} partnerName={partnerName} mode="embedded" />
+              <ChatDock
+                partnerId={partnerId}
+                partnerName={partnerName}
+                mode="embedded"
+                onRead={() => computeUnread(me?.id)}
+              />
             </div>
           </DockErrorBoundary>
         </div>
@@ -541,6 +630,7 @@ export default function ChatLauncher({ disabled = false }) {
     </>
   )
 }
+
 
 
 
