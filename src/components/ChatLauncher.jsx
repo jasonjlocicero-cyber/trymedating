@@ -1,9 +1,7 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
-
-const LS_NOTIF_ENABLED = 'tmd_notifications_enabled'
 
 // Small helper to fetch a display name/handle for a user id
 async function fetchProfileName(userId) {
@@ -28,7 +26,7 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (launcher always above the panel)
+// Layering (the key fix: launcher always above the panel)
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -74,25 +72,6 @@ class DockErrorBoundary extends React.Component {
   }
 }
 
-async function showSystemNotification({ title, body, url }) {
-  try {
-    if (!('Notification' in window)) return
-    if (Notification.permission !== 'granted') return
-    if (!('serviceWorker' in navigator)) return
-
-    const reg = await navigator.serviceWorker.ready
-    await reg.showNotification(title || 'TryMeDating', {
-      body: body || 'New message',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      tag: 'tmd-message',
-      data: { url: url || '/' }
-    })
-  } catch {
-    // ignore notification failures
-  }
-}
-
 export default function ChatLauncher({ disabled = false, onUnreadChange = () => {} }) {
   const [me, setMe] = useState(null)
 
@@ -104,11 +83,33 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
 
-  // We still compute unread (useful for analytics / future UI), but we do NOT show a red badge anymore.
   const [unreadLocal, setUnreadLocal] = useState(0)
 
   // New-message toast (shows only when dock is closed)
   const [toast, setToast] = useState(null)
+
+  // --- responsive panel positioning (fixes cut-off on narrow screens) ---
+  const [isNarrow, setIsNarrow] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia?.('(max-width: 420px)')?.matches ?? false
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(max-width: 420px)')
+
+    const handler = () => setIsNarrow(!!mq.matches)
+
+    // modern + safari fallback
+    if (mq.addEventListener) mq.addEventListener('change', handler)
+    else mq.addListener(handler)
+
+    handler()
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', handler)
+      else mq.removeListener(handler)
+    }
+  }, [])
 
   const closeAll = useCallback(() => {
     setOpen(false)
@@ -183,6 +184,14 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     return () => supabase.removeChannel(channel)
   }, [me?.id, computeUnread])
 
+  // When opening/closing the panel, force a refresh so badge clears even if UPDATE events don’t fire
+  useEffect(() => {
+    if (!me?.id) return
+    if (!open) return
+    const t = setTimeout(() => computeUnread(me.id), 350)
+    return () => clearTimeout(t)
+  }, [open, me?.id, computeUnread])
+
   // Esc to close (desktop)
   useEffect(() => {
     if (!open) return
@@ -193,7 +202,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     return () => window.removeEventListener('keydown', onKey)
   }, [open, closeAll])
 
-  // ------- global opener + events -------
+  // ------- global opener + events (supports BOTH names) -------
   useEffect(() => {
     function openFromEvent(ev) {
       const d = ev?.detail || {}
@@ -300,47 +309,22 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     return () => { cancel = true }
   }, [open, me?.id, partnerId])
 
-  // ------- new-message toast + system notification when dock is closed -------
+  // ------- new-message toast when dock is closed -------
   useEffect(() => {
     if (!me?.id) return
-
     const ch = supabase
       .channel(`toast-${me.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `recipient=eq.${me.id}` },
         async ({ new: m }) => {
+          if (open) return
           const name = await fetchProfileName(m.sender)
-          const text = m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
-
-          // Show toast (in-app)
-          if (!open) {
-            setToast({
-              fromId: m.sender,
-              fromName: name || 'New message',
-              text
-            })
-          }
-
-          // System notification (device-level) if user enabled it
-          const enabled = (() => {
-            try { return localStorage.getItem(LS_NOTIF_ENABLED) === '1' } catch { return false }
-          })()
-
-          // Avoid spamming notifications when chat is open and visible
-          const shouldNotify =
-            enabled &&
-            Notification?.permission === 'granted' &&
-            (!open || document.visibilityState !== 'visible')
-
-          if (shouldNotify) {
-            const url = `/connections?openChat=${encodeURIComponent(String(m.sender))}`
-            await showSystemNotification({
-              title: name || 'TryMeDating',
-              body: text,
-              url
-            })
-          }
+          setToast({
+            fromId: m.sender,
+            fromName: name || 'New message',
+            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
+          })
         }
       )
       .subscribe()
@@ -355,9 +339,14 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const rightCss = `calc(${RIGHT_GUTTER}px + env(safe-area-inset-right, 0px))`
   const panelBottomCss = `calc(${PANEL_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
 
+  // FIX: on narrow screens, pin panel inside the viewport (prevents left-side cutoff)
+  const panelLeftCss = `calc(12px + env(safe-area-inset-left, 0px))`
+  const panelRightCss = `calc(12px + env(safe-area-inset-right, 0px))`
+  const panelPos = isNarrow ? { left: panelLeftCss, right: panelRightCss } : { right: rightCss }
+
   return (
     <>
-      {/* Backdrop to make closing easy */}
+      {/* Backdrop to make closing easy (tap outside) */}
       {open && (
         <div
           onClick={closeAll}
@@ -371,7 +360,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         />
       )}
 
-      {/* Floating launcher button */}
+      {/* Floating launcher button (ALWAYS on top) */}
       <button
         type="button"
         disabled={disabled}
@@ -407,7 +396,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         }}
       >
         <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
-        {/* 🚫 unread badge intentionally removed */}
+
+        {/* NOTE: unread badge intentionally removed (per your request) */}
+        {/* (unreadLocal is still computed for future use / push logic) */}
       </button>
 
       {/* Inbox picker */}
@@ -415,10 +406,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         <div
           style={{
             position: 'fixed',
-            right: rightCss,
+            ...panelPos,
             bottom: panelBottomCss,
-            width: 320,
-            maxWidth: 'calc(100vw - 24px)',
+            width: isNarrow ? 'auto' : 320,
             background: '#fff',
             border: '1px solid var(--border)',
             borderRadius: 14,
@@ -542,10 +532,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         <div
           style={{
             position: 'fixed',
-            right: rightCss,
+            ...panelPos,
             bottom: panelBottomCss,
-            width: 360,
-            maxWidth: 'calc(100vw - 24px)',
+            width: isNarrow ? 'auto' : 360,
             height: 'min(70vh, 520px)',
             zIndex: Z_PANEL,
             background: '#fff',
@@ -558,6 +547,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           }}
           onClick={(e) => e.stopPropagation()}
         >
+          {/* Header (bigger touch targets for mobile) */}
           <div
             style={{
               display: 'flex',
@@ -616,7 +606,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           </div>
 
           <DockErrorBoundary onClose={closeAll}>
-            <div style={{ flex: 1, minHeight: 0 }}>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <ChatDock
                 partnerId={partnerId}
                 partnerName={partnerName}
