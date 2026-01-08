@@ -43,10 +43,17 @@ export default defineConfig(() => {
           'favicon.ico',
           'apple-touch-icon.png',
           'robots.txt',
-          'offline.html'
+          'offline.html',
+          'sw-push.js'
         ],
 
         workbox: {
+          /**
+           * Import custom push handlers into the generated service worker
+           * (file lives at /public/sw-push.js => served at /sw-push.js)
+           */
+          importScripts: ['sw-push.js'],
+
           /**
            * IMPORTANT:
            * navigateFallback should be your SPA shell (index.html),
