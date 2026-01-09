@@ -5,10 +5,7 @@
   "description": "TryMeDating brand site + desktop wrapper",
   "author": "Jason LoCicero",
   "license": "UNLICENSED",
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
-  },
+  "engines": { "node": ">=20.0.0", "npm": ">=10.0.0" },
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -26,7 +23,7 @@
   },
   "dependencies": {
     "@sentry/react": "^7.120.0",
-    "@supabase/supabase-js": "^2.90.0",
+    "@supabase/supabase-js": "^2.39.7",
     "browser-image-compression": "^2.0.2",
     "qrcode": "^1.5.3",
     "qrcode.react": "^3.1.0",
@@ -55,33 +52,11 @@
     "productName": "TryMeDating",
     "artifactName": "${productName}-Setup-${version}-${os}-${arch}.${ext}",
     "asar": true,
-    "protocols": [
-      {
-        "name": "TryMeDating Link",
-        "schemes": [
-          "tryme"
-        ]
-      }
-    ],
-    "files": [
-      "electron/**",
-      "dist/**",
-      "public/**",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "public/icons",
-      "output": "release"
-    },
+    "protocols": [{ "name": "TryMeDating Link", "schemes": ["tryme"] }],
+    "files": ["electron/**", "dist/**", "public/**", "package.json"],
+    "directories": { "buildResources": "public/icons", "output": "release" },
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/icons/icon.ico",
       "publisherName": "TryMeDating"
     },
@@ -96,11 +71,17 @@
   }
 }
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> e0a7032 (Stabilize PWA install + fix local build)
 
 
 
 
 
 
+<<<<<<< HEAD
 =======
 >>>>>>> 5b543c9 (Add web-push dependency for Netlify functions)
+=======
+>>>>>>> e0a7032 (Stabilize PWA install + fix local build)
