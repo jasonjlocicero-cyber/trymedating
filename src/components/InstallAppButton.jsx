@@ -1,3 +1,4 @@
+// src/components/InstallAppButton.jsx
 import React, { useEffect, useMemo, useState } from "react";
 
 function isIos() {
@@ -8,8 +9,6 @@ function isIos() {
 
 function isStandalone() {
   if (typeof window === "undefined") return false;
-  // iOS Safari uses navigator.standalone
-  // Other browsers use display-mode
   return (
     window.matchMedia?.("(display-mode: standalone)")?.matches ||
     window.navigator?.standalone === true
@@ -21,63 +20,62 @@ export default function InstallAppButton({
   style,
   label = "Install app",
 }) {
-  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installed, setInstalled] = useState(false);
+  const [canInstall, setCanInstall] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
 
-  const canPrompt = useMemo(() => !!deferredPrompt && !installed, [deferredPrompt, installed]);
+  const canPrompt = useMemo(
+    () => !installed && !!canInstall,
+    [installed, canInstall]
+  );
 
   useEffect(() => {
+    // initial state
     setInstalled(isStandalone());
+    setCanInstall(Boolean(window?.tmdCanInstall));
 
-    function onBeforeInstallPrompt(e) {
-      // Required for custom in-app install button
-      e.preventDefault();
-      setDeferredPrompt(e);
+    function sync() {
+      setInstalled(isStandalone());
+      setCanInstall(Boolean(window?.tmdCanInstall));
     }
 
-    function onAppInstalled() {
+    // Fired by main.jsx when beforeinstallprompt/appinstalled changes state
+    window.addEventListener("tmd:install-state", sync);
+
+    // Also listen to native appinstalled as a backup
+    window.addEventListener("appinstalled", () => {
       setInstalled(true);
-      setDeferredPrompt(null);
+      setCanInstall(false);
       setShowIosHelp(false);
-    }
-
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onAppInstalled);
+    });
 
     return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onAppInstalled);
+      window.removeEventListener("tmd:install-state", sync);
+      window.removeEventListener("appinstalled", sync);
     };
   }, []);
 
   async function handleClick() {
     if (installed) return;
 
-    // Desktop/Android (Chromium): show prompt if available
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      try {
-        await deferredPrompt.userChoice;
-      } catch {
-        // ignore
-      }
-      setDeferredPrompt(null);
-      return;
-    }
-
-    // iOS: no beforeinstallprompt exists
+    // iOS: no beforeinstallprompt prompt exists
     if (isIos()) {
       setShowIosHelp(true);
       return;
     }
 
-    // Fallback: user can still install from browser UI
-    // (Chrome: Install icon in address bar / menu)
-    alert('To install: open the browser menu and choose "Install app" or "Add to Home screen".');
+    // Chromium (Android/Desktop): use the globally captured prompt
+    const ok = await window.tmdPromptInstall?.();
+
+    // If prompt isn't available, fall back to instructions
+    if (!ok) {
+      alert(
+        'On Chrome/Brave: click the address-bar install icon, or go to menu → "Install app".'
+      );
+    }
   }
 
-  // If already installed, hide button
+  // Hide button if already installed
   if (installed) return null;
 
   return (
@@ -86,10 +84,11 @@ export default function InstallAppButton({
         {label}
       </button>
 
-      {/* Optional: small hint when prompt isn't available yet */}
+      {/* Optional hint when install prompt isn't available */}
       {!canPrompt && !isIos() && (
         <div className="helper-muted" style={{ fontSize: 12, opacity: 0.85 }}>
-          If you don’t see an install prompt yet, try again after a refresh.
+          If Install isn’t available yet, refresh once. If it still won’t show, the site isn’t installable
+          (usually manifest/icons/service worker).
         </div>
       )}
 
@@ -112,3 +111,4 @@ export default function InstallAppButton({
     </div>
   );
 }
+
