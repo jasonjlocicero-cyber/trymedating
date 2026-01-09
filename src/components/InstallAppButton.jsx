@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+const INSTALL_FLAG_KEY = "tmd_pwa_installed_v1";
+
 function isIos() {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent.toLowerCase();
@@ -8,81 +10,109 @@ function isIos() {
 
 function isStandalone() {
   if (typeof window === "undefined") return false;
+
+  // iOS Safari uses navigator.standalone
+  // Other browsers use display-mode
   return (
     window.matchMedia?.("(display-mode: standalone)")?.matches ||
     window.navigator?.standalone === true
   );
 }
 
+function readInstalledFlag() {
+  try {
+    return localStorage.getItem(INSTALL_FLAG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInstalledFlag(val) {
+  try {
+    localStorage.setItem(INSTALL_FLAG_KEY, val ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 export default function InstallAppButton({
   className = "btn btn-primary btn-pill",
   style,
   label = "Install app",
+  // New behavior: hide button even on the normal website once this device has installed the PWA
+  hideWhenInstalled = true,
 }) {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [installed, setInstalled] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
 
-  // Local fallback capture (only used if global handler isn't present)
-  const [localDeferred, setLocalDeferred] = useState(null);
-
-  const canPrompt = useMemo(() => {
-    // Prefer global installability signal from main.jsx
-    if (typeof window !== "undefined" && typeof window.tmdCanInstall !== "undefined") {
-      return Boolean(window.tmdCanInstall);
-    }
-    return Boolean(localDeferred);
-  }, [localDeferred]);
+  const canPrompt = useMemo(() => !!deferredPrompt && !installed, [deferredPrompt, installed]);
 
   useEffect(() => {
-    setInstalled(isStandalone());
+    let alive = true;
 
-    const onInstalled = () => {
-      setInstalled(true);
-      setLocalDeferred(null);
-      setShowIosHelp(false);
-    };
+    // Initial installed state:
+    // - true if running as PWA (standalone)
+    // - OR if we previously saw appinstalled in this browser profile
+    const initialInstalled = isStandalone() || readInstalledFlag();
+    setInstalled(initialInstalled);
 
-    // Listen for global state updates (from main.jsx)
-    const onState = () => {
-      // just triggers rerender; canPrompt reads window.tmdCanInstall
-      setLocalDeferred((d) => d);
-    };
+    // If we’re currently running in standalone, persist the flag so the website tab can hide it too.
+    if (isStandalone()) writeInstalledFlag(true);
 
-    window.addEventListener("appinstalled", onInstalled);
-    window.addEventListener("tmd:install-state", onState);
-
-    // Fallback: if main.jsx global handler doesn't exist, capture here
     function onBeforeInstallPrompt(e) {
-      if (window.tmdPromptInstall) return; // global handler will manage it
+      // This event generally only fires when the app is NOT installed / installable.
+      // So: clear our installed flag, store the prompt, and prevent default for custom button.
       e.preventDefault();
-      setLocalDeferred(e);
+
+      writeInstalledFlag(false);
+      if (!alive) return;
+
+      setInstalled(isStandalone() || readInstalledFlag());
+      setDeferredPrompt(e);
     }
+
+    function onAppInstalled() {
+      writeInstalledFlag(true);
+      if (!alive) return;
+
+      setInstalled(true);
+      setDeferredPrompt(null);
+      setShowIosHelp(false);
+    }
+
+    // Keep installed state in sync if display-mode changes (rare but safe)
+    const mql = window.matchMedia?.("(display-mode: standalone)");
+    const onDisplayModeChange = () => {
+      const nowInstalled = isStandalone() || readInstalledFlag();
+      setInstalled(nowInstalled);
+      if (isStandalone()) writeInstalledFlag(true);
+    };
+
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
+    mql?.addEventListener?.("change", onDisplayModeChange);
 
     return () => {
-      window.removeEventListener("appinstalled", onInstalled);
-      window.removeEventListener("tmd:install-state", onState);
+      alive = false;
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+      mql?.removeEventListener?.("change", onDisplayModeChange);
     };
   }, []);
 
   async function handleClick() {
     if (installed) return;
 
-    // Prefer global prompt function (main.jsx)
-    if (typeof window !== "undefined" && typeof window.tmdPromptInstall === "function") {
-      const didPrompt = await window.tmdPromptInstall();
-      if (didPrompt) return;
-      // if it couldn't prompt, fall through to iOS/help/fallback
-    } else if (localDeferred) {
-      // Local fallback prompt
+    // Desktop/Android (Chromium): show prompt if available
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
       try {
-        localDeferred.prompt();
-        await localDeferred.userChoice.catch(() => null);
+        await deferredPrompt.userChoice;
       } catch {
         // ignore
       }
-      setLocalDeferred(null);
+      setDeferredPrompt(null);
       return;
     }
 
@@ -92,11 +122,12 @@ export default function InstallAppButton({
       return;
     }
 
-    // General fallback
+    // Fallback: user can still install from browser UI
     alert('To install: open the browser menu and choose "Install app" or "Add to Home screen".');
   }
 
-  if (installed) return null;
+  // If installed and we want it hidden everywhere (including normal website tab), hide it.
+  if (hideWhenInstalled && installed) return null;
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
@@ -104,7 +135,8 @@ export default function InstallAppButton({
         {label}
       </button>
 
-      {!canPrompt && !isIos() && (
+      {/* Optional: small hint when prompt isn't available yet */}
+      {!canPrompt && !isIos() && !installed && (
         <div className="helper-muted" style={{ fontSize: 12, opacity: 0.85 }}>
           If you don’t see an install prompt yet, try again after a refresh.
         </div>
