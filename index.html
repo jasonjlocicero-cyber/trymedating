@@ -10,28 +10,21 @@
     <title>TryMeDating</title>
     <meta name="description" content="Meet intentionally via private invites and real conversations." />
 
-    <!-- PWA / install metadata -->
+    <!-- Theme color for address bar / PWA -->
     <meta name="theme-color" content="#14b8a6" />
-    <meta name="application-name" content="TryMeDating" />
-    <meta name="apple-mobile-web-app-title" content="TryMeDating" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
-    <!-- Manifest -->
+    <!-- PWA manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Favicons -->
+    <!-- Icons (keep these aligned with /public files) -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/pwa-192.png" />
 
-    <!-- iOS home screen icon -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-
-    <!-- Optional pinned-tab mask icon -->
-    <link rel="mask-icon" href="/icons/mask-icon.svg" color="#14b8a6" />
+    <!-- iOS standalone tweaks -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
-
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
@@ -57,6 +50,7 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+
 
 
 
