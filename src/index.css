@@ -252,6 +252,42 @@ textarea.input{
 }
 
 /* -----------------------------
+   ✅ BIO BOX FIX (mobile + narrow)
+   Keeps avatar + top inputs in 2 columns,
+   but forces Bio (textarea field) to span full width
+   directly under BOTH columns.
+   ----------------------------- */
+@supports selector(.tmd-x:has(textarea)) {
+  /* Flatten the right column so its children can be placed on the parent grid */
+  .profile-grid .profile-form-grid{
+    display: contents;
+  }
+
+  /* Default: form fields land in column 2 */
+  .profile-grid .profile-form-grid > *{
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  /* The field that contains a textarea (Bio) spans both columns */
+  .profile-grid .profile-form-grid > *:has(textarea){
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+
+  /* Make sure the textarea truly fills the new span */
+  .profile-grid .profile-form-grid > *:has(textarea) textarea{
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Very small screens: stack everything cleanly */
+@media (max-width:420px){
+  .profile-grid{ grid-template-columns:1fr; }
+}
+
+/* -----------------------------
    Danger Zone + Modal
    ----------------------------- */
 .danger-zone{
@@ -325,6 +361,7 @@ textarea.input{
   flex-wrap:wrap;
   margin-top:6px;
 }
+
 
 
 
