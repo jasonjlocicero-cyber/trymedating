@@ -1,5 +1,9 @@
-# Force HTTPS to apex (switch to www if you prefer)
-http:*  https://trymedating.com/:splat  301!
+/manifest.webmanifest  /manifest.webmanifest  200
+/sw.js                 /sw.js                 200
+/icons/*               /icons/:splat          200
+/favicon.ico           /favicon.ico           200
+/apple-touch-icon.png  /apple-touch-icon.png  200
+/robots.txt            /robots.txt            200
 
-# SPA fallback for client routing
-/*   /index.html   200
+/*  /index.html  200
+
