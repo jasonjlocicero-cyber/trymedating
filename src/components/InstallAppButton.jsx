@@ -1,4 +1,3 @@
-// src/components/InstallAppButton.jsx
 import React, { useEffect, useMemo, useState } from "react";
 
 function isIos() {
@@ -21,61 +20,82 @@ export default function InstallAppButton({
   label = "Install app",
 }) {
   const [installed, setInstalled] = useState(false);
-  const [canInstall, setCanInstall] = useState(false);
   const [showIosHelp, setShowIosHelp] = useState(false);
 
-  const canPrompt = useMemo(
-    () => !installed && !!canInstall,
-    [installed, canInstall]
-  );
+  // Local fallback capture (only used if global handler isn't present)
+  const [localDeferred, setLocalDeferred] = useState(null);
+
+  const canPrompt = useMemo(() => {
+    // Prefer global installability signal from main.jsx
+    if (typeof window !== "undefined" && typeof window.tmdCanInstall !== "undefined") {
+      return Boolean(window.tmdCanInstall);
+    }
+    return Boolean(localDeferred);
+  }, [localDeferred]);
 
   useEffect(() => {
-    // initial state
     setInstalled(isStandalone());
-    setCanInstall(Boolean(window?.tmdCanInstall));
 
-    function sync() {
-      setInstalled(isStandalone());
-      setCanInstall(Boolean(window?.tmdCanInstall));
-    }
-
-    // Fired by main.jsx when beforeinstallprompt/appinstalled changes state
-    window.addEventListener("tmd:install-state", sync);
-
-    // Also listen to native appinstalled as a backup
-    window.addEventListener("appinstalled", () => {
+    const onInstalled = () => {
       setInstalled(true);
-      setCanInstall(false);
+      setLocalDeferred(null);
       setShowIosHelp(false);
-    });
+    };
+
+    // Listen for global state updates (from main.jsx)
+    const onState = () => {
+      // just triggers rerender; canPrompt reads window.tmdCanInstall
+      setLocalDeferred((d) => d);
+    };
+
+    window.addEventListener("appinstalled", onInstalled);
+    window.addEventListener("tmd:install-state", onState);
+
+    // Fallback: if main.jsx global handler doesn't exist, capture here
+    function onBeforeInstallPrompt(e) {
+      if (window.tmdPromptInstall) return; // global handler will manage it
+      e.preventDefault();
+      setLocalDeferred(e);
+    }
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
 
     return () => {
-      window.removeEventListener("tmd:install-state", sync);
-      window.removeEventListener("appinstalled", sync);
+      window.removeEventListener("appinstalled", onInstalled);
+      window.removeEventListener("tmd:install-state", onState);
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
     };
   }, []);
 
   async function handleClick() {
     if (installed) return;
 
-    // iOS: no beforeinstallprompt prompt exists
+    // Prefer global prompt function (main.jsx)
+    if (typeof window !== "undefined" && typeof window.tmdPromptInstall === "function") {
+      const didPrompt = await window.tmdPromptInstall();
+      if (didPrompt) return;
+      // if it couldn't prompt, fall through to iOS/help/fallback
+    } else if (localDeferred) {
+      // Local fallback prompt
+      try {
+        localDeferred.prompt();
+        await localDeferred.userChoice.catch(() => null);
+      } catch {
+        // ignore
+      }
+      setLocalDeferred(null);
+      return;
+    }
+
+    // iOS: no beforeinstallprompt exists
     if (isIos()) {
       setShowIosHelp(true);
       return;
     }
 
-    // Chromium (Android/Desktop): use the globally captured prompt
-    const ok = await window.tmdPromptInstall?.();
-
-    // If prompt isn't available, fall back to instructions
-    if (!ok) {
-      alert(
-        'On Chrome/Brave: click the address-bar install icon, or go to menu → "Install app".'
-      );
-    }
+    // General fallback
+    alert('To install: open the browser menu and choose "Install app" or "Add to Home screen".');
   }
 
-  // Hide button if already installed
   if (installed) return null;
 
   return (
@@ -84,11 +104,9 @@ export default function InstallAppButton({
         {label}
       </button>
 
-      {/* Optional hint when install prompt isn't available */}
       {!canPrompt && !isIos() && (
         <div className="helper-muted" style={{ fontSize: 12, opacity: 0.85 }}>
-          If Install isn’t available yet, refresh once. If it still won’t show, the site isn’t installable
-          (usually manifest/icons/service worker).
+          If you don’t see an install prompt yet, try again after a refresh.
         </div>
       )}
 
