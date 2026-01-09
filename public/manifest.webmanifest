@@ -1,26 +1,23 @@
 {
+  "id": "/?source=pwa",
   "name": "TryMeDating",
   "short_name": "TryMeDating",
-  "id": "/",
+  "description": "Meet intentionally via private invites and real conversations.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#ffffff",
   "theme_color": "#14b8a6",
-  "description": "Meet intentionally. Share your invite with a QR code and connect only with people you’ve actually met.",
   "icons": [
     {
-      "src": "/icons/pwa-192.png",
+      "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
-      "src": "/icons/pwa-512.png",
+      "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
   ]
 }
