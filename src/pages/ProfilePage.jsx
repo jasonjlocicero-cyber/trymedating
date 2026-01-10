@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ProfilePhotosManager from '../components/ProfilePhotosManager'
+import ImageCropModal from '../components/ImageCropModal'
 
 const PROFILE_SELECT = 'user_id, handle, display_name, bio, is_public, avatar_url'
 
@@ -32,18 +33,19 @@ async function ensureProfileRow(me) {
   const existing = await fetchMyProfile(me.id)
   if (existing) return existing
 
-  const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
+  const emailBase = sanitizeHandle noting baseline
+  const seed = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
 
   for (let attempt = 0; attempt <= 30; attempt += 1) {
-    const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
+    const candidate = attempt === 0 ? seed : `${seed}${attempt}`
 
     const toInsert = {
       user_id: me.id,
       handle: candidate,
       display_name: me.user_metadata?.full_name || candidate,
-      is_public: false, // ✅ start private until avatar exists
+      is_public: false,
       bio: '',
-      avatar_url: null
+      avatar_url: null,
     }
 
     const { error: insErr } = await supabase.from('profiles').insert(toInsert)
@@ -52,9 +54,7 @@ async function ensureProfileRow(me) {
       return created
     }
 
-    // Unique conflict (handle/user_id/etc)
     if (insErr?.code === '23505') continue
-
     throw insErr
   }
 
@@ -70,12 +70,16 @@ export default function ProfilePage() {
   const [me, setMe] = useState(null)
   const [uploading, setUploading] = useState(false)
 
+  // cropping state
+  const [cropOpen, setCropOpen] = useState(false)
+  const [pendingFile, setPendingFile] = useState(null)
+
   const [profile, setProfile] = useState({
     handle: '',
     display_name: '',
     bio: '',
     is_public: false,
-    avatar_url: ''
+    avatar_url: '',
   })
 
   // Load auth user
@@ -106,7 +110,7 @@ export default function ProfilePage() {
             display_name: row.display_name || '',
             bio: row.bio || '',
             is_public: !!row.is_public,
-            avatar_url: row.avatar_url || ''
+            avatar_url: row.avatar_url || '',
           })
         }
       } catch (e) {
@@ -143,7 +147,7 @@ export default function ProfilePage() {
         display_name: (profile.display_name || '').trim(),
         bio: profile.bio || '',
         is_public: !!profile.is_public,
-        avatar_url: profile.avatar_url || null
+        avatar_url: profile.avatar_url || null,
       }
 
       if (payload.is_public && !payload.avatar_url) {
@@ -160,7 +164,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || ''
+          avatar_url: fresh.avatar_url || '',
         })
       }
 
@@ -172,15 +176,15 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleUploadAvatar(ev) {
+  // actual uploader (re-used after crop)
+  async function uploadAvatarFile(file) {
+    if (!file || !me?.id) return
+
+    setUploading(true)
+    setErr('')
+    setMsg('')
+
     try {
-      const file = ev.target.files?.[0]
-      if (!file || !me?.id) return
-
-      setUploading(true)
-      setErr('')
-      setMsg('')
-
       await ensureProfileRow(me)
 
       const extFromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
@@ -195,7 +199,7 @@ export default function ProfilePage() {
 
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
-        contentType: file.type || 'image/jpeg'
+        contentType: file.type || 'image/jpeg',
       })
       if (upErr) throw upErr
 
@@ -217,7 +221,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || ''
+          avatar_url: fresh.avatar_url || '',
         })
       }
 
@@ -226,8 +230,24 @@ export default function ProfilePage() {
       setErr(e?.message || 'Upload failed')
     } finally {
       setUploading(false)
-      ev.target.value = ''
     }
+  }
+
+  // pick file -> open crop modal
+  async function handlePickAvatar(ev) {
+    const file = ev.target.files?.[0]
+    if (!file || !me?.id) return
+
+    // only images for avatar
+    if (!file.type?.startsWith('image/')) {
+      setErr('Please choose an image file.')
+      ev.target.value = ''
+      return
+    }
+
+    setPendingFile(file)
+    setCropOpen(true)
+    ev.target.value = ''
   }
 
   async function handleRemoveAvatar() {
@@ -254,7 +274,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || ''
+          avatar_url: fresh.avatar_url || '',
         })
       }
 
@@ -286,44 +306,6 @@ export default function ProfilePage() {
 
   return (
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
-      {/* Component-scoped layout CSS so this can't "revert" */}
-      <style>{`
-        .tmd-profile-grid{
-          display:grid;
-          grid-template-columns: 180px 1fr;
-          gap: 18px;
-          align-items:start;
-        }
-        .tmd-profile-avatar-col{
-          display:grid;
-          gap:10px;
-          justify-items:center;
-        }
-        .tmd-profile-top{
-          display:grid;
-          gap:12px;
-          min-width:0;
-        }
-        /* ✅ Bio spans BOTH columns (under photo + under display name) */
-        .tmd-profile-bio{
-          grid-column: 1 / -1;
-          min-width:0;
-        }
-        /* ✅ Keep lower controls roomy too */
-        .tmd-profile-lower{
-          grid-column: 1 / -1;
-          display:grid;
-          gap:12px;
-        }
-        @media (max-width: 640px){
-          .tmd-profile-grid{ grid-template-columns: 140px 1fr; }
-          .tmd-profile-avatar-col{ justify-items:start; }
-        }
-        @media (max-width: 380px){
-          .tmd-profile-grid{ grid-template-columns: 1fr; }
-        }
-      `}</style>
-
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Upload a photo first if you want your profile to be public.
@@ -332,9 +314,16 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <form onSubmit={saveProfile} className="tmd-profile-grid">
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '180px 1fr',
+          gap: 18,
+          alignItems: 'start',
+        }}
+      >
         {/* Avatar column */}
-        <div className="tmd-profile-avatar-col">
+        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
           <div className="avatar-frame" style={{ width: 140, height: 140 }}>
             {profile.avatar_url ? (
               <img
@@ -355,7 +344,7 @@ export default function ProfilePage() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleUploadAvatar}
+                onChange={handlePickAvatar}
                 style={{ display: 'none' }}
                 disabled={uploading}
               />
@@ -374,8 +363,8 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Right-side: handle + display name */}
-        <div className="tmd-profile-top">
+        {/* Right-side form */}
+        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
           <label className="form-label">
             Handle
             <input
@@ -399,22 +388,18 @@ export default function ProfilePage() {
               placeholder="Your name"
             />
           </label>
-        </div>
 
-        {/* ✅ Bio FULL WIDTH */}
-        <label className="form-label tmd-profile-bio">
-          Bio
-          <textarea
-            className="input"
-            rows={5}
-            value={profile.bio || ''}
-            onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
-            placeholder="A short intro…"
-          />
-        </label>
+          <label className="form-label">
+            Bio
+            <textarea
+              className="input"
+              rows={4}
+              value={profile.bio || ''}
+              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+              placeholder="A short intro…"
+            />
+          </label>
 
-        {/* Lower controls */}
-        <div className="tmd-profile-lower">
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
@@ -438,17 +423,36 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="actions-row">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
           </div>
-        </div>
-      </form>
+        </form>
+      </div>
 
+      {/* Multi-photo manager */}
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
+
+      {/* Crop modal */}
+      <ImageCropModal
+        open={cropOpen}
+        file={pendingFile}
+        aspect={1}
+        round={true}
+        title="Crop profile photo"
+        onCancel={() => {
+          setCropOpen(false)
+          setPendingFile(null)
+        }}
+        onConfirm={(croppedFile) => {
+          setCropOpen(false)
+          setPendingFile(null)
+          uploadAvatarFile(croppedFile)
+        }}
+      />
     </div>
   )
 }
