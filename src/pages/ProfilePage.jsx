@@ -33,19 +33,19 @@ async function ensureProfileRow(me) {
   const existing = await fetchMyProfile(me.id)
   if (existing) return existing
 
-  const seed = sanitizeHandle(me.email?.split('@')?.[0] || me.id.slice(0, 6))
+  const emailBase = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
 
   for (let attempt = 0; attempt <= 30; attempt += 1) {
-    const candidate = attempt === 0 ? seed : `${seed}${attempt}`
+    const candidate = attempt === 0 ? emailBase : `${emailBase}${attempt}`
 
     const toInsert = {
       user_id: me.id,
       handle: candidate,
       display_name: me.user_metadata?.full_name || candidate,
-      // start private until avatar exists (constraint: public_requires_avatar)
+      // ✅ start private until avatar exists (constraint: public_requires_avatar)
       is_public: false,
       bio: '',
-      avatar_url: null,
+      avatar_url: null
     }
 
     const { error: insErr } = await supabase.from('profiles').insert(toInsert)
@@ -72,17 +72,17 @@ export default function ProfilePage() {
   const [me, setMe] = useState(null)
   const [uploading, setUploading] = useState(false)
 
-  // cropping state
-  const [cropOpen, setCropOpen] = useState(false)
-  const [pendingFile, setPendingFile] = useState(null)
-
   const [profile, setProfile] = useState({
     handle: '',
     display_name: '',
     bio: '',
     is_public: false,
-    avatar_url: '',
+    avatar_url: ''
   })
+
+  // Crop modal state (avatar)
+  const [cropOpen, setCropOpen] = useState(false)
+  const [pendingAvatarFile, setPendingAvatarFile] = useState(null)
 
   // Load auth user
   useEffect(() => {
@@ -112,7 +112,7 @@ export default function ProfilePage() {
             display_name: row.display_name || '',
             bio: row.bio || '',
             is_public: !!row.is_public,
-            avatar_url: row.avatar_url || '',
+            avatar_url: row.avatar_url || ''
           })
         }
       } catch (e) {
@@ -129,7 +129,7 @@ export default function ProfilePage() {
     if (!me?.id) return false
     if (!profile.handle?.trim()) return false
     if (saving) return false
-    // enforce DB rule client-side too
+    // ✅ enforce your DB rule client-side too
     if (profile.is_public && !profile.avatar_url) return false
     return true
   }, [me?.id, profile.handle, profile.is_public, profile.avatar_url, saving])
@@ -150,7 +150,7 @@ export default function ProfilePage() {
         display_name: (profile.display_name || '').trim(),
         bio: profile.bio || '',
         is_public: !!profile.is_public,
-        avatar_url: profile.avatar_url || null,
+        avatar_url: profile.avatar_url || null
       }
 
       if (payload.is_public && !payload.avatar_url) {
@@ -167,7 +167,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || '',
+          avatar_url: fresh.avatar_url || ''
         })
       }
 
@@ -179,15 +179,24 @@ export default function ProfilePage() {
     }
   }
 
-  // actual uploader (re-used after crop)
-  async function uploadAvatarFile(file) {
+  function onPickAvatar(ev) {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
     if (!file || !me?.id) return
-
-    setUploading(true)
     setErr('')
     setMsg('')
+    setPendingAvatarFile(file)
+    setCropOpen(true)
+  }
 
+  async function uploadAvatarFile(file) {
     try {
+      if (!file || !me?.id) return
+
+      setUploading(true)
+      setErr('')
+      setMsg('')
+
       await ensureProfileRow(me)
 
       const extFromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
@@ -202,7 +211,7 @@ export default function ProfilePage() {
 
       const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
-        contentType: file.type || 'image/jpeg',
+        contentType: file.type || 'image/jpeg'
       })
       if (upErr) throw upErr
 
@@ -224,7 +233,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || '',
+          avatar_url: fresh.avatar_url || ''
         })
       }
 
@@ -234,22 +243,6 @@ export default function ProfilePage() {
     } finally {
       setUploading(false)
     }
-  }
-
-  // pick file -> open crop modal
-  function handlePickAvatar(ev) {
-    const file = ev.target.files?.[0]
-    if (!file || !me?.id) return
-
-    if (!file.type?.startsWith('image/')) {
-      setErr('Please choose an image file.')
-      ev.target.value = ''
-      return
-    }
-
-    setPendingFile(file)
-    setCropOpen(true)
-    ev.target.value = ''
   }
 
   async function handleRemoveAvatar() {
@@ -262,7 +255,7 @@ export default function ProfilePage() {
 
       await ensureProfileRow(me)
 
-      // if public_requires_avatar exists, removing avatar must make private
+      // ✅ if public_requires_avatar exists, removing the avatar must make them private
       const updates = profile.is_public
         ? { avatar_url: null, is_public: false }
         : { avatar_url: null }
@@ -277,7 +270,7 @@ export default function ProfilePage() {
           display_name: fresh.display_name || '',
           bio: fresh.bio || '',
           is_public: !!fresh.is_public,
-          avatar_url: fresh.avatar_url || '',
+          avatar_url: fresh.avatar_url || ''
         })
       }
 
@@ -322,7 +315,7 @@ export default function ProfilePage() {
           display: 'grid',
           gridTemplateColumns: '180px 1fr',
           gap: 18,
-          alignItems: 'start',
+          alignItems: 'start'
         }}
       >
         {/* Avatar column */}
@@ -347,7 +340,7 @@ export default function ProfilePage() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={handlePickAvatar}
+                onChange={onPickAvatar}
                 style={{ display: 'none' }}
                 disabled={uploading}
               />
@@ -439,26 +432,30 @@ export default function ProfilePage() {
         <ProfilePhotosManager userId={me.id} />
       </div>
 
-      {/* Crop modal */}
+      {/* Crop modal for avatar */}
       <ImageCropModal
         open={cropOpen}
-        file={pendingFile}
-        aspect={1}
-        round={true}
+        file={pendingAvatarFile}
         title="Crop profile photo"
+        shape="round"
+        initialAspect={1}
+        aspectOptions={[
+          { label: "1:1", value: 1 / 1 },
+        ]}
         onCancel={() => {
           setCropOpen(false)
-          setPendingFile(null)
+          setPendingAvatarFile(null)
         }}
-        onConfirm={(croppedFile) => {
+        onConfirm={async (croppedFile) => {
           setCropOpen(false)
-          setPendingFile(null)
-          uploadAvatarFile(croppedFile)
+          setPendingAvatarFile(null)
+          await uploadAvatarFile(croppedFile)
         }}
       />
     </div>
   )
 }
+
 
 
 
