@@ -377,10 +377,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
 export default function ChatDock(props) {
   const { peerId: peerIdProp, partnerId, partnerName = "", onClose, mode, onRead } = props;
 
-  // Modes:
-  // - "page": embedded in a page
-  // - "widget": standalone fixed widget (legacy / optional)
-  // - "embedded": rendered inside an already-positioned container (ChatLauncher panel)
   const resolvedMode = mode || (typeof onClose === "function" ? "widget" : "page");
   const isWidget = resolvedMode === "widget";
   const isEmbedded = resolvedMode === "embedded";
@@ -423,23 +419,22 @@ export default function ChatDock(props) {
   // Delete-last state
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  // Composer: auto-grow textarea
-  const inputRef = useRef(null);
-  const MAX_COMPOSER_ROWS = 6;
-  const COMPOSER_LINE_HEIGHT_PX = 20; // used only for max-height calculation
-  const MAX_TEXTAREA_HEIGHT = MAX_COMPOSER_ROWS * COMPOSER_LINE_HEIGHT_PX + 24; // padding-ish
-
-  const autoresizeTextarea = useCallback(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
-    el.style.height = `${next}px`;
-  }, []);
+  // Composer refs / responsive
+  const textareaRef = useRef(null);
+  const [isNarrow, setIsNarrow] = useState(false);
 
   useEffect(() => {
-    autoresizeTextarea();
-  }, [text, autoresizeTextarea]);
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(max-width: 640px)");
+    const apply = () => setIsNarrow(!!mq.matches);
+    apply();
+    if (mq.addEventListener) mq.addEventListener("change", apply);
+    else mq.addListener(apply);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", apply);
+      else mq.removeListener(apply);
+    };
+  }, []);
 
   /* -------------------- layout constants (fix overflow) -------------------- */
   const listStyle = {
@@ -450,6 +445,7 @@ export default function ChatDock(props) {
     overflowX: "hidden",
     background: "#fff",
     minHeight: 140,
+
     display: "flex",
     flexDirection: "column",
     gap: 10,
@@ -726,9 +722,6 @@ export default function ChatDock(props) {
       const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
-      requestAnimationFrame(() => {
-        autoresizeTextarea();
-      });
     } catch (err) {
       alert(err.message ?? "Failed to send");
       console.error(err);
@@ -1000,6 +993,16 @@ export default function ChatDock(props) {
     }
   };
 
+  // ✅ Auto-grow textarea so users can see what they’re typing
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const cap = isNarrow ? 220 : 160;
+    const next = Math.min(el.scrollHeight || 0, cap);
+    el.style.height = `${Math.max(next, 44)}px`;
+  }, [text, isNarrow]);
+
   /* connection controls */
   const connControls = (
     <div style={{ marginBottom: 10 }}>
@@ -1017,9 +1020,7 @@ export default function ChatDock(props) {
         </>
       )}
       {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
-      {(status === "rejected" || status === "disconnected") && (
-        <Btn onClick={reconnect} label="Reconnect" disabled={busy} />
-      )}
+      {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
     </div>
   );
 
@@ -1134,7 +1135,6 @@ export default function ChatDock(props) {
   /* UI */
   return (
     <div onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} style={outerStyle}>
-      {/* widget topbar (NOT in embedded mode, because ChatLauncher already has a header) */}
       {isWidget && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1167,7 +1167,6 @@ export default function ChatDock(props) {
         </div>
       )}
 
-      {/* header */}
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ fontWeight: 700 }}>Connection</div>
         <div>
@@ -1179,10 +1178,8 @@ export default function ChatDock(props) {
         </div>
       </div>
 
-      {/* controls */}
       <div style={{ marginBottom: 10 }}>{connControls}</div>
 
-      {/* messages + composer */}
       {ACCEPTED.has(status) ? (
         <div
           style={{
@@ -1196,7 +1193,6 @@ export default function ChatDock(props) {
             overflow: "hidden",
           }}
         >
-          {/* sessions banner */}
           {sessionCount > 1 && !hidePrevBanner && (
             <div
               style={{
@@ -1323,33 +1319,36 @@ export default function ChatDock(props) {
               </div>
             )}
 
-            {/* ✅ Composer: wraps nicely on small screens; textarea expands; delete is compact */}
+            {/* ✅ Mobile composer: textarea gets full width, actions below */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "flex-end",
-                minWidth: 0,
-                flexWrap: "wrap",
-              }}
+              style={
+                isNarrow
+                  ? {
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr",
+                      gridTemplateRows: "auto auto",
+                      gap: 8,
+                      alignItems: "end",
+                      minWidth: 0,
+                    }
+                  : { display: "flex", gap: 8, alignItems: "center", minWidth: 0 }
+              }
             >
-              <div style={{ flex: "0 0 auto" }}>
+              <div style={isNarrow ? { gridColumn: "1 / 2", gridRow: "1 / 2" } : undefined}>
                 <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
               </div>
 
               <textarea
-                ref={inputRef}
-                rows={1}
+                ref={textareaRef}
+                rows={2}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
                   sendTyping();
-                  // autoresize happens via effect, but this makes it feel instant
-                  requestAnimationFrame(autoresizeTextarea);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -1359,58 +1358,61 @@ export default function ChatDock(props) {
                 }}
                 disabled={uploading}
                 style={{
-                  flex: "1 1 220px",
+                  gridColumn: isNarrow ? "2 / 3" : undefined,
+                  gridRow: isNarrow ? "1 / 2" : undefined,
+                  flex: 1,
                   minWidth: 0,
                   border: "1px solid var(--border)",
                   borderRadius: 12,
                   padding: "10px 12px",
-                  fontSize: 14,
+                  fontSize: isNarrow ? 16 : 14,
                   resize: "none",
-                  lineHeight: "20px",
-                  maxHeight: MAX_TEXTAREA_HEIGHT,
+                  lineHeight: 1.35,
                   overflowY: "auto",
+                  minHeight: 44,
+                  maxHeight: isNarrow ? 220 : 160,
                 }}
               />
 
-              {/* Compact delete icon button to save space */}
-              <button
-                type="button"
-                onClick={deleteMyLastMessage}
-                disabled={!canDeleteLast || deleteBusy || uploading}
-                title="Delete your last message"
-                aria-label="Delete last message"
-                style={{
-                  flex: "0 0 auto",
-                  width: 44,
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid var(--border)",
-                  background: "#f3f4f6",
-                  fontWeight: 900,
-                  cursor: !canDeleteLast || deleteBusy || uploading ? "not-allowed" : "pointer",
-                  opacity: !canDeleteLast || deleteBusy || uploading ? 0.55 : 1,
-                }}
+              <div
+                style={
+                  isNarrow
+                    ? { gridColumn: "1 / 3", gridRow: "2 / 3", display: "flex", gap: 8, justifyContent: "flex-end" }
+                    : { display: "flex", gap: 8, alignItems: "center" }
+                }
               >
-                {deleteBusy ? "…" : "🗑"}
-              </button>
+                <button
+                  type="button"
+                  onClick={deleteMyLastMessage}
+                  disabled={!canDeleteLast || deleteBusy || uploading}
+                  title="Delete your last message in this conversation"
+                  className="btn btn-neutral btn-pill"
+                  style={{
+                    opacity: !canDeleteLast || deleteBusy || uploading ? 0.6 : 1,
+                    flex: "0 0 auto",
+                    padding: isNarrow ? "10px 12px" : undefined,
+                  }}
+                >
+                  {isNarrow ? "🗑️" : deleteBusy ? "Deleting…" : "Delete last"}
+                </button>
 
-              <button
-                type="submit"
-                disabled={!canSend || uploading}
-                style={{
-                  flex: "0 0 auto",
-                  height: 44,
-                  padding: "0 14px",
-                  borderRadius: 12,
-                  background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
-                  color: "#fff",
-                  border: "none",
-                  cursor: !canSend || uploading ? "not-allowed" : "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                Send
-              </button>
+                <button
+                  type="submit"
+                  disabled={!canSend || uploading}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
+                    color: "#fff",
+                    border: "none",
+                    cursor: !canSend || uploading ? "not-allowed" : "pointer",
+                    fontWeight: 700,
+                    flex: "0 0 auto",
+                  }}
+                >
+                  Send
+                </button>
+              </div>
             </form>
 
             {uploading && (
@@ -1424,6 +1426,7 @@ export default function ChatDock(props) {
     </div>
   );
 }
+
 
 
 
