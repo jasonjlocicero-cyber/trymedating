@@ -33,8 +33,7 @@ async function ensureProfileRow(me) {
   const existing = await fetchMyProfile(me.id)
   if (existing) return existing
 
-  const emailBase = sanitizeHandle noting baseline
-  const seed = sanitizeHandle(me.email?.split('@')[0] || me.id.slice(0, 6))
+  const seed = sanitizeHandle(me.email?.split('@')?.[0] || me.id.slice(0, 6))
 
   for (let attempt = 0; attempt <= 30; attempt += 1) {
     const candidate = attempt === 0 ? seed : `${seed}${attempt}`
@@ -43,6 +42,7 @@ async function ensureProfileRow(me) {
       user_id: me.id,
       handle: candidate,
       display_name: me.user_metadata?.full_name || candidate,
+      // start private until avatar exists (constraint: public_requires_avatar)
       is_public: false,
       bio: '',
       avatar_url: null,
@@ -54,7 +54,9 @@ async function ensureProfileRow(me) {
       return created
     }
 
+    // Unique conflict (handle/user_id/etc)
     if (insErr?.code === '23505') continue
+
     throw insErr
   }
 
@@ -127,6 +129,7 @@ export default function ProfilePage() {
     if (!me?.id) return false
     if (!profile.handle?.trim()) return false
     if (saving) return false
+    // enforce DB rule client-side too
     if (profile.is_public && !profile.avatar_url) return false
     return true
   }, [me?.id, profile.handle, profile.is_public, profile.avatar_url, saving])
@@ -234,11 +237,10 @@ export default function ProfilePage() {
   }
 
   // pick file -> open crop modal
-  async function handlePickAvatar(ev) {
+  function handlePickAvatar(ev) {
     const file = ev.target.files?.[0]
     if (!file || !me?.id) return
 
-    // only images for avatar
     if (!file.type?.startsWith('image/')) {
       setErr('Please choose an image file.')
       ev.target.value = ''
@@ -260,6 +262,7 @@ export default function ProfilePage() {
 
       await ensureProfileRow(me)
 
+      // if public_requires_avatar exists, removing avatar must make private
       const updates = profile.is_public
         ? { avatar_url: null, is_public: false }
         : { avatar_url: null }
@@ -456,6 +459,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
