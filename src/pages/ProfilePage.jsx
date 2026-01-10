@@ -41,8 +41,7 @@ async function ensureProfileRow(me) {
       user_id: me.id,
       handle: candidate,
       display_name: me.user_metadata?.full_name || candidate,
-      // ✅ start private until avatar exists (constraint: public_requires_avatar)
-      is_public: false,
+      is_public: false, // ✅ start private until avatar exists
       bio: '',
       avatar_url: null
     }
@@ -124,7 +123,6 @@ export default function ProfilePage() {
     if (!me?.id) return false
     if (!profile.handle?.trim()) return false
     if (saving) return false
-    // ✅ enforce your DB rule client-side too
     if (profile.is_public && !profile.avatar_url) return false
     return true
   }, [me?.id, profile.handle, profile.is_public, profile.avatar_url, saving])
@@ -242,7 +240,6 @@ export default function ProfilePage() {
 
       await ensureProfileRow(me)
 
-      // ✅ if public_requires_avatar exists, removing the avatar must make them private
       const updates = profile.is_public
         ? { avatar_url: null, is_public: false }
         : { avatar_url: null }
@@ -289,6 +286,44 @@ export default function ProfilePage() {
 
   return (
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
+      {/* Component-scoped layout CSS so this can't "revert" */}
+      <style>{`
+        .tmd-profile-grid{
+          display:grid;
+          grid-template-columns: 180px 1fr;
+          gap: 18px;
+          align-items:start;
+        }
+        .tmd-profile-avatar-col{
+          display:grid;
+          gap:10px;
+          justify-items:center;
+        }
+        .tmd-profile-top{
+          display:grid;
+          gap:12px;
+          min-width:0;
+        }
+        /* ✅ Bio spans BOTH columns (under photo + under display name) */
+        .tmd-profile-bio{
+          grid-column: 1 / -1;
+          min-width:0;
+        }
+        /* ✅ Keep lower controls roomy too */
+        .tmd-profile-lower{
+          grid-column: 1 / -1;
+          display:grid;
+          gap:12px;
+        }
+        @media (max-width: 640px){
+          .tmd-profile-grid{ grid-template-columns: 140px 1fr; }
+          .tmd-profile-avatar-col{ justify-items:start; }
+        }
+        @media (max-width: 380px){
+          .tmd-profile-grid{ grid-template-columns: 1fr; }
+        }
+      `}</style>
+
       <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Profile</h1>
       <p className="muted" style={{ marginBottom: 16 }}>
         Upload a photo first if you want your profile to be public.
@@ -297,16 +332,9 @@ export default function ProfilePage() {
       {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
       {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '180px 1fr',
-          gap: 18,
-          alignItems: 'start'
-        }}
-      >
+      <form onSubmit={saveProfile} className="tmd-profile-grid">
         {/* Avatar column */}
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
+        <div className="tmd-profile-avatar-col">
           <div className="avatar-frame" style={{ width: 140, height: 140 }}>
             {profile.avatar_url ? (
               <img
@@ -346,8 +374,8 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Right-side form */}
-        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
+        {/* Right-side: handle + display name */}
+        <div className="tmd-profile-top">
           <label className="form-label">
             Handle
             <input
@@ -371,18 +399,22 @@ export default function ProfilePage() {
               placeholder="Your name"
             />
           </label>
+        </div>
 
-          <label className="form-label">
-            Bio
-            <textarea
-              className="input"
-              rows={4}
-              value={profile.bio || ''}
-              onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
-              placeholder="A short intro…"
-            />
-          </label>
+        {/* ✅ Bio FULL WIDTH */}
+        <label className="form-label tmd-profile-bio">
+          Bio
+          <textarea
+            className="input"
+            rows={5}
+            value={profile.bio || ''}
+            onChange={(e) => setProfile((p) => ({ ...p, bio: e.target.value }))}
+            placeholder="A short intro…"
+          />
+        </label>
 
+        {/* Lower controls */}
+        <div className="tmd-profile-lower">
           <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <input
               type="checkbox"
@@ -406,21 +438,21 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="actions-row">
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
           </div>
-        </form>
-      </div>
+        </div>
+      </form>
 
-      {/* Multi-photo manager */}
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
     </div>
   )
 }
+
 
 
 
