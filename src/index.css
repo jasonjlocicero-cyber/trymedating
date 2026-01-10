@@ -232,9 +232,24 @@ textarea.input{
   justify-content:center;
 }
 
-.profile-form-grid{
+.profile-top-fields{
   display:grid;
   gap:12px;
+  min-width:0;
+}
+
+/* ✅ Bio spans full width under avatar + display name */
+.profile-bio-field{
+  grid-column: 1 / -1;
+  min-width:0;
+}
+
+/* Lower fields: right column on desktop, full width on mobile */
+.profile-lower-fields{
+  grid-column: 2;
+  display:grid;
+  gap:12px;
+  min-width:0;
 }
 
 .profile-public-row{
@@ -244,47 +259,18 @@ textarea.input{
   font-weight:800;
 }
 
-/* Mobile: stack avatar above form so Bio has full width */
+/* Mobile: KEEP 2 columns, but give more room + make lower section full width */
 @media (max-width:640px){
-  .profile-grid{ grid-template-columns:1fr; }
+  .profile-grid{ grid-template-columns:140px 1fr; }
   .profile-avatar-col{ justify-items:start; }
   .profile-avatar-actions{ justify-content:flex-start; }
+  .profile-lower-fields{ grid-column: 1 / -1; }
 }
 
-/* -----------------------------
-   ✅ BIO BOX FIX (mobile + narrow)
-   Keeps avatar + top inputs in 2 columns,
-   but forces Bio (textarea field) to span full width
-   directly under BOTH columns.
-   ----------------------------- */
-@supports selector(.tmd-x:has(textarea)) {
-  /* Flatten the right column so its children can be placed on the parent grid */
-  .profile-grid .profile-form-grid{
-    display: contents;
-  }
-
-  /* Default: form fields land in column 2 */
-  .profile-grid .profile-form-grid > *{
-    grid-column: 2;
-    min-width: 0;
-  }
-
-  /* The field that contains a textarea (Bio) spans both columns */
-  .profile-grid .profile-form-grid > *:has(textarea){
-    grid-column: 1 / -1;
-    margin-top: 4px;
-  }
-
-  /* Make sure the textarea truly fills the new span */
-  .profile-grid .profile-form-grid > *:has(textarea) textarea{
-    width: 100%;
-    max-width: 100%;
-  }
-}
-
-/* Very small screens: stack everything cleanly */
-@media (max-width:420px){
+/* Ultra-small screens: stack if needed */
+@media (max-width:380px){
   .profile-grid{ grid-template-columns:1fr; }
+  .profile-lower-fields{ grid-column: 1 / -1; }
 }
 
 /* -----------------------------
@@ -361,6 +347,7 @@ textarea.input{
   flex-wrap:wrap;
   margin-top:6px;
 }
+
 
 
 
