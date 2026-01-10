@@ -280,7 +280,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
   return (
     <div
       style={{
-        // ✅ CRITICAL: clamp to panel width
         maxWidth: "78%",
         minWidth: 0,
         boxSizing: "border-box",
@@ -295,7 +294,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         lineHeight: 1.4,
       }}
     >
-      {/* header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ fontSize: 13, minWidth: 0 }}>
           Attachment: {meta?.name || "file"}
@@ -344,7 +342,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         </div>
       </div>
 
-      {/* body */}
       <div style={{ marginTop: 6 }}>
         {url ? (
           isPDF ? (
@@ -355,7 +352,6 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               src={url}
               alt={meta?.name || "image"}
               onError={handleImgError}
-              // ✅ never exceed bubble width (prevents horizontal overflow)
               style={{ maxWidth: "100%", height: "auto", borderRadius: 8, display: "block" }}
             />
           ) : (
@@ -427,16 +423,33 @@ export default function ChatDock(props) {
   // Delete-last state
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  // Composer: auto-grow textarea
+  const inputRef = useRef(null);
+  const MAX_COMPOSER_ROWS = 6;
+  const COMPOSER_LINE_HEIGHT_PX = 20; // used only for max-height calculation
+  const MAX_TEXTAREA_HEIGHT = MAX_COMPOSER_ROWS * COMPOSER_LINE_HEIGHT_PX + 24; // padding-ish
+
+  const autoresizeTextarea = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    el.style.height = `${next}px`;
+  }, []);
+
+  useEffect(() => {
+    autoresizeTextarea();
+  }, [text, autoresizeTextarea]);
+
   /* -------------------- layout constants (fix overflow) -------------------- */
   const listStyle = {
     border: "1px solid var(--border)",
     borderRadius: 12,
     padding: 12,
     overflowY: "auto",
-    overflowX: "hidden", // ✅ kills horizontal scrollbar
+    overflowX: "hidden",
     background: "#fff",
     minHeight: 140,
-
     display: "flex",
     flexDirection: "column",
     gap: 10,
@@ -445,11 +458,11 @@ export default function ChatDock(props) {
   const rowStyle = (mine) => ({
     display: "flex",
     justifyContent: mine ? "flex-end" : "flex-start",
-    maxWidth: "100%", // ✅ row can’t exceed panel width
+    maxWidth: "100%",
   });
 
   const bubbleBase = {
-    maxWidth: "78%", // ✅ critical: prevents off-screen bubbles
+    maxWidth: "78%",
     minWidth: 0,
     boxSizing: "border-box",
     overflowWrap: "anywhere",
@@ -465,7 +478,7 @@ export default function ChatDock(props) {
   const bubbleStyle = (mine) => ({
     ...bubbleBase,
     background: mine ? "#eef6ff" : "#f8fafc",
-    marginLeft: mine ? "auto" : undefined, // extra safety
+    marginLeft: mine ? "auto" : undefined,
   });
 
   const deletedBubble = {
@@ -479,7 +492,7 @@ export default function ChatDock(props) {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    flexWrap: "wrap", // ✅ prevents width blowout
+    flexWrap: "wrap",
     justifyContent: mine ? "flex-end" : "space-between",
   });
 
@@ -623,7 +636,6 @@ export default function ChatDock(props) {
 
     setItems(data || []);
 
-    // mark all unread (for me) across the pair as read
     await supabase
       .from("messages")
       .update({ read_at: new Date().toISOString() })
@@ -631,7 +643,6 @@ export default function ChatDock(props) {
       .eq("recipient", myId)
       .is("read_at", null);
 
-    // NEW: force launcher badge refresh even if UPDATE realtime doesn’t fire
     try {
       onRead?.();
     } catch {}
@@ -654,7 +665,6 @@ export default function ChatDock(props) {
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    // ensure scroll after DOM paint
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
@@ -716,6 +726,9 @@ export default function ChatDock(props) {
       const { error } = await supabase.from("messages").insert(payload);
       if (error) throw error;
       setText("");
+      requestAnimationFrame(() => {
+        autoresizeTextarea();
+      });
     } catch (err) {
       alert(err.message ?? "Failed to send");
       console.error(err);
@@ -1004,7 +1017,9 @@ export default function ChatDock(props) {
         </>
       )}
       {ACCEPTED.has(status) && <Btn tone="danger" onClick={disconnect} label="Disconnect" disabled={busy} />}
-      {(status === "rejected" || status === "disconnected") && <Btn onClick={reconnect} label="Reconnect" disabled={busy} />}
+      {(status === "rejected" || status === "disconnected") && (
+        <Btn onClick={reconnect} label="Reconnect" disabled={busy} />
+      )}
     </div>
   );
 
@@ -1018,7 +1033,7 @@ export default function ChatDock(props) {
         flexDirection: "column",
         background: "#fff",
         minWidth: 0,
-        overflow: "hidden", // ✅ safety
+        overflow: "hidden",
       }
     : isWidget
     ? {
@@ -1037,7 +1052,7 @@ export default function ChatDock(props) {
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        overflow: "hidden", // ✅ safety
+        overflow: "hidden",
       }
     : {
         maxWidth: 720,
@@ -1047,7 +1062,7 @@ export default function ChatDock(props) {
         padding: 12,
         background: "#fff",
         minWidth: 0,
-        overflow: "hidden", // ✅ safety
+        overflow: "hidden",
       };
 
   /* UI guards */
@@ -1178,7 +1193,7 @@ export default function ChatDock(props) {
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
-            overflow: "hidden", // ✅ prevents any horizontal bleed
+            overflow: "hidden",
           }}
         >
           {/* sessions banner */}
@@ -1287,7 +1302,6 @@ export default function ChatDock(props) {
                               fontSize: 11,
                               opacity: 0.6,
                               textAlign: mine ? "right" : "left",
-                              // ✅ ensure timestamp doesn’t force width
                               maxWidth: "100%",
                               overflowWrap: "anywhere",
                               wordBreak: "break-word",
@@ -1309,20 +1323,33 @@ export default function ChatDock(props) {
               </div>
             )}
 
+            {/* ✅ Composer: wraps nicely on small screens; textarea expands; delete is compact */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-end",
+                minWidth: 0,
+                flexWrap: "wrap",
+              }}
             >
-              <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
+              <div style={{ flex: "0 0 auto" }}>
+                <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
+              </div>
+
               <textarea
+                ref={inputRef}
                 rows={1}
                 placeholder={uploading ? "Uploading…" : "Type a message…"}
                 value={text}
                 onChange={(e) => {
                   setText(e.target.value);
                   sendTyping();
+                  // autoresize happens via effect, but this makes it feel instant
+                  requestAnimationFrame(autoresizeTextarea);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
@@ -1332,45 +1359,54 @@ export default function ChatDock(props) {
                 }}
                 disabled={uploading}
                 style={{
-                  flex: 1,
-                  minWidth: 0, // ✅ prevents composer overflow
+                  flex: "1 1 220px",
+                  minWidth: 0,
                   border: "1px solid var(--border)",
                   borderRadius: 12,
                   padding: "10px 12px",
                   fontSize: 14,
                   resize: "none",
-                  lineHeight: 1.35,
-                  maxHeight: 120,
+                  lineHeight: "20px",
+                  maxHeight: MAX_TEXTAREA_HEIGHT,
                   overflowY: "auto",
                 }}
               />
 
+              {/* Compact delete icon button to save space */}
               <button
                 type="button"
                 onClick={deleteMyLastMessage}
                 disabled={!canDeleteLast || deleteBusy || uploading}
-                title="Delete your last message in this conversation"
-                className="btn btn-neutral btn-pill"
+                title="Delete your last message"
+                aria-label="Delete last message"
                 style={{
-                  opacity: !canDeleteLast || deleteBusy || uploading ? 0.6 : 1,
                   flex: "0 0 auto",
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  border: "1px solid var(--border)",
+                  background: "#f3f4f6",
+                  fontWeight: 900,
+                  cursor: !canDeleteLast || deleteBusy || uploading ? "not-allowed" : "pointer",
+                  opacity: !canDeleteLast || deleteBusy || uploading ? 0.55 : 1,
                 }}
               >
-                {deleteBusy ? "Deleting…" : "Delete last"}
+                {deleteBusy ? "…" : "🗑"}
               </button>
 
               <button
                 type="submit"
                 disabled={!canSend || uploading}
                 style={{
-                  padding: "10px 14px",
+                  flex: "0 0 auto",
+                  height: 44,
+                  padding: "0 14px",
                   borderRadius: 12,
                   background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
                   color: "#fff",
                   border: "none",
                   cursor: !canSend || uploading ? "not-allowed" : "pointer",
                   fontWeight: 700,
-                  flex: "0 0 auto",
                 }}
               >
                 Send
@@ -1388,6 +1424,7 @@ export default function ChatDock(props) {
     </div>
   );
 }
+
 
 
 
