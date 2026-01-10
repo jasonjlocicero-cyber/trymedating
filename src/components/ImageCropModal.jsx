@@ -1,60 +1,64 @@
-import React, { useMemo, useState } from "react";
+// src/components/ImageCropModal.jsx
+import React, { useEffect, useMemo, useState } from "react";
 import Cropper from "react-easy-crop";
-import { getCroppedImageBlob } from "../lib/imageCrop";
+import { blobToFile, getCroppedImageBlob } from "../lib/cropImage";
 
 export default function ImageCropModal({
+  open,
   file,
   aspect = 1,
+  round = true,
   title = "Crop photo",
   onCancel,
-  onCropped,
-  circle = false, // useful for avatars (preview only)
-  maxSize = 2048, // optional downscale cap
+  onConfirm,
 }) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const imageSrc = useMemo(() => (file ? URL.createObjectURL(file) : ""), [file]);
+  const objectUrl = useMemo(() => {
+    if (!file) return "";
+    return URL.createObjectURL(file);
+  }, [file]);
 
-  async function handleCrop() {
-    if (!file || !croppedAreaPixels) return;
-    setBusy(true);
+  useEffect(() => {
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [objectUrl]);
+
+  if (!open || !file) return null;
+
+  async function handleConfirm() {
     try {
-      const blob = await getCroppedImageBlob(imageSrc, croppedAreaPixels, {
-        mime: "image/jpeg",
+      setBusy(true);
+      const blob = await getCroppedImageBlob(objectUrl, croppedAreaPixels, {
+        mimeType: file.type?.startsWith("image/") ? file.type : "image/jpeg",
         quality: 0.92,
-        maxSize,
       });
 
-      // Keep a sane filename
-      const base = (file.name || "photo").replace(/\.[^.]+$/, "");
-      const croppedFile = new File([blob], `${base}-cropped.jpg`, { type: blob.type });
-
-      onCropped?.(croppedFile);
+      const croppedFile = blobToFile(blob, file.name || "photo.jpg");
+      onConfirm?.(croppedFile);
     } catch (e) {
-      alert(e?.message || "Failed to crop image.");
+      alert(e?.message || "Failed to crop image");
     } finally {
       setBusy(false);
     }
   }
 
-  // cleanup object URL when modal closes is handled by React when component unmounts;
-  // if you want extra safety, you can revoke it in a useEffect cleanup.
-
-  if (!file) return null;
-
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 999999,
         background: "rgba(0,0,0,0.55)",
+        zIndex: 200000,
         display: "grid",
         placeItems: "center",
-        padding: 12,
+        padding: 16,
       }}
     >
       <div
@@ -67,44 +71,50 @@ export default function ImageCropModal({
           boxShadow: "0 18px 60px rgba(0,0,0,0.25)",
         }}
       >
-        <div style={{ padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          style={{
+            padding: 12,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
           <div style={{ fontWeight: 900 }}>{title}</div>
           <button
             type="button"
+            className="btn btn-neutral btn-pill"
             onClick={onCancel}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
-              border: "1px solid var(--border)",
-              background: "#fff",
-              cursor: "pointer",
-              fontWeight: 900,
-            }}
-            aria-label="Close"
-            title="Close"
+            disabled={busy}
           >
             ✕
           </button>
         </div>
 
-        <div style={{ position: "relative", height: "min(60vh, 420px)", background: "#111" }}>
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: 420,
+            background: "#111",
+          }}
+        >
           <Cropper
-            image={imageSrc}
+            image={objectUrl}
             crop={crop}
             zoom={zoom}
             aspect={aspect}
-            cropShape={circle ? "round" : "rect"}
-            showGrid={!circle}
+            cropShape={round ? "round" : "rect"}
+            showGrid={!round}
             onCropChange={setCrop}
             onZoomChange={setZoom}
-            onCropComplete={(_, areaPixels) => setCroppedAreaPixels(areaPixels)}
+            onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
           />
         </div>
 
         <div style={{ padding: 12, display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontWeight: 800, fontSize: 13, minWidth: 48 }}>Zoom</div>
+          <label style={{ display: "grid", gap: 6, fontWeight: 800 }}>
+            Zoom
             <input
               type="range"
               min={1}
@@ -112,16 +122,26 @@ export default function ImageCropModal({
               step={0.01}
               value={zoom}
               onChange={(e) => setZoom(Number(e.target.value))}
-              style={{ width: "100%" }}
+              disabled={busy}
             />
-          </div>
+          </label>
 
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-            <button type="button" className="btn btn-neutral btn-pill" onClick={onCancel} disabled={busy}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-neutral btn-pill"
+              onClick={onCancel}
+              disabled={busy}
+            >
               Cancel
             </button>
-            <button type="button" className="btn btn-primary btn-pill" onClick={handleCrop} disabled={busy}>
-              {busy ? "Cropping…" : "Crop & Use Photo"}
+            <button
+              type="button"
+              className="btn btn-primary btn-pill"
+              onClick={handleConfirm}
+              disabled={busy}
+            >
+              {busy ? "Cropping…" : "Use photo"}
             </button>
           </div>
         </div>
