@@ -1,4 +1,5 @@
 /* src/index.css */
+@import "cropperjs/dist/cropper.css";
 
 /* Reset & base */
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -232,24 +233,9 @@ textarea.input{
   justify-content:center;
 }
 
-.profile-top-fields{
+.profile-form-grid{
   display:grid;
   gap:12px;
-  min-width:0;
-}
-
-/* ✅ Bio spans full width under avatar + display name */
-.profile-bio-field{
-  grid-column: 1 / -1;
-  min-width:0;
-}
-
-/* Lower fields: right column on desktop, full width on mobile */
-.profile-lower-fields{
-  grid-column: 2;
-  display:grid;
-  gap:12px;
-  min-width:0;
 }
 
 .profile-public-row{
@@ -259,18 +245,11 @@ textarea.input{
   font-weight:800;
 }
 
-/* Mobile: KEEP 2 columns, but give more room + make lower section full width */
+/* Mobile: stack avatar above form so Bio has full width */
 @media (max-width:640px){
-  .profile-grid{ grid-template-columns:140px 1fr; }
+  .profile-grid{ grid-template-columns:1fr; }
   .profile-avatar-col{ justify-items:start; }
   .profile-avatar-actions{ justify-content:flex-start; }
-  .profile-lower-fields{ grid-column: 1 / -1; }
-}
-
-/* Ultra-small screens: stack if needed */
-@media (max-width:380px){
-  .profile-grid{ grid-template-columns:1fr; }
-  .profile-lower-fields{ grid-column: 1 / -1; }
 }
 
 /* -----------------------------
@@ -347,6 +326,7 @@ textarea.input{
   flex-wrap:wrap;
   margin-top:6px;
 }
+
 
 
 
