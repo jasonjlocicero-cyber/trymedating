@@ -1,6 +1,7 @@
 // src/components/ProfilePhotosManager.jsx
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import ImageCropModal from './ImageCropModal'
 
 const BUCKET = 'profile-photos'
 const MAX_PHOTOS = 6
@@ -20,6 +21,12 @@ export default function ProfilePhotosManager({ userId }) {
   const [photos, setPhotos] = useState([])
 
   const canUploadMore = useMemo(() => photos.length < MAX_PHOTOS, [photos.length])
+
+  // crop modal state (all profile photos)
+  const [cropOpen, setCropOpen] = useState(false)
+  const [cropSrc, setCropSrc] = useState('')
+  const [cropMime, setCropMime] = useState('image/jpeg')
+  const pendingFileRef = useRef(null)
 
   useEffect(() => {
     if (!userId) return
@@ -64,9 +71,23 @@ export default function ProfilePhotosManager({ userId }) {
     }
   }
 
-  async function handleUpload(e) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
+  function openCropForFile(file) {
+    const url = URL.createObjectURL(file)
+    pendingFileRef.current = file
+    setCropMime(file.type || 'image/jpeg')
+    setCropSrc(url)
+    setCropOpen(true)
+  }
+
+  function closeCrop() {
+    setCropOpen(false)
+    if (cropSrc) URL.revokeObjectURL(cropSrc)
+    setCropSrc('')
+    setCropMime('image/jpeg')
+    pendingFileRef.current = null
+  }
+
+  async function uploadPhotoFile(file) {
     if (!file || !userId) return
 
     setErr('')
@@ -79,7 +100,14 @@ export default function ProfilePhotosManager({ userId }) {
 
     setUploading(true)
     try {
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+      const extFromName = file.name?.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
+      const ext =
+        extFromName ||
+        (file.type === 'image/png' ? 'png' : '') ||
+        (file.type === 'image/webp' ? 'webp' : '') ||
+        (file.type === 'image/heic' ? 'heic' : '') ||
+        'jpg'
+
       const path = `${userId}/${makeId()}.${ext}`
 
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
@@ -113,6 +141,36 @@ export default function ProfilePhotosManager({ userId }) {
     } finally {
       setUploading(false)
     }
+  }
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !userId) return
+
+    setErr('')
+    setMsg('')
+
+    if (!canUploadMore) {
+      setErr(`Max ${MAX_PHOTOS} photos.`)
+      return
+    }
+
+    openCropForFile(file)
+  }
+
+  async function confirmCrop(blob) {
+    const original = pendingFileRef.current
+    if (!original) {
+      closeCrop()
+      return
+    }
+
+    const ext = blob.type.includes('png') ? 'png' : 'jpg'
+    const cropped = new File([blob], `photo.${ext}`, { type: blob.type || 'image/jpeg' })
+
+    closeCrop()
+    await uploadPhotoFile(cropped)
   }
 
   async function updatePhoto(id, patch) {
@@ -311,6 +369,16 @@ export default function ProfilePhotosManager({ userId }) {
           ))}
         </div>
       )}
+
+      <ImageCropModal
+        open={cropOpen}
+        src={cropSrc}
+        aspect={1}
+        title="Crop photo"
+        mimeHint={cropMime}
+        onCancel={closeCrop}
+        onConfirm={confirmCrop}
+      />
     </div>
   )
 }
