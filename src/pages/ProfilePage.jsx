@@ -1,8 +1,7 @@
 // src/pages/ProfilePage.jsx
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ProfilePhotosManager from '../components/ProfilePhotosManager'
-import ImageCropModal from '../components/ImageCropModal'
 
 const PROFILE_SELECT = 'user_id, handle, display_name, bio, is_public, avatar_url'
 
@@ -80,20 +79,18 @@ export default function ProfilePage() {
     avatar_url: '',
   })
 
-  // crop modal state (avatar)
-  const [cropOpen, setCropOpen] = useState(false)
-  const [cropSrc, setCropSrc] = useState('')
-  const [cropMime, setCropMime] = useState('image/jpeg')
-  const pendingAvatarFileRef = useRef(null)
-
   // Load auth user
   useEffect(() => {
     let mounted = true
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (mounted) setMe(user || null)
     })()
-    return () => { mounted = false }
+    return () => {
+      mounted = false
+    }
   }, [])
 
   // Ensure we have a profile row
@@ -124,7 +121,9 @@ export default function ProfilePage() {
       }
     })()
 
-    return () => { mounted = false }
+    return () => {
+      mounted = false
+    }
   }, [me?.id])
 
   const canSave = useMemo(() => {
@@ -181,8 +180,9 @@ export default function ProfilePage() {
     }
   }
 
-  async function uploadAvatarFile(file) {
+  async function handleUploadAvatar(ev) {
     try {
+      const file = ev.target.files?.[0]
       if (!file || !me?.id) return
 
       setUploading(true)
@@ -211,11 +211,7 @@ export default function ProfilePage() {
       const url = pub?.publicUrl || ''
       if (!url) throw new Error('Upload succeeded, but could not get avatar URL.')
 
-      const { error: dbErr } = await supabase
-        .from('profiles')
-        .update({ avatar_url: url })
-        .eq('user_id', me.id)
-
+      const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: url }).eq('user_id', me.id)
       if (dbErr) throw dbErr
 
       const fresh = await fetchMyProfile(me.id)
@@ -234,45 +230,8 @@ export default function ProfilePage() {
       setErr(e?.message || 'Upload failed')
     } finally {
       setUploading(false)
+      ev.target.value = ''
     }
-  }
-
-  function handlePickAvatar(ev) {
-    const file = ev.target.files?.[0]
-    ev.target.value = ''
-    if (!file || !me?.id) return
-
-    setErr('')
-    setMsg('')
-
-    // open crop modal
-    const url = URL.createObjectURL(file)
-    pendingAvatarFileRef.current = file
-    setCropMime(file.type || 'image/jpeg')
-    setCropSrc(url)
-    setCropOpen(true)
-  }
-
-  function closeCrop() {
-    setCropOpen(false)
-    if (cropSrc) URL.revokeObjectURL(cropSrc)
-    setCropSrc('')
-    setCropMime('image/jpeg')
-    pendingAvatarFileRef.current = null
-  }
-
-  async function confirmCrop(blob) {
-    const original = pendingAvatarFileRef.current
-    if (!original) {
-      closeCrop()
-      return
-    }
-
-    const ext = blob.type.includes('png') ? 'png' : 'jpg'
-    const cropped = new File([blob], `avatar.${ext}`, { type: blob.type || 'image/jpeg' })
-
-    closeCrop()
-    await uploadAvatarFile(cropped)
   }
 
   async function handleRemoveAvatar() {
@@ -286,9 +245,7 @@ export default function ProfilePage() {
       await ensureProfileRow(me)
 
       // ✅ if public_requires_avatar exists, removing the avatar must make them private
-      const updates = profile.is_public
-        ? { avatar_url: null, is_public: false }
-        : { avatar_url: null }
+      const updates = profile.is_public ? { avatar_url: null, is_public: false } : { avatar_url: null }
 
       const { error: dbErr } = await supabase.from('profiles').update(updates).eq('user_id', me.id)
       if (dbErr) throw dbErr
@@ -337,20 +294,22 @@ export default function ProfilePage() {
         Upload a photo first if you want your profile to be public.
       </p>
 
-      {err && <div className="helper-error" style={{ marginBottom: 12 }}>{err}</div>}
-      {msg && <div className="helper-success" style={{ marginBottom: 12 }}>{msg}</div>}
+      {err && (
+        <div className="helper-error" style={{ marginBottom: 12 }}>
+          {err}
+        </div>
+      )}
+      {msg && (
+        <div className="helper-success" style={{ marginBottom: 12 }}>
+          {msg}
+        </div>
+      )}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '180px 1fr',
-          gap: 18,
-          alignItems: 'start',
-        }}
-      >
+      {/* ✅ USE CSS CLASSES so mobile media rules apply (bio becomes full width) */}
+      <div className="profile-grid">
         {/* Avatar column */}
-        <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
-          <div className="avatar-frame" style={{ width: 140, height: 140 }}>
+        <div className="profile-avatar-col">
+          <div className="avatar-frame profile-avatar-frame">
             {profile.avatar_url ? (
               <img
                 src={profile.avatar_url}
@@ -364,25 +323,20 @@ export default function ProfilePage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div className="profile-avatar-actions">
             <label className="btn btn-primary btn-pill" style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
               {uploading ? 'Uploading…' : 'Upload photo'}
               <input
                 type="file"
                 accept="image/*"
-                onChange={handlePickAvatar}
+                onChange={handleUploadAvatar}
                 style={{ display: 'none' }}
                 disabled={uploading}
               />
             </label>
 
             {profile.avatar_url && (
-              <button
-                type="button"
-                className="btn btn-neutral btn-pill"
-                onClick={handleRemoveAvatar}
-                disabled={uploading}
-              >
+              <button type="button" className="btn btn-neutral btn-pill" onClick={handleRemoveAvatar} disabled={uploading}>
                 Remove
               </button>
             )}
@@ -390,7 +344,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Right-side form */}
-        <form onSubmit={saveProfile} style={{ display: 'grid', gap: 12 }}>
+        <form onSubmit={saveProfile} className="profile-form-grid">
           <label className="form-label">
             Handle
             <input
@@ -449,7 +403,7 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div className="actions-row">
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
@@ -461,19 +415,10 @@ export default function ProfilePage() {
       <div style={{ marginTop: 26 }}>
         <ProfilePhotosManager userId={me.id} />
       </div>
-
-      <ImageCropModal
-        open={cropOpen}
-        src={cropSrc}
-        aspect={1}
-        title="Crop profile photo"
-        mimeHint={cropMime}
-        onCancel={closeCrop}
-        onConfirm={confirmCrop}
-      />
     </div>
   )
 }
+
 
 
 
