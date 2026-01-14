@@ -75,6 +75,18 @@ export default function InviteQR() {
     setExpUnix(0);
   }
 
+  function resolveFunctionsBase() {
+    const envBase = import.meta.env.VITE_SUPA_FUNCTIONS_URL;
+    if (envBase) return envBase.replace(/\/$/, "");
+
+    // If you don't set VITE_SUPA_FUNCTIONS_URL, try to derive from Supabase URL.
+    const supaUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (supaUrl) return `${String(supaUrl).replace(/\/$/, "")}/functions/v1`;
+
+    // last resort (not recommended for prod)
+    return "/functions/v1";
+  }
+
   // Mint a short-lived token via Edge function (works with your mint_invite.ts)
   async function mintShortLived() {
     const since = Date.now();
@@ -83,11 +95,13 @@ export default function InviteQR() {
 
     setRefreshing(true);
     try {
-      const base = import.meta.env.VITE_SUPA_FUNCTIONS_URL || "/functions/v1";
-      // Forward the user's JWT (your mint_invite expects Authorization)
-      const authToken =
-        JSON.parse(localStorage.getItem("sb-@supabase-auth-token") || "{}")
-          ?.currentSession?.access_token || "";
+      const base = resolveFunctionsBase();
+
+      // Forward the user's JWT (mint_invite expects Authorization)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const authToken = session?.access_token || "";
 
       const res = await fetch(`${base}/mint_invite`, {
         method: "POST",
