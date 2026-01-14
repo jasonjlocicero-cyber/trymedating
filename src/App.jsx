@@ -1,200 +1,232 @@
-// src/App.jsx
-import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
-import { supabase } from './lib/supabaseClient'
-import { ChatProvider } from './chat/ChatContext'
+// src/pages/InviteQR.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "react-qr-code";
+import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
-// Layout
-import Header from './components/Header'
-import Footer from './components/Footer'
-import ChatLauncher from './components/ChatLauncher'
+export default function InviteQR() {
+  const nav = useNavigate();
 
-// PWA buttons / nudges
-import InstallPWAButton from './components/InstallPWAButton'
-import InstallNudgeMobile from './components/InstallNudgeMobile'
+  const [inviteUrl, setInviteUrl] = useState("");
+  const [publicHandle, setPublicHandle] = useState("");
+  const [expUnix, setExpUnix] = useState(0); // seconds since epoch (from function)
+  const [refreshing, setRefreshing] = useState(false);
 
-// Desktop deep links (Electron)
-import useDesktopDeepLinks from './desktop/useDesktopDeepLinks'
+  // 'static' | 'auto' (auto = short-lived, rotating)
+  const mode = useMemo(() => import.meta.env.VITE_QR_MODE ?? "auto", []);
 
-// Pages
-import AuthPage from './pages/AuthPage'
-import ProfilePage from './pages/ProfilePage'
-import SettingsPage from './pages/SettingsPage'
-import PublicProfile from './pages/PublicProfile'
-import Contact from './pages/Contact'
-import Terms from './pages/Terms'
-import Privacy from './pages/Privacy'
-import InviteQR from './pages/InviteQR'
-import DebugQR from './pages/DebugQR'
-import Connections from './pages/Connections'
-import Report from './pages/Report'
-import AdminReports from './pages/AdminReports'
-import BuyWristband from './pages/BuyWristband'
-import PurchaseSuccess from './pages/PurchaseSuccess'
-import PurchaseCancel from './pages/PurchaseCancel'
+  // helper: seconds remaining
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secsLeft = useMemo(
+    () => Math.max(0, (Math.floor(expUnix * 1000 - nowMs) / 1000) | 0),
+    [expUnix, nowMs]
+  );
 
-// Components/Routes
-import ConnectionToast from './components/ConnectionToast'
-import Connect from './routes/Connect'
+  // show mm:ss for countdown
+  const mmss = useMemo(() => {
+    const m = Math.floor(secsLeft / 60);
+    const s = secsLeft % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  }, [secsLeft]);
 
-const PENDING_CONNECT_KEY = 'tmd_pending_connect'
+  // throttle guard for manual refresh
+  const lastMintRef = useRef(0);
 
-function Home({ me }) {
-  const authed = !!me?.id
+  // Load handle (for "Public profile" button)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
 
-  return (
-    <div style={{ background: '#fff' }}>
-      <section style={{ padding: '52px 0 36px', borderBottom: '1px solid var(--border)' }}>
-        <div
-          className="container"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr',
-            gap: 18,
-            textAlign: 'center',
-            maxWidth: 920
-          }}
-        >
-          <h1
-            style={{
-              fontWeight: 900,
-              fontSize: 44,
-              lineHeight: 1.1,
-              margin: '0 auto'
-            }}
-          >
-            Welcome to{' '}
-            <span style={{ color: 'var(--brand-teal)' }}>Try</span>
-            <span style={{ color: 'var(--brand-teal)' }}>Me</span>
-            <span style={{ color: 'var(--brand-coral)' }}>Dating</span>
-          </h1>
+      try {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("handle")
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-          <p className="muted" style={{ margin: '0 auto', maxWidth: 760, fontSize: 16 }}>
-            Meet intentionally. Share your invite with a QR code and connect only with people
-            you’ve actually met. No endless swiping—just real conversations with people you trust.
-          </p>
+        if (!cancelled && prof?.handle) {
+          setPublicHandle(prof.handle);
+        }
+      } catch {
+        // ignore
+      }
+    })();
 
-          {/* CTA row */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginTop: 4
-            }}
-          >
-            {!authed ? (
-              <>
-                <Link className="btn btn-primary btn-pill" to="/auth">Sign in / Sign up</Link>
-                <a className="btn btn-accent btn-pill" href="#how-it-works">How it works</a>
-                <InstallPWAButton />
-              </>
-            ) : (
-              <>
-                <Link className="btn btn-primary btn-pill" to="/profile">Go to Profile</Link>
-                <Link className="btn btn-primary btn-pill" to="/buy">Buy wristband</Link>
-                <Link className="btn btn-accent btn-pill" to="/connections">Connections</Link>
-                <Link className="btn btn-accent btn-pill" to="/invite">My Invite QR</Link>
-                <InstallPWAButton />
-              </>
-            )}
-          </div>
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-              justifyContent: 'center',
-              flexWrap: 'wrap',
-              marginTop: 8
-            }}
-          >
-            <div className="helper-muted">Private 1:1 messages</div>
-            <div className="helper-muted">You control who can find you</div>
-            <div className="helper-muted">No public browsing of strangers</div>
-          </div>
-        </div>
-      </section>
+  // STATIC fallback url (no backend)
+  async function loadStaticUrl() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    setInviteUrl(`${location.origin}/connect?u=${user.id}`);
+    setExpUnix(0);
+  }
 
-      <section id="how-it-works" style={{ padding: '28px 0' }}>
-        <div className="container" style={{ maxWidth: 960 }}>
-          <h2 className="home-section-title" style={{ fontWeight: 800, marginBottom: 14, textAlign: 'center' }}>
-            How it works
-          </h2>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 16
-            }}
-          >
-            <FeatureCard title="Create" text="Set up a simple profile with your name and a short intro. Choose if it’s public." icon="🧩" />
-            <FeatureCard title="Share" text="Show your personal QR code to people you’ve met in real life to invite them." icon="🔗" />
-            <FeatureCard title="Match" text="You both must accept—this isn’t a browse-everyone app; it’s about real connections." icon="🤝" />
-            <FeatureCard title="Message" text="Keep it private and focused with clean, simple 1:1 messaging (no noise, no spam)." icon="💬" />
-          </div>
-        </div>
-      </section>
+  function resolveFunctionsBase() {
+    const envBase = import.meta.env.VITE_SUPA_FUNCTIONS_URL;
+    if (envBase) return envBase.replace(/\/$/, "");
 
-      <section
-        style={{
-          padding: '18px 0',
-          borderTop: '1px solid var(--border)',
-          borderBottom: '1px solid var(--border)',
-          background: '#fbfbfb'
-        }}
-      >
-        <div
-          className="container"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 14,
-            flexWrap: 'wrap',
-            textAlign: 'center'
-          }}
-        >
-          <span style={{ fontWeight: 700 }}>Your pace. Your privacy.</span>
-          <span className="muted">Turn public off anytime • Block/report if needed • No public search</span>
-        </div>
-      </section>
-    </div>
-  )
-}
+    // If you don't set VITE_SUPA_FUNCTIONS_URL, try to derive from Supabase URL.
+    const supaUrl = import.meta.env.VITE_SUPABASE_URL;
+    if (supaUrl) return `${String(supaUrl).replace(/\/$/, "")}/functions/v1`;
 
-function FeatureCard({ title, text, icon }) {
-  return (
-    <div className="card" style={{
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-      padding: 16,
-      background: '#fff',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
-          background: '#f8fafc', border: '1px solid var(--border)', fontSize: 16
-        }} aria-hidden>
-          <span>{icon}</span>
-        </div>
-        <div style={{ fontWeight: 800 }}>{title}</div>
+    // last resort (not recommended for prod)
+    return "/functions/v1";
+  }
+
+  // Mint a short-lived token via Edge function (works with your mint_invite.ts)
+  async function mintShortLived() {
+    const since = Date.now();
+    if (since - lastMintRef.current < 1000) return; // soft throttle
+    lastMintRef.current = since;
+
+    setRefreshing(true);
+    try {
+      const base = resolveFunctionsBase();
+
+      // Forward the user's JWT (mint_invite expects Authorization)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const authToken = session?.access_token || "";
+
+      const res = await fetch(`${base}/mint_invite`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: authToken ? `Bearer ${authToken}` : "",
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!res.ok) throw new Error("Function unavailable");
+      const json = await res.json(); // { token, exp } or { url, exp }
+
+      // Build Connect URL (your Connect reads ?token= from search params)
+      const url =
+        json.url ||
+        (json.token ? `${location.origin}/connect?token=${json.token}` : null);
+      if (!url || !json.exp) throw new Error("Invalid mint payload");
+
+      setInviteUrl(url);
+      setExpUnix(Number(json.exp) || 0);
+    } catch (e) {
+      // Safe fallback to static (non-expiring)
+      await loadStaticUrl();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // initial load
+  useEffect(() => {
+    if (mode === "static") {
+      loadStaticUrl();
+      return;
+    }
+    mintShortLived();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  // auto-refresh shortly before expiry (under 5s)
+  useEffect(() => {
+    if (mode === "static" || !expUnix) return;
+    if (secsLeft <= 5 && !refreshing) {
+      mintShortLived();
+    }
+  }, [secsLeft, expUnix, mode, refreshing]);
+
+  if (!inviteUrl) {
+    return (
+      <div className="container" style={{ padding: 24 }}>
+        <div className="muted">Loading…</div>
       </div>
-      <div className="muted" style={{ lineHeight: 1.55 }}>{text}</div>
+    );
+  }
+
+  return (
+    <div className="container" style={{ padding: "24px 0", maxWidth: 760 }}>
+      <h1 style={{ fontWeight: 900, marginBottom: 12 }}>My Invite QR</h1>
+
+      {mode === "static" && (
+        <div className="helper-muted" style={{ marginBottom: 12 }}>
+          Beta mode: this code doesn’t expire yet. Rotating codes will be enabled later.
+        </div>
+      )}
+
+      <div style={{ display: "grid", placeItems: "center", gap: 10 }}>
+        <div
+          style={{
+            padding: 12,
+            background: "#fff",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+          }}
+        >
+          <QRCode value={inviteUrl} size={220} />
+        </div>
+
+        {/* Countdown + controls (auto mode only) */}
+        {mode !== "static" && expUnix > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              justifyContent: "center",
+            }}
+          >
+            <span className="muted">
+              Expires in <strong>{mmss}</strong>
+            </span>
+
+            <button
+              className="btn btn-neutral btn-pill"
+              onClick={mintShortLived}
+              disabled={refreshing}
+              title="Refresh code"
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+
+            <button
+              className="btn btn-neutral btn-pill"
+              onClick={() => navigator.clipboard.writeText(inviteUrl).catch(() => {})}
+              title="Copy link"
+            >
+              Copy link
+            </button>
+          </div>
+        )}
+
+        {/* Public profile (same-tab, in-app navigation) */}
+        {publicHandle && (
+          <button
+            type="button"
+            className="btn btn-primary btn-pill"
+            onClick={() => nav(`/u/${publicHandle}`)}
+          >
+            Public profile
+          </button>
+        )}
+      </div>
     </div>
-  )
+  );
 }
-
-/**
- * Auth-resilient connect gate:
- * - If /connect is opened while logged out (common on iOS QR scan),
- *   stash the exact /connect?... URL and send the user to /auth.
- * - After login, App will auto-resume the saved /connect U*
-
-
 
 
 
