@@ -1,6 +1,6 @@
 // src/App.jsx
 import React, { useEffect, useState } from 'react'
-import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
 
@@ -29,13 +29,15 @@ import DebugQR from './pages/DebugQR'
 import Connections from './pages/Connections'
 import Report from './pages/Report'
 import AdminReports from './pages/AdminReports'
-import BuyWristband from "./pages/BuyWristband";
-import PurchaseSuccess from "./pages/PurchaseSuccess";
-import PurchaseCancel from "./pages/PurchaseCancel";
+import BuyWristband from './pages/BuyWristband'
+import PurchaseSuccess from './pages/PurchaseSuccess'
+import PurchaseCancel from './pages/PurchaseCancel'
 
 // Components/Routes
 import ConnectionToast from './components/ConnectionToast'
 import Connect from './routes/Connect'
+
+const PENDING_CONNECT_KEY = 'tmd_pending_connect'
 
 function Home({ me }) {
   const authed = !!me?.id
@@ -186,132 +188,11 @@ function FeatureCard({ title, text, icon }) {
   )
 }
 
-export default function App() {
-  const [me, setMe] = useState(null)
-  const [loadingAuth, setLoadingAuth] = useState(true)
-  const [unread, setUnread] = useState(0) // (kept; ChatLauncher controls its own badge)
-  const { pathname } = useLocation()
-
-  const showChatLauncher = !pathname.startsWith('/chat')
-
-  useDesktopDeepLinks()
-
-  useEffect(() => {
-    try {
-      const sp = new URLSearchParams(window.location.search)
-      const dl = sp.get('deeplink') || sp.get('dl')
-      if (!dl) return
-
-      const url = new URL(dl)
-      if (url.protocol !== 'tryme:') return
-
-      let next = '/'
-      switch (url.host) {
-        case 'chat':
-          next = '/'
-          break
-        case 'u':
-          next = `/u${url.pathname || ''}`
-          break
-        case 'connect':
-          next = `/connect${url.search || ''}`
-          break
-        default:
-          next = `${url.pathname || '/'}${url.search || ''}`
-          break
-      }
-
-      window.history.replaceState({}, '', next)
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    } catch {
-      /* ignore malformed deeplink */
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    const safety = setTimeout(() => alive && setLoadingAuth(false), 2000)
-
-    ;(async () => {
-      try {
-        const res = await supabase.auth.getUser()
-        if (!alive) return
-        setMe(res?.data?.user || null)
-      } catch (err) {
-        console.error('[auth.getUser] failed:', err)
-      } finally {
-        if (alive) setLoadingAuth(false)
-      }
-    })()
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      if (!alive) return
-      setMe(session?.user || null)
-    })
-
-    return () => {
-      alive = false
-      clearTimeout(safety)
-      sub?.subscription?.unsubscribe?.()
-    }
-  }, [])
-
-  async function handleSignOut() {
-    await supabase.auth.signOut()
-  }
-
-  return (
-    <ChatProvider renderDock={false}>
-      <Header me={me} onSignOut={handleSignOut} />
-      {me?.id && <ConnectionToast me={me} />}
-
-      <main style={{ minHeight: '60vh', paddingBottom: 76 }}>
-        {loadingAuth ? (
-          <div style={{ padding: 24, display: 'grid', placeItems: 'center' }}>
-            <div className="muted">Loading…</div>
-          </div>
-        ) : (
-          <Routes>
-            <Route path="/" element={<Home me={me} />} />
-            <Route path="/auth" element={<AuthPage />} />
-            <Route path="/profile" element={me ? <ProfilePage /> : <Navigate to="/auth" replace />} />
-            <Route path="/settings" element={me ? <SettingsPage /> : <Navigate to="/auth" replace />} />
-            <Route path="/connections" element={me ? <Connections /> : <Navigate to="/auth" replace />} />
-            <Route path="/report/:peerId" element={me ? <Report /> : <Navigate to="/auth" replace />} />
-            <Route path="/u/:handle" element={<PublicProfile />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/buy" element={<BuyWristband />} />
-            <Route path="/purchase/success" element={<PurchaseSuccess />} />
-            <Route path="/purchase/cancel" element={<PurchaseCancel />} />
-
-            <Route path="/chat*" element={<Navigate to="/" replace />} />
-            <Route path="/chat/:peerId" element={<Navigate to="/" replace />} />
-            <Route path="/chat/handle/:handle" element={<Navigate to="/" replace />} />
-
-            <Route path="/invite" element={me ? <InviteQR /> : <Navigate to="/auth" replace />} />
-            <Route path="/admin/reports" element={<AdminReports />} />
-            <Route path="/debug-qr" element={<DebugQR />} />
-            <Route path="/connect" element={<Connect me={me} />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        )}
-      </main>
-
-      <InstallNudgeMobile />
-      <Footer me={me} />
-
-      {showChatLauncher && (
-        <ChatLauncher
-          onUnreadChange={(n) => {
-            setUnread((prev) => (typeof n === 'number' ? n : prev))
-          }}
-        />
-      )}
-    </ChatProvider>
-  )
-}
+/**
+ * Auth-resilient connect gate:
+ * - If /connect is opened while logged out (common on iOS QR scan),
+ *   stash the exact /connect?... URL and send the user to /auth.
+ * - After login, App will auto-resume the saved /connect U*
 
 
 
