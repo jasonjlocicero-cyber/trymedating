@@ -1,5 +1,5 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
@@ -26,7 +26,12 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (the key fix: launcher always above the panel)
+// Theme-aware surfaces
+const PANEL_BG = 'var(--bg-light)'
+const BORDER = 'var(--border)'
+const TEXT = 'var(--text)'
+
+// Layering
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -48,10 +53,12 @@ class DockErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <div
+          className="tmd-chat-panel"
           style={{
             width: '100%',
             height: '100%',
-            background: '#fff',
+            background: PANEL_BG,
+            color: TEXT,
             padding: 12,
             display: 'flex',
             flexDirection: 'column',
@@ -127,7 +134,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
       if (!alive) return
       setMe(user || null)
     })()
@@ -141,29 +150,32 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   }, [])
 
   // ------- unread count -------
-  const computeUnread = useCallback(async (userId) => {
-    if (!userId) {
-      setUnreadLocal(0)
-      onUnreadChange(0)
-      return
-    }
+  const computeUnread = useCallback(
+    async (userId) => {
+      if (!userId) {
+        setUnreadLocal(0)
+        onUnreadChange(0)
+        return
+      }
 
-    const { count, error } = await supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('recipient', userId)
-      .is('read_at', null)
+      const { count, error } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient', userId)
+        .is('read_at', null)
 
-    if (error) {
-      setUnreadLocal(0)
-      onUnreadChange(0)
-      return
-    }
+      if (error) {
+        setUnreadLocal(0)
+        onUnreadChange(0)
+        return
+      }
 
-    const n = typeof count === 'number' ? count : 0
-    setUnreadLocal(n)
-    onUnreadChange(n)
-  }, [onUnreadChange])
+      const n = typeof count === 'number' ? count : 0
+      setUnreadLocal(n)
+      onUnreadChange(n)
+    },
+    [onUnreadChange]
+  )
 
   useEffect(() => {
     computeUnread(me?.id)
@@ -250,7 +262,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       if (!cancel) setPartnerName(n || '')
     }
     hydrateName()
-    return () => { cancel = true }
+    return () => {
+      cancel = true
+    }
   }, [partnerId, partnerName])
 
   // ------- recent list when open -------
@@ -306,7 +320,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       }
     }
     loadRecent()
-    return () => { cancel = true }
+    return () => {
+      cancel = true
+    }
   }, [open, me?.id, partnerId])
 
   // ------- new-message toast when dock is closed -------
@@ -323,7 +339,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           setToast({
             fromId: m.sender,
             fromName: name || 'New message',
-            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : (m.body || 'Message')
+            text: m.body?.startsWith?.('[[file:') ? 'Attachment' : m.body || 'Message'
           })
         }
       )
@@ -396,21 +412,19 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         }}
       >
         <span style={{ fontSize: 24, color: '#fff' }}>💬</span>
-
-        {/* NOTE: unread badge intentionally removed (per your request) */}
-        {/* (unreadLocal is still computed for future use / push logic) */}
       </button>
 
       {/* Inbox picker */}
       {open && !partnerId && (
         <div
+          className="tmd-chat-panel"
           style={{
             position: 'fixed',
             ...panelPos,
             bottom: panelBottomCss,
             width: isNarrow ? 'auto' : 320,
-            background: '#fff',
-            border: '1px solid var(--border)',
+            background: PANEL_BG,
+            border: `1px solid ${BORDER}`,
             borderRadius: 14,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             padding: 12,
@@ -428,8 +442,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: '1px solid var(--border)',
-                background: '#fff',
+                border: `1px solid ${BORDER}`,
+                background: PANEL_BG,
+                color: TEXT,
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -442,8 +457,14 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
 
           {me?.id && (
             <>
-              <div className="helper-muted" style={{ marginBottom: 8 }}>Pick a recent chat:</div>
-              {err && <div className="helper-error" style={{ marginBottom: 8 }}>{err}</div>}
+              <div className="helper-muted" style={{ marginBottom: 8 }}>
+                Pick a recent chat:
+              </div>
+              {err && (
+                <div className="helper-error" style={{ marginBottom: 8 }}>
+                  {err}
+                </div>
+              )}
               {loadingList && <div className="muted">Loading…</div>}
               {!loadingList && recent.length === 0 && (
                 <div className="muted">No conversations yet. Open someone’s profile to start a chat.</div>
@@ -466,7 +487,8 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                             width: 24,
                             height: 24,
                             borderRadius: '50%',
-                            background: '#eef2f7',
+                            background: 'rgba(255,255,255,0.08)',
+                            border: `1px solid ${BORDER}`,
                             display: 'grid',
                             placeItems: 'center',
                             fontSize: 12,
@@ -507,7 +529,15 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           }}
         >
           <div style={{ fontWeight: 900, marginBottom: 4 }}>{toast.fromName}</div>
-          <div style={{ opacity: 0.9, marginBottom: 8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div
+            style={{
+              opacity: 0.9,
+              marginBottom: 8,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
             {toast.text}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -522,7 +552,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
             >
               Open
             </button>
-            <button className="btn btn-neutral" onClick={() => setToast(null)}>Dismiss</button>
+            <button className="btn btn-neutral" onClick={() => setToast(null)}>
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -530,6 +562,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       {/* Chat panel */}
       {open && canChat && (
         <div
+          className="tmd-chat-panel"
           style={{
             position: 'fixed',
             ...panelPos,
@@ -537,8 +570,8 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
             width: isNarrow ? 'auto' : 360,
             height: 'min(70vh, 520px)',
             zIndex: Z_PANEL,
-            background: '#fff',
-            border: '1px solid var(--border)',
+            background: PANEL_BG,
+            border: `1px solid ${BORDER}`,
             borderRadius: 14,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             overflow: 'hidden',
@@ -547,7 +580,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header (bigger touch targets for mobile) */}
+          {/* Header */}
           <div
             style={{
               display: 'flex',
@@ -555,8 +588,8 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
               justifyContent: 'space-between',
               gap: 8,
               padding: '8px 10px',
-              borderBottom: '1px solid var(--border)',
-              background: '#fff'
+              borderBottom: `1px solid ${BORDER}`,
+              background: PANEL_BG
             }}
           >
             <button
@@ -568,8 +601,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: '1px solid var(--border)',
-                background: '#fff',
+                border: `1px solid ${BORDER}`,
+                background: PANEL_BG,
+                color: TEXT,
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -595,8 +629,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: '1px solid var(--border)',
-                background: '#fff',
+                border: `1px solid ${BORDER}`,
+                background: PANEL_BG,
+                color: TEXT,
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -607,12 +642,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
 
           <DockErrorBoundary onClose={closeAll}>
             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <ChatDock
-                partnerId={partnerId}
-                partnerName={partnerName}
-                mode="embedded"
-                onRead={() => computeUnread(me?.id)}
-              />
+              <ChatDock partnerId={partnerId} partnerName={partnerName} mode="embedded" onRead={() => computeUnread(me?.id)} />
             </div>
           </DockErrorBoundary>
         </div>
