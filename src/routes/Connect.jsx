@@ -1,11 +1,13 @@
 // src/routes/Connect.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { useSearchParams, useNavigate, Link, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useChat } from "../chat/ChatContext";
 
 /* ---------- constants / helpers ---------- */
 const CONN_TABLE = "connections";
+const PENDING_CONNECT_KEY = "tmd_pending_connect";
+
 const C = {
   requester: "requester_id",
   addressee: "addressee_id",
@@ -14,9 +16,17 @@ const C = {
   decidedAt: "updated_at", // we sort by updated first, then created
 };
 
+// normalize supabase-ish errors
+function errMsg(e) {
+  if (!e) return "";
+  if (typeof e === "string") return e;
+  return e?.message || e?.error_description || e?.details || "Unknown error";
+}
+
 /* ---------- component ---------- */
 export default function Connect({ me }) {
   const nav = useNavigate();
+  const loc = useLocation();
   const [sp] = useSearchParams();
   const { openChat } = useChat();
 
@@ -35,6 +45,7 @@ export default function Connect({ me }) {
   // Resolve recipient: prefer short-lived token, else fall back to ?to= / ?u=
   const token = sp.get("token");
   const legacyId = sp.get("to") || sp.get("u") || "";
+  const demo = sp.get("demo");
 
   const hasRecipient = useMemo(() => !!recipientId, [recipientId]);
 
@@ -58,6 +69,19 @@ export default function Connect({ me }) {
   }
 
   /* ---------- small helpers ---------- */
+
+  // Belt+suspenders: if /connect is opened logged out (common on iOS QR scan),
+  // stash the exact URL so AuthPage/App can resume afterwards.
+  function stashConnectUrlIfNeeded() {
+    try {
+      const hasInviteParams = !!token || !!legacyId || !!demo;
+      if (!hasInviteParams) return;
+      const next = `${loc.pathname}${loc.search || ""}`;
+      localStorage.setItem(PENDING_CONNECT_KEY, next);
+    } catch {
+      // ignore storage failures
+    }
+  }
 
   // Check "I blocked them" (RLS may hide the reverse direction).
   async function iBlockedThem(a, b) {
@@ -92,9 +116,19 @@ export default function Connect({ me }) {
   // Create a fresh pending request (me -> recipient)
   async function createPending(a, b) {
     const payload = { [C.requester]: a, [C.addressee]: b, [C.status]: "pending" };
+
     const { error } = await supabase.from(CONN_TABLE).insert(payload);
-    if (error && error.code !== "23505") throw error; // ignore dup-insert race
-    return true;
+
+    // 23505 = unique violation (duplicate). Treat as success: request already exists.
+    if (error) {
+      if (error.code === "23505") return { ok: true, reason: "duplicate" };
+
+      // If blocked by RLS / not authorized, surface clearly
+      const m = errMsg(error);
+      return { ok: false, reason: "error", message: m, raw: error };
+    }
+
+    return { ok: true, reason: "inserted" };
   }
 
   // Return a friendly name/handle for chat bubble title
@@ -142,6 +176,14 @@ export default function Connect({ me }) {
         return;
       }
 
+      // Demo (QR Debug)
+      if (demo) {
+        setStatus("invalid");
+        setErrorText("Demo QR loaded. Add ?u=<userId> or ?token=<invite> to connect.");
+        setRecipientId("");
+        return;
+      }
+
       setStatus("invalid");
       setErrorText("This link is missing a valid invite token or user id.");
     }
@@ -151,7 +193,7 @@ export default function Connect({ me }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, legacyId]);
+  }, [token, legacyId, demo]);
 
   /* ---------- once we know the recipient, decide and act ---------- */
   useEffect(() => {
@@ -163,8 +205,11 @@ export default function Connect({ me }) {
       // cache label (best-effort)
       recipientLabelRef.current = await fetchRecipientLabel(recipientId);
 
+      // If opened logged out, stash the URL and let the UI prompt sign-in.
       if (!authed) {
-        setStatus("none"); // UI will prompt to sign in
+        stashConnectUrlIfNeeded();
+        setStatus("none");
+        setMessage("Please sign in to send a request.");
         return;
       }
 
@@ -185,7 +230,7 @@ export default function Connect({ me }) {
         const existing = await getLatestConnection(me.id, recipientId);
         if (cancelled) return;
 
-        // Always try opening the bubble once we know who this is
+        // Always try opening the bubble once we know who this is (one-time)
         if (!openedOnceRef.current) {
           openedOnceRef.current = true;
           openChatBubble(recipientId, recipientLabelRef.current);
@@ -195,7 +240,16 @@ export default function Connect({ me }) {
           // Create pending request me -> recipient
           setBusy(true);
           try {
-            await createPending(me.id, recipientId);
+            const res = await createPending(me.id, recipientId);
+
+            if (!res.ok) {
+              // Common: other side blocked you (RLS) or not authorized
+              setStatus("blocked");
+              setErrorText("Unable to request. One side may have blocked the other.");
+              console.warn("[createPending]", res.raw || res.message);
+              return;
+            }
+
             setStatus("pending");
             setMessage("Request sent — opening chat…");
             openChatBubble(recipientId, recipientLabelRef.current);
@@ -206,21 +260,22 @@ export default function Connect({ me }) {
         }
 
         // We have some relationship already
-        setStatus(existing[C.status] || "none");
+        const st = existing[C.status] || "none";
+        setStatus(st);
 
-        if (existing[C.status] === "pending") {
+        if (st === "pending") {
           setMessage("Request is pending — check the chat to accept/reject.");
-        } else if (existing[C.status] === "accepted") {
+        } else if (st === "accepted") {
           setMessage("You are connected — chat is open.");
-        } else if (existing[C.status] === "rejected") {
+        } else if (st === "rejected") {
           setMessage("This request was declined.");
-        } else if (existing[C.status] === "disconnected") {
+        } else if (st === "disconnected") {
           setMessage("This connection was disconnected. You can send a new request.");
         }
       } catch (e) {
         if (cancelled) return;
         console.error(e);
-        setErrorText(e.message || "Failed to process invite.");
+        setErrorText(errMsg(e) || "Failed to process invite.");
         setStatus("none");
       }
     }
@@ -234,7 +289,9 @@ export default function Connect({ me }) {
 
   /* ---------- explicit action (rarely needed now) ---------- */
   async function requestConnection() {
+    setErrorText("");
     if (!authed) {
+      stashConnectUrlIfNeeded();
       nav("/auth");
       return;
     }
@@ -250,14 +307,22 @@ export default function Connect({ me }) {
 
     setBusy(true);
     try {
-      await createPending(me.id, recipientId);
+      const res = await createPending(me.id, recipientId);
+
+      if (!res.ok) {
+        setStatus("blocked");
+        setErrorText("Unable to request. One side may have blocked the other.");
+        console.warn("[requestConnection/createPending]", res.raw || res.message);
+        return;
+      }
+
       setStatus("pending");
       setMessage("Request sent — opening chat…");
       openChatBubble(recipientId, recipientLabelRef.current);
     } catch (e) {
       console.error(e);
       setStatus("blocked");
-      setMessage("Unable to request. One side may have blocked the other.");
+      setErrorText("Unable to request. One side may have blocked the other.");
     } finally {
       setBusy(false);
     }
@@ -370,6 +435,7 @@ export default function Connect({ me }) {
     </div>
   );
 }
+
 
 
 
