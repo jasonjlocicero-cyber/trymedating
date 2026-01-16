@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import { applyTheme, getTheme } from "../lib/theme";
+import { applyTheme, getTheme, getThemePreference, startThemeSync } from "../lib/theme";
 
 const LS_NOTIF_ENABLED = "tmd_notifications_enabled";
 
@@ -25,12 +25,16 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   // Theme
-  const [theme, setTheme] = useState(() => getTheme());
-
-  function setAndApplyTheme(next) {
-    const applied = applyTheme(next);
-    setTheme(applied);
-  }
+  const [themePref, setThemePref] = useState(() => {
+    try {
+      const v = getThemePreference();
+      return v;
+    } catch {
+      return "system";
+    }
+  });
+  const [themeResolved, setThemeResolved] = useState(() => getTheme());
+  const [themeMsg, setThemeMsg] = useState("");
 
   // Notifications
   const supported = useMemo(() => {
@@ -58,19 +62,17 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState("");
 
+  // Keep "system" theme synced to OS changes
   useEffect(() => {
-    // Ensure the theme is applied when this page loads too (no visual change if already applied)
-    setAndApplyTheme(getTheme());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const stop = startThemeSync?.();
+    return () => stop?.();
   }, []);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         if (!alive) return;
         setMe(user || null);
       } finally {
@@ -92,6 +94,18 @@ export default function SettingsPage() {
     }
   }, [notifEnabled]);
 
+  function setTheme(nextPref) {
+    setThemeMsg("");
+    const resolved = applyTheme(nextPref);
+    setThemePref(nextPref);
+    setThemeResolved(resolved);
+
+    const label =
+      nextPref === "system" ? `System (${resolved})` : resolved;
+
+    setThemeMsg(`Theme set to: ${label}`);
+  }
+
   async function testNotification() {
     setNotifMsg("");
     if (!supported) {
@@ -110,7 +124,7 @@ export default function SettingsPage() {
         icon: "/icons/icon-192.png",
         badge: "/icons/icon-192.png",
         tag: "tmd-test",
-        data: { url: "/" },
+        data: { url: "/" }
       });
       setNotifMsg("Test notification sent.");
     } catch (e) {
@@ -129,9 +143,7 @@ export default function SettingsPage() {
     if (next) {
       // iOS guidance: push-style UX is best when installed to Home Screen
       if (isIOS() && !isStandalonePWA()) {
-        setNotifMsg(
-          "On iPhone: install the app (Share → Add to Home Screen) for best notification behavior."
-        );
+        setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
         // still allow enabling; user can proceed
       }
 
@@ -140,9 +152,7 @@ export default function SettingsPage() {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") {
           setNotifEnabled(false);
-          setNotifMsg(
-            "Permission denied. Enable notifications in your browser/iOS settings."
-          );
+          setNotifMsg("Permission denied. Enable notifications in your browser/iOS settings.");
           return;
         }
         setNotifEnabled(true);
@@ -209,36 +219,43 @@ export default function SettingsPage() {
         }}
       >
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Appearance</div>
-
         <div className="muted" style={{ marginBottom: 10 }}>
-          Switch between Light and Dark mode. Your choice is saved on this device.
+          Choose a theme. “System” will follow your device setting.
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <button
             type="button"
-            className={`btn btn-pill ${theme === "light" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setAndApplyTheme("light")}
-            aria-pressed={theme === "light"}
-            title="Light mode"
+            className={`btn btn-pill ${themePref === "system" ? "btn-primary" : "btn-neutral"}`}
+            onClick={() => setTheme("system")}
+          >
+            System
+          </button>
+          <button
+            type="button"
+            className={`btn btn-pill ${themePref === "light" ? "btn-primary" : "btn-neutral"}`}
+            onClick={() => setTheme("light")}
           >
             Light
           </button>
-
           <button
             type="button"
-            className={`btn btn-pill ${theme === "dark" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setAndApplyTheme("dark")}
-            aria-pressed={theme === "dark"}
-            title="Dark mode"
+            className={`btn btn-pill ${themePref === "dark" ? "btn-primary" : "btn-neutral"}`}
+            onClick={() => setTheme("dark")}
           >
             Dark
           </button>
 
-          <span className="muted" style={{ alignSelf: "center", fontSize: 13 }}>
-            Current: <code>{theme}</code>
+          <span className="muted" style={{ fontSize: 13 }}>
+            Current: <code>{themeResolved}</code>
           </span>
         </div>
+
+        {themeMsg && (
+          <div className="helper-muted" style={{ marginTop: 10 }}>
+            {themeMsg}
+          </div>
+        )}
       </section>
 
       {/* Notifications */}
@@ -254,30 +271,17 @@ export default function SettingsPage() {
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Notifications</div>
 
         {!supported ? (
-          <div className="muted">This device/browser doesn’t support notifications.</div>
+          <div className="muted">
+            This device/browser doesn’t support notifications.
+          </div>
         ) : (
           <>
             <div className="muted" style={{ marginBottom: 10 }}>
               When enabled, you’ll get a phone-style notification when a new message arrives (best in the installed PWA).
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  fontWeight: 800,
-                }}
-              >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800 }}>
                 <input
                   type="checkbox"
                   checked={notifEnabled}
@@ -300,7 +304,11 @@ export default function SettingsPage() {
 
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
               Permission: <code>{Notification.permission}</code>
-              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
+              {isIOS() ? (
+                <>
+                  {" "}• iPhone tip: install to Home Screen for best results
+                </>
+              ) : null}
             </div>
 
             {notifMsg && (
@@ -406,6 +414,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
 
 
 
