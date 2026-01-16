@@ -3,34 +3,8 @@
   <head>
     <meta charset="UTF-8" />
 
-    <!-- ✅ No-flash theme bootstrap (must run before CSS/app loads) -->
-    <script>
-      (function () {
-        try {
-          var KEY = "tmd_theme"; // "light" | "dark" | "system"
-          var saved = localStorage.getItem(KEY) || "system";
-          var prefersDark =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-          var resolved =
-            saved === "dark" || (saved === "system" && prefersDark)
-              ? "dark"
-              : "light";
-
-          document.documentElement.setAttribute("data-theme", resolved);
-          document.documentElement.style.colorScheme = resolved;
-        } catch (e) {
-          // ignore (private mode / storage blocked)
-        }
-      })();
-    </script>
-
     <!-- Viewport / safe areas for iOS notches -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
-    <!-- ✅ Let browsers know we support both -->
-    <meta name="color-scheme" content="light dark" />
 
     <!-- Basic SEO -->
     <title>TryMeDating</title>
@@ -50,6 +24,27 @@
     <!-- iOS standalone tweaks -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- ✅ Apply theme BEFORE the app paints (prevents white/grey flash in dark mode) -->
+    <script>
+      (function () {
+        try {
+          var key = "tmd_theme";
+          var t = localStorage.getItem(key);
+          if (t !== "light" && t !== "dark") {
+            t =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          }
+          document.documentElement.dataset.theme = t;
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -76,6 +71,7 @@
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+
 
 
 
