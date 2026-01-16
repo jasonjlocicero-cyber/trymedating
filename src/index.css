@@ -361,76 +361,40 @@ html[data-theme="dark"] .modal-backdrop{
    ✅ Fix “greyed out” readability caused by inline white backgrounds
    (common in Terms/Privacy/Chat panels)
    ------------------------------------------------------------------ */
+
+/* Catch BOTH background + background-color inline styles */
 html[data-theme="dark"] [style*="background: #fff"],
 html[data-theme="dark"] [style*="background:#fff"],
-html[data-theme="dark"] [style*="background: #FFF"],
-html[data-theme="dark"] [style*="background:#FFF"],
 html[data-theme="dark"] [style*="background: #ffffff"],
 html[data-theme="dark"] [style*="background:#ffffff"],
-html[data-theme="dark"] [style*="background: #FFFFFF"],
-html[data-theme="dark"] [style*="background:#FFFFFF"],
 html[data-theme="dark"] [style*="background: rgb(255, 255, 255)"],
 html[data-theme="dark"] [style*="background:rgb(255, 255, 255)"],
-html[data-theme="dark"] [style*="background:rgb(255,255,255)"]{
+html[data-theme="dark"] [style*="background-color: #fff"],
+html[data-theme="dark"] [style*="background-color:#fff"],
+html[data-theme="dark"] [style*="background-color: #ffffff"],
+html[data-theme="dark"] [style*="background-color:#ffffff"],
+html[data-theme="dark"] [style*="background-color: rgb(255, 255, 255)"],
+html[data-theme="dark"] [style*="background-color:rgb(255, 255, 255)"]{
   background: var(--surface) !important;
+  background-color: var(--surface) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
 }
 
 html[data-theme="dark"] [style*="background: #fbfbfb"],
 html[data-theme="dark"] [style*="background:#fbfbfb"],
-html[data-theme="dark"] [style*="background: #FBFBFB"],
-html[data-theme="dark"] [style*="background:#FBFBFB"],
 html[data-theme="dark"] [style*="background: rgb(251, 251, 251)"],
 html[data-theme="dark"] [style*="background:rgb(251, 251, 251)"],
-html[data-theme="dark"] [style*="background:rgb(251,251,251)"]{
+html[data-theme="dark"] [style*="background-color: #fbfbfb"],
+html[data-theme="dark"] [style*="background-color:#fbfbfb"],
+html[data-theme="dark"] [style*="background-color: rgb(251, 251, 251)"],
+html[data-theme="dark"] [style*="background-color:rgb(251, 251, 251)"]{
   background: var(--surface-2) !important;
+  background-color: var(--surface-2) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
 }
 
-/* ------------------------------------------------------------------
-   ✅ Chat bubble readability in dark mode:
-   Some outgoing bubbles are very light (near-white/blue), causing
-   inherited light text to become unreadable.
-   We force those light bubbles to dark surfaces in dark mode.
-   ------------------------------------------------------------------ */
-html[data-theme="dark"] [style*="background: #eef6ff"],
-html[data-theme="dark"] [style*="background:#eef6ff"],
-html[data-theme="dark"] [style*="background: #EFF6FF"],
-html[data-theme="dark"] [style*="background:#EFF6FF"],
-html[data-theme="dark"] [style*="background: #eef2ff"],
-html[data-theme="dark"] [style*="background:#eef2ff"],
-html[data-theme="dark"] [style*="background: #EEF2FF"],
-html[data-theme="dark"] [style*="background:#EEF2FF"],
-html[data-theme="dark"] [style*="background: #f1f5f9"],
-html[data-theme="dark"] [style*="background:#f1f5f9"],
-html[data-theme="dark"] [style*="background: #F1F5F9"],
-html[data-theme="dark"] [style*="background:#F1F5F9"],
-html[data-theme="dark"] [style*="background: rgb(238, 246, 255)"],
-html[data-theme="dark"] [style*="background:rgb(238, 246, 255)"],
-html[data-theme="dark"] [style*="background:rgb(238,246,255)"],
-html[data-theme="dark"] [style*="background: rgb(239, 246, 255)"],
-html[data-theme="dark"] [style*="background:rgb(239, 246, 255)"],
-html[data-theme="dark"] [style*="background:rgb(239,246,255)"]{
-  background: rgba(255,255,255,0.07) !important;
-  border-color: rgba(255,255,255,0.14) !important;
-  color: var(--text) !important;
-}
-
-/* Ensure nested text inside those bubbles stays readable */
-html[data-theme="dark"] [style*="background: #eef6ff"] *,
-html[data-theme="dark"] [style*="background:#eef6ff"] *,
-html[data-theme="dark"] [style*="background: #EFF6FF"] *,
-html[data-theme="dark"] [style*="background:#EFF6FF"] *,
-html[data-theme="dark"] [style*="background: rgb(238, 246, 255)"] *,
-html[data-theme="dark"] [style*="background:rgb(238, 246, 255)"] *,
-html[data-theme="dark"] [style*="background:rgb(238,246,255)"] *,
-html[data-theme="dark"] [style*="background: rgb(239, 246, 255)"] *,
-html[data-theme="dark"] [style*="background:rgb(239, 246, 255)"] *,
-html[data-theme="dark"] [style*="background:rgb(239,246,255)"] *{
-  color: var(--text) !important;
-}
 
 
 
