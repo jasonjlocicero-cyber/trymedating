@@ -46,6 +46,8 @@ html[data-theme="dark"]{
   --surface-2:#0b1426;
 
   --bg-light: var(--surface);
+
+  color-scheme: dark;
 }
 
 html, body {
@@ -77,6 +79,14 @@ button { font-family: inherit; cursor: pointer; }
   text-align:center;
   border-top:1px solid var(--border);
   background:var(--bg-light);
+  color: var(--text);
+}
+
+/* ✅ Force footer to respect dark mode even if component uses inline background */
+html[data-theme="dark"] .site-footer{
+  background: var(--bg-light) !important;
+  color: var(--text) !important;
+  border-top: 1px solid var(--border) !important;
 }
 
 /* ✅ Extra: if Footer component uses <footer> without class */
@@ -84,6 +94,11 @@ footer{
   background: var(--bg-light);
   border-top: 1px solid var(--border);
   color: var(--text);
+}
+html[data-theme="dark"] footer{
+  background: var(--bg-light) !important;
+  border-top: 1px solid var(--border) !important;
+  color: var(--text) !important;
 }
 
 /* Cards */
@@ -358,13 +373,25 @@ html[data-theme="dark"] .modal-backdrop{
 }
 
 /* ------------------------------------------------------------------
-   ✅ Fix “greyed out” readability caused by inline white backgrounds
-   (common in Terms/Privacy/Chat panels)
+   ✅ Fix “greyed out” readability caused by hardcoded LIGHT inline styles
+   (Terms / Privacy / Chat bubble / Footer)
    ------------------------------------------------------------------ */
+
+/* Convert common light backgrounds to dark surfaces (covers background & background-color) */
 html[data-theme="dark"] [style*="background: #fff"],
 html[data-theme="dark"] [style*="background:#fff"],
+html[data-theme="dark"] [style*="background: #ffffff"],
+html[data-theme="dark"] [style*="background:#ffffff"],
 html[data-theme="dark"] [style*="background: rgb(255, 255, 255)"],
-html[data-theme="dark"] [style*="background:rgb(255, 255, 255)"]{
+html[data-theme="dark"] [style*="background:rgb(255, 255, 255)"],
+html[data-theme="dark"] [style*="background-color: #fff"],
+html[data-theme="dark"] [style*="background-color:#fff"],
+html[data-theme="dark"] [style*="background-color: #ffffff"],
+html[data-theme="dark"] [style*="background-color:#ffffff"],
+html[data-theme="dark"] [style*="background-color: rgb(255, 255, 255)"],
+html[data-theme="dark"] [style*="background-color:rgb(255, 255, 255)"],
+html[data-theme="dark"] [style*="background: white"],
+html[data-theme="dark"] [style*="background-color: white"]{
   background: var(--surface) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
@@ -373,10 +400,61 @@ html[data-theme="dark"] [style*="background:rgb(255, 255, 255)"]{
 html[data-theme="dark"] [style*="background: #fbfbfb"],
 html[data-theme="dark"] [style*="background:#fbfbfb"],
 html[data-theme="dark"] [style*="background: rgb(251, 251, 251)"],
-html[data-theme="dark"] [style*="background:rgb(251, 251, 251)"]{
+html[data-theme="dark"] [style*="background:rgb(251, 251, 251)"],
+html[data-theme="dark"] [style*="background-color: #fbfbfb"],
+html[data-theme="dark"] [style*="background-color:#fbfbfb"],
+html[data-theme="dark"] [style*="background-color: rgb(251, 251, 251)"],
+html[data-theme="dark"] [style*="background-color:rgb(251, 251, 251)"]{
   background: var(--surface-2) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
+}
+
+/* Also catch other common “light gray” inline surfaces */
+html[data-theme="dark"] [style*="background: #f9f9f9"],
+html[data-theme="dark"] [style*="background:#f9f9f9"],
+html[data-theme="dark"] [style*="background: #f9fafb"],
+html[data-theme="dark"] [style*="background:#f9fafb"],
+html[data-theme="dark"] [style*="background: #f8fafc"],
+html[data-theme="dark"] [style*="background:#f8fafc"],
+html[data-theme="dark"] [style*="background: #f3f4f6"],
+html[data-theme="dark"] [style*="background:#f3f4f6"],
+html[data-theme="dark"] [style*="background: rgb(249, 250, 251)"],
+html[data-theme="dark"] [style*="background:rgb(249, 250, 251)"],
+html[data-theme="dark"] [style*="background: rgb(243, 244, 246)"],
+html[data-theme="dark"] [style*="background:rgb(243, 244, 246)"],
+html[data-theme="dark"] [style*="background-color: #f9f9f9"],
+html[data-theme="dark"] [style*="background-color:#f9f9f9"],
+html[data-theme="dark"] [style*="background-color: #f9fafb"],
+html[data-theme="dark"] [style*="background-color:#f9fafb"],
+html[data-theme="dark"] [style*="background-color: #f8fafc"],
+html[data-theme="dark"] [style*="background-color:#f8fafc"],
+html[data-theme="dark"] [style*="background-color: #f3f4f6"],
+html[data-theme="dark"] [style*="background-color:#f3f4f6"],
+html[data-theme="dark"] [style*="background-color: rgb(249, 250, 251)"],
+html[data-theme="dark"] [style*="background-color:rgb(249, 250, 251)"],
+html[data-theme="dark"] [style*="background-color: rgb(243, 244, 246)"],
+html[data-theme="dark"] [style*="background-color:rgb(243, 244, 246)"]{
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+/* Fix common inline “light mode text colors” if they appear inside converted surfaces */
+html[data-theme="dark"] [style*="color: #111827"],
+html[data-theme="dark"] [style*="color:#111827"],
+html[data-theme="dark"] [style*="color: #222"],
+html[data-theme="dark"] [style*="color:#222"],
+html[data-theme="dark"] [style*="color: #333"],
+html[data-theme="dark"] [style*="color:#333"]{
+  color: var(--text) !important;
+}
+
+html[data-theme="dark"] [style*="color: #6b7280"],
+html[data-theme="dark"] [style*="color:#6b7280"],
+html[data-theme="dark"] [style*="color: #64748b"],
+html[data-theme="dark"] [style*="color:#64748b"]{
+  color: var(--muted) !important;
 }
 
 
