@@ -5,8 +5,7 @@ import { BrowserRouter, HashRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./index.css";
 import maybeRegisterSW from "./pwa/maybeRegisterSW";
-
-import { applyTheme, getThemeMode, watchSystemTheme } from "./lib/theme";
+import { applyTheme, getTheme } from "./lib/theme";
 
 // Reliable Electron detection:
 // - In Electron, preload should expose window.tmd.isElectron (recommended)
@@ -20,21 +19,11 @@ const isElectronFromPreload =
 
 const isElectron = isFileProtocol || isElectronFromPreload;
 
+// ✅ Ensure theme is applied (index.html already sets it early; this keeps it consistent)
+applyTheme(getTheme());
+
 // IMPORTANT: PWA/SW should NOT run in Electron.
 maybeRegisterSW({ isElectron });
-
-/* ---------------------------
-   THEME BOOTSTRAP (WEB + Electron)
-   - index.html snippet prevents flash
-   - this keeps it consistent once JS runs
---------------------------- */
-applyTheme(getThemeMode());
-
-// Live-update only when user is in "system"
-watchSystemTheme(() => {
-  const mode = getThemeMode();
-  if (mode === "system") applyTheme("system");
-});
 
 /**
  * PWA install prompt handling (WEB ONLY)
@@ -104,6 +93,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 );
+
 
 
 
