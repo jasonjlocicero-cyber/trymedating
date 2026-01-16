@@ -27,6 +27,11 @@ export default function SettingsPage() {
   // ✅ Theme
   const [theme, setTheme] = useState(() => getTheme());
 
+  function setThemeTo(next) {
+    const applied = applyTheme(next);
+    setTheme(applied);
+  }
+
   // Notifications
   const supported = useMemo(() => {
     return (
@@ -57,7 +62,9 @@ export default function SettingsPage() {
     let alive = true;
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (!alive) return;
         setMe(user || null);
       } finally {
@@ -79,16 +86,6 @@ export default function SettingsPage() {
     }
   }, [notifEnabled]);
 
-  // Keep theme state synced (in case something else changes it)
-  useEffect(() => {
-    setTheme(getTheme());
-  }, []);
-
-  function setThemeChoice(next) {
-    const t = applyTheme(next);
-    setTheme(t);
-  }
-
   async function testNotification() {
     setNotifMsg("");
     if (!supported) {
@@ -107,7 +104,7 @@ export default function SettingsPage() {
         icon: "/icons/icon-192.png",
         badge: "/icons/icon-192.png",
         tag: "tmd-test",
-        data: { url: "/" }
+        data: { url: "/" },
       });
       setNotifMsg("Test notification sent.");
     } catch (e) {
@@ -126,7 +123,9 @@ export default function SettingsPage() {
     if (next) {
       // iOS guidance: push-style UX is best when installed to Home Screen
       if (isIOS() && !isStandalonePWA()) {
-        setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
+        setNotifMsg(
+          "On iPhone: install the app (Share → Add to Home Screen) for best notification behavior."
+        );
         // still allow enabling; user can proceed
       }
 
@@ -135,7 +134,9 @@ export default function SettingsPage() {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") {
           setNotifEnabled(false);
-          setNotifMsg("Permission denied. Enable notifications in your browser/iOS settings.");
+          setNotifMsg(
+            "Permission denied. Enable notifications in your browser/iOS settings."
+          );
           return;
         }
         setNotifEnabled(true);
@@ -193,7 +194,6 @@ export default function SettingsPage() {
 
       {/* ✅ Appearance */}
       <section
-        className="card"
         style={{
           border: "1px solid var(--border)",
           background: "var(--bg-light)",
@@ -204,36 +204,40 @@ export default function SettingsPage() {
       >
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Appearance</div>
         <div className="muted" style={{ marginBottom: 10 }}>
-          Choose how TryMeDating looks on this device.
+          Choose a theme for this device.
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
-            className={`btn btn-pill ${theme === "light" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setThemeChoice("light")}
+            className={`btn btn-pill ${
+              theme === "light" ? "btn-primary" : "btn-neutral"
+            }`}
+            onClick={() => setThemeTo("light")}
             aria-pressed={theme === "light"}
           >
             Light
           </button>
+
           <button
             type="button"
-            className={`btn btn-pill ${theme === "dark" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setThemeChoice("dark")}
+            className={`btn btn-pill ${
+              theme === "dark" ? "btn-primary" : "btn-neutral"
+            }`}
+            onClick={() => setThemeTo("dark")}
             aria-pressed={theme === "dark"}
           >
             Dark
           </button>
-        </div>
 
-        <div className="helper-muted" style={{ marginTop: 10 }}>
-          Current: <code>{theme}</code>
+          <div className="helper-muted" style={{ alignSelf: "center" }}>
+            Current: <code>{theme}</code>
+          </div>
         </div>
       </section>
 
       {/* Notifications */}
       <section
-        className="card"
         style={{
           border: "1px solid var(--border)",
           background: "var(--bg-light)",
@@ -245,17 +249,31 @@ export default function SettingsPage() {
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Notifications</div>
 
         {!supported ? (
-          <div className="muted">
-            This device/browser doesn’t support notifications.
-          </div>
+          <div className="muted">This device/browser doesn’t support notifications.</div>
         ) : (
           <>
             <div className="muted" style={{ marginBottom: 10 }}>
-              When enabled, you’ll get a phone-style notification when a new message arrives (best in the installed PWA).
+              When enabled, you’ll get a phone-style notification when a new message arrives
+              (best in the installed PWA).
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontWeight: 800,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={notifEnabled}
@@ -278,11 +296,7 @@ export default function SettingsPage() {
 
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
               Permission: <code>{Notification.permission}</code>
-              {isIOS() ? (
-                <>
-                  {" "}• iPhone tip: install to Home Screen for best results
-                </>
-              ) : null}
+              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
             </div>
 
             {notifMsg && (
@@ -296,7 +310,6 @@ export default function SettingsPage() {
 
       {/* Account overview */}
       <section
-        className="card"
         style={{
           border: "1px solid var(--border)",
           background: "var(--bg-light)",
@@ -314,7 +327,6 @@ export default function SettingsPage() {
 
       {/* Danger zone */}
       <section
-        className="card"
         style={{
           border: "1px solid var(--border)",
           background: "var(--bg-light)",
@@ -391,6 +403,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
 
 
 
