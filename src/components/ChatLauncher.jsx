@@ -1,5 +1,5 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
@@ -16,7 +16,7 @@ async function fetchProfileName(userId) {
 }
 
 // ---- UI positioning + theme ----
-const LAUNCHER_BOTTOM = 96 // px (tweak 80–120 if you want)
+const LAUNCHER_BOTTOM = 96 // px
 const RIGHT_GUTTER = 28
 const LAUNCHER_SIZE = 56
 
@@ -26,7 +26,7 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (the key fix: launcher always above the panel)
+// Layering (launcher always above the panel)
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
@@ -98,10 +98,8 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
     const mq = window.matchMedia('(max-width: 420px)')
-
     const handler = () => setIsNarrow(!!mq.matches)
 
-    // modern + safari fallback
     if (mq.addEventListener) mq.addEventListener('change', handler)
     else mq.addListener(handler)
 
@@ -339,8 +337,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const bottomCss = `calc(${LAUNCHER_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
   const rightCss = `calc(${RIGHT_GUTTER}px + env(safe-area-inset-right, 0px))`
   const panelBottomCss = `calc(${PANEL_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
+  const topCss = `calc(12px + env(safe-area-inset-top, 0px))`
 
-  // FIX: on narrow screens, pin panel inside the viewport (prevents left-side cutoff)
+  // On narrow screens, pin panel inside the viewport (prevents left-side cutoff)
   const panelLeftCss = `calc(12px + env(safe-area-inset-left, 0px))`
   const panelRightCss = `calc(12px + env(safe-area-inset-right, 0px))`
   const panelPos = isNarrow ? { left: panelLeftCss, right: panelRightCss } : { right: rightCss }
@@ -416,7 +415,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             padding: 12,
             zIndex: Z_PANEL,
-            color: 'var(--text)'
+            color: 'var(--text)',
+            maxHeight: `calc(100dvh - ${PANEL_BOTTOM}px - 24px)`,
+            overflowY: 'auto'
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -538,9 +539,14 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           style={{
             position: 'fixed',
             ...panelPos,
-            bottom: panelBottomCss,
+
+            // ✅ Key fix:
+            // On iPhone/narrow screens, clamp panel between safe-area top and the launcher gap.
+            ...(isNarrow
+              ? { top: topCss, bottom: panelBottomCss }
+              : { bottom: panelBottomCss, height: 'min(70dvh, 520px)' }),
+
             width: isNarrow ? 'auto' : 360,
-            height: 'min(70vh, 520px)',
             zIndex: Z_PANEL,
             background: panelBg,
             border: panelBorder,
@@ -628,6 +634,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     </>
   )
 }
+
 
 
 
