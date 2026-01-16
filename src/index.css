@@ -33,6 +33,9 @@
   /* safe-area helpers */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+
+  /* overlay */
+  --tmd-overlay-backdrop: rgba(0,0,0,0.12);
 }
 
 /* ✅ DARK theme overrides */
@@ -46,6 +49,8 @@ html[data-theme="dark"]{
   --surface-2:#0b1426;
 
   --bg-light: var(--surface);
+
+  --tmd-overlay-backdrop: rgba(0,0,0,0.24);
 }
 
 html, body {
@@ -79,7 +84,7 @@ button { font-family: inherit; cursor: pointer; }
   background:var(--bg-light);
 }
 
-/* ✅ Extra: if Footer component uses <footer> without class */
+/* If Footer component uses <footer> without class */
 footer{
   background: var(--bg-light);
   border-top: 1px solid var(--border);
@@ -134,31 +139,26 @@ html[data-theme="dark"] .site-footer [style*="background:rgb(255, 255, 255)"]{
   box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.25);
 }
 
-/* primary = teal */
 .btn-primary{
   background:var(--brand-teal); color:#fff; border-color:var(--brand-teal-700);
 }
 .btn-primary:hover{ background:var(--brand-teal-700); }
 
-/* accent = coral */
 .btn-accent{
   background:var(--brand-coral); color:#fff; border-color:var(--brand-coral-600);
 }
 .btn-accent:hover{ background:var(--brand-coral-600); }
 
-/* danger = red */
 .btn-danger{
   background:#dc2626; color:#fff; border-color:#b91c1c;
 }
 .btn-danger:hover{ background:#b91c1c; }
 
-/* neutral chip */
 .btn-neutral{
   background:#f3f4f6; color:#111827; border-color:#e5e7eb;
 }
 .btn-neutral:hover{ background:#e5e7eb; }
 
-/* ✅ dark-mode neutral buttons should NOT be light gray */
 html[data-theme="dark"] .btn-neutral{
   background: rgba(255,255,255,0.06);
   color: var(--text);
@@ -170,14 +170,11 @@ html[data-theme="dark"] .btn-neutral:hover{
 
 .btn-pill{ border-radius:999px; }
 
-/* Headings */
 h1,h2,h3{ font-weight:700; line-height:1.2; margin-bottom:12px; }
 
-/* Utility */
 .muted{ color:var(--muted); }
 .helper-muted{ font-size:12px; color:var(--muted); margin-top:4px; }
 
-/* Alerts */
 .helper-error{
   background: rgba(244,63,94,0.12);
   color: var(--text);
@@ -197,85 +194,13 @@ h1,h2,h3{ font-weight:700; line-height:1.2; margin-bottom:12px; }
   font-size:13px;
 }
 
-/* Responsive tweaks */
 @media (max-width:768px){
   .btn{ font-size:14px; padding:6px 12px; }
   .site-footer{ padding:16px 0; }
 }
 
-/* === Profile polish === */
-.profile-form{ display:grid; gap:18px; padding:16px; }
-.field-label{ font-weight:800; margin-bottom:6px; }
-.helper{ font-size:12px; color:var(--muted); margin-top:4px; }
-.actions-row{ display:flex; gap:8px; flex-wrap:wrap; }
-.qr-row{ display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
-.qr-card{
-  background:var(--bg-light);
-  padding:10px;
-  border-radius:12px;
-  border:1px solid var(--border);
-  box-shadow:0 1px 3px rgba(0,0,0,.06);
-}
-
-/* Mobile tweaks */
-@media (max-width:640px){
-  .profile-form{ gap:16px; }
-  .qr-row{ flex-direction:column; align-items:flex-start; }
-  .actions-row .btn{ width:100%; }
-}
-
-/* Profile completeness bar */
-.progress{ width:100%; height:10px; background:rgba(148,163,184,0.25); border-radius:999px; overflow:hidden; border:1px solid var(--border); }
-.progress__bar{ height:100%; background:linear-gradient(90deg, var(--brand-teal), var(--brand-coral)); width:0%; transition:width 300ms ease; }
-
-/* Checklist */
-.checklist{ display:flex; flex-wrap:wrap; gap:8px 12px; margin-top:8px; }
-.checklist__item{
-  font-size:13px; padding:4px 8px; border-radius:999px;
-  border:1px solid var(--border); background:var(--bg-light);
-  display:inline-flex; align-items:center; gap:6px;
-}
-.checklist__item--done{ border-color:rgba(22,163,74,.35); background:rgba(22,163,74,.06); color:#16a34a; }
-.checkmark{ display:inline-block; width:16px; height:16px; border-radius:50%; background:#16a34a; color:#fff; font-size:12px; line-height:16px; text-align:center; }
-
-/* Avatar & QR */
-.section-title{ font-weight:800; margin-bottom:6px; }
-.row-split{ display:grid; grid-template-columns:1fr; gap:12px; }
-@media (min-width:720px){ .row-split{ grid-template-columns:1fr auto; align-items:center; } }
-.avatar-frame{ width:104px; height:104px; border-radius:50%; border:2px solid var(--border); background:var(--bg-light); display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06); }
-.avatar-initials{
-  width:100%; height:100%; border-radius:50%; display:grid; place-items:center;
-  font-weight:800; font-size:32px; color:var(--text);
-  background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(244,63,94,.10));
-}
-.qr-caption{ font-size:12px; color:var(--muted); text-align:center; margin-top:6px; }
-
-/* QR layout */
-.qr-wrap{ display:grid; grid-template-columns:1fr; gap:12px; }
-@media (min-width:720px){ .qr-wrap{ grid-template-columns:1fr auto; align-items:center; } }
-
-/* Width cap */
-.profile-narrow{ max-width:860px; margin:0 auto; }
-
-/* Interest chips */
-.chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.chip{
-  display:inline-flex; align-items:center; gap:6px;
-  border:1px solid var(--border); background:var(--bg-light);
-  border-radius:999px; padding:4px 10px; font-size:13px;
-}
-.chip button{ appearance:none; border:0; background:transparent; cursor:pointer; font-weight:700; padding:0; line-height:1; color:var(--muted); }
-.chip button:hover{ color:var(--text); }
-.interest-input-wrap{ display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
-.interest-input-wrap input{ flex:1 1 240px; }
-.helper-inline{ font-size:12px; color:var(--muted); display:inline-block; margin-left:6px; }
-
 /* === Form controls === */
-.form-label{
-  display:grid;
-  gap:6px;
-  font-weight:800;
-}
+.form-label{ display:grid; gap:6px; font-weight:800; }
 
 .input,
 input.input,
@@ -302,101 +227,53 @@ select:focus{
   box-shadow:0 0 0 4px rgba(14,164,122,0.15);
 }
 
-textarea.input{
-  min-height:110px;
-  resize:vertical;
-}
-
-/* -----------------------------
-   ProfilePage layout (responsive)
-   ----------------------------- */
-.profile-grid{
-  display:grid;
-  grid-template-columns:180px 1fr;
-  gap:18px;
-  align-items:start;
-}
-
-.profile-avatar-col{
-  display:grid;
-  gap:10px;
-  justify-items:center;
-}
-
-.profile-avatar-frame{
-  width:140px;
-  height:140px;
-}
-
-.profile-avatar-actions{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  justify-content:center;
-}
-
-.profile-form-grid{
-  display:grid;
-  gap:12px;
-}
-
-/* Mobile: stack avatar above form so Bio has full width */
-@media (max-width:640px){
-  .profile-grid{ grid-template-columns:1fr; }
-  .profile-avatar-col{ justify-items:start; }
-  .profile-avatar-actions{ justify-content:flex-start; }
-}
-
-/* -----------------------------
-   Modal / Backdrop
-   ----------------------------- */
-.modal-backdrop{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,0.35);
-  display:grid;
-  place-items:center;
-  padding:18px;
-  z-index:200000;
-}
-
-/* ✅ in dark mode, reduce “washed out” feeling behind overlays */
-html[data-theme="dark"] .modal-backdrop{
-  background:rgba(0,0,0,0.22);
-}
-
-.modal-card{
-  width:min(520px, 100%);
-  background:var(--bg-light);
-  border:1px solid var(--border);
-  border-radius:16px;
-  box-shadow:0 18px 60px rgba(0,0,0,0.25);
-  padding:14px;
-  display:grid;
-  gap:10px;
-}
+textarea.input{ min-height:110px; resize:vertical; }
 
 /* ------------------------------------------------------------------
-   ✅ Fix “greyed out” readability caused by inline white backgrounds
-   (scoped to MAIN to avoid accidentally theming overlays/tooling)
+   ✅ Chat-only fix (ONCE AND FOR ALL)
+   - We ONLY force inline white/light backgrounds to dark surfaces
+     inside the chat shell (ChatLauncher adds className="tmd-chat-shell")
    ------------------------------------------------------------------ */
-html[data-theme="dark"] main [style*="background: #fff"],
-html[data-theme="dark"] main [style*="background:#fff"],
-html[data-theme="dark"] main [style*="background: rgb(255, 255, 255)"],
-html[data-theme="dark"] main [style*="background:rgb(255, 255, 255)"]{
-  background: var(--surface) !important;
+.tmd-chat-shell{
+  color: var(--text);
+}
+
+html[data-theme="dark"] .tmd-chat-shell{
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] .tmd-chat-shell [style*="background: #fff"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:#fff"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background: rgb(255, 255, 255)"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:rgb(255, 255, 255)"]{
+  background: var(--bg-light) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
 }
 
-html[data-theme="dark"] main [style*="background: #fbfbfb"],
-html[data-theme="dark"] main [style*="background:#fbfbfb"],
-html[data-theme="dark"] main [style*="background: rgb(251, 251, 251)"],
-html[data-theme="dark"] main [style*="background:rgb(251, 251, 251)"]{
+html[data-theme="dark"] .tmd-chat-shell [style*="background: #fbfbfb"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:#fbfbfb"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background: rgb(251, 251, 251)"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:rgb(251, 251, 251)"]{
   background: var(--surface-2) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
 }
+
+html[data-theme="dark"] .tmd-chat-shell [style*="background: #f3f4f6"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:#f3f4f6"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background: rgb(243, 244, 246)"],
+html[data-theme="dark"] .tmd-chat-shell [style*="background:rgb(243, 244, 246)"]{
+  background: rgba(255,255,255,0.06) !important;
+  color: var(--text) !important;
+  border-color: rgba(255,255,255,0.12) !important;
+}
+
+/* Make sure faint “light-on-light” text doesn’t sneak in */
+html[data-theme="dark"] .tmd-chat-shell{
+  text-shadow: none;
+}
+
 
 
 
