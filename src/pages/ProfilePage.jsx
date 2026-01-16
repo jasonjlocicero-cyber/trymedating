@@ -404,20 +404,13 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="actions-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* ✅ Save + Connections next to each other (coral) */}
+          <div className="actions-row">
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
 
-            <Link
-              to="/connections"
-              className="btn btn-accent btn-pill"
-              style={{
-                background: 'var(--brand-coral)',
-                borderColor: 'var(--brand-coral)',
-                color: '#fff',
-              }}
-            >
+            <Link className="btn btn-accent btn-pill" to="/connections">
               Connections
             </Link>
           </div>
