@@ -1,5 +1,6 @@
 // src/pages/ProfilePage.jsx
 import React, { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import ProfilePhotosManager from '../components/ProfilePhotosManager'
 
@@ -403,10 +404,22 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="actions-row">
+          <div className="actions-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
               {saving ? 'Saving…' : 'Save profile'}
             </button>
+
+            <Link
+              to="/connections"
+              className="btn btn-accent btn-pill"
+              style={{
+                background: 'var(--brand-coral)',
+                borderColor: 'var(--brand-coral)',
+                color: '#fff',
+              }}
+            >
+              Connections
+            </Link>
           </div>
         </form>
       </div>
@@ -418,6 +431,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
