@@ -5,6 +5,10 @@ import { BrowserRouter, HashRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./index.css";
 import maybeRegisterSW from "./pwa/maybeRegisterSW";
+import { applyTheme, getTheme } from "./lib/theme";
+
+// ✅ Apply theme ASAP (prevents light-flash before React mounts)
+applyTheme(getTheme());
 
 // Reliable Electron detection:
 // - In Electron, preload should expose window.tmd.isElectron (recommended)
@@ -89,6 +93,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 );
+
 
 
 
