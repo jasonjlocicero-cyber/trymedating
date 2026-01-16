@@ -146,7 +146,15 @@ function linkifyJSX(text) {
 
 /* ------------------------------ UI bits ------------------------------ */
 const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
-  const bg = tone === "danger" ? "#dc2626" : tone === "ghost" ? "#e5e7eb" : "#2563eb";
+  const bg =
+    tone === "danger"
+      ? "#dc2626"
+      : tone === "ghost"
+      ? "var(--chat-ghost-bg)"
+      : "var(--brand-teal)";
+  const fg =
+    tone === "ghost" ? "var(--chat-ghost-text)" : "#fff";
+
   return (
     <button
       onClick={onClick}
@@ -157,10 +165,10 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
         borderRadius: 16,
         marginRight: 8,
         border: "1px solid var(--border)",
-        background: disabled ? "#cbd5e1" : bg,
-        color: tone === "ghost" ? "#111" : "#fff",
+        background: disabled ? "var(--chat-disabled-bg)" : bg,
+        color: disabled ? "var(--chat-disabled-text)" : fg,
         cursor: disabled ? "not-allowed" : "pointer",
-        fontWeight: 600,
+        fontWeight: 700,
         fontSize: 14,
       }}
     >
@@ -175,7 +183,7 @@ const Pill = (txt, color) => (
       padding: "2px 8px",
       borderRadius: 999,
       fontSize: 12,
-      fontWeight: 700,
+      fontWeight: 800,
       background: color,
       color: "#111",
     }}
@@ -187,8 +195,8 @@ const Pill = (txt, color) => (
 function ProgressBar({ percent }) {
   const p = Math.min(100, Math.max(0, percent || 0));
   return (
-    <div style={{ width: "100%", height: 8, background: "#eee", borderRadius: 8 }}>
-      <div style={{ width: `${p}%`, height: 8, borderRadius: 8, background: "#2563eb" }} />
+    <div style={{ width: "100%", height: 8, background: "rgba(148,163,184,0.25)", borderRadius: 8 }}>
+      <div style={{ width: `${p}%`, height: 8, borderRadius: 8, background: "var(--brand-teal)" }} />
     </div>
   );
 }
@@ -211,7 +219,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
           borderRadius: 6,
           display: "grid",
           placeItems: "center",
-          background: "#fff",
+          background: "var(--chat-panel-bg)",
           flex: "0 0 auto",
         }}
       >
@@ -226,8 +234,8 @@ function PdfThumb({ url, name = "document.pdf" }) {
       <div style={{ display: "grid", minWidth: 0 }}>
         <span
           style={{
-            fontWeight: 600,
-            color: "#111",
+            fontWeight: 800,
+            color: "var(--text)",
             maxWidth: 360,
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -236,7 +244,7 @@ function PdfThumb({ url, name = "document.pdf" }) {
         >
           {name}
         </span>
-        <span style={{ fontSize: 12, color: "#374151" }}>Open</span>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>Open</span>
       </div>
     </a>
   );
@@ -288,7 +296,8 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         padding: "8px 10px",
         borderRadius: 12,
         border: "1px solid var(--border)",
-        background: mine ? "#eef6ff" : "#f8fafc",
+        background: mine ? "var(--chat-bubble-mine-bg)" : "var(--chat-bubble-other-bg)",
+        color: "var(--chat-bubble-text)",
         whiteSpace: "pre-wrap",
         fontSize: 14,
         lineHeight: 1.4,
@@ -307,11 +316,11 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               onClick={() => setRefreshTick((n) => n + 1)}
               style={{
                 border: "1px solid var(--border)",
-                background: "#f3f4f6",
-                color: "#111",
+                background: "var(--chat-ghost-bg)",
+                color: "var(--chat-ghost-text)",
                 borderRadius: 8,
                 padding: "4px 8px",
-                fontWeight: 700,
+                fontWeight: 800,
                 fontSize: 12,
                 cursor: "pointer",
               }}
@@ -327,12 +336,12 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               title="Delete attachment"
               style={{
                 border: "1px solid var(--border)",
-                background: deleting ? "#cbd5e1" : "#fee2e2",
-                color: "#111",
+                background: deleting ? "var(--chat-disabled-bg)" : "rgba(244,63,94,0.18)",
+                color: "var(--text)",
                 borderRadius: 8,
                 padding: "4px 8px",
                 cursor: deleting ? "not-allowed" : "pointer",
-                fontWeight: 700,
+                fontWeight: 800,
                 fontSize: 12,
               }}
             >
@@ -360,13 +369,13 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
               target="_blank"
               rel="noreferrer"
               onClick={() => setRefreshTick((n) => n + 1)}
-              style={{ fontWeight: 600 }}
+              style={{ fontWeight: 800 }}
             >
               Open file
             </a>
           )
         ) : (
-          <div style={{ fontSize: 12, opacity: 0.7 }}>Link unavailable</div>
+          <div style={{ fontSize: 12, color: "var(--chat-bubble-meta)" }}>Link unavailable</div>
         )}
       </div>
     </div>
@@ -443,7 +452,7 @@ export default function ChatDock(props) {
     padding: 12,
     overflowY: "auto",
     overflowX: "hidden",
-    background: "#fff",
+    background: "var(--chat-list-bg)",
     minHeight: 140,
 
     display: "flex",
@@ -469,17 +478,18 @@ export default function ChatDock(props) {
     border: "1px solid var(--border)",
     fontSize: 14,
     lineHeight: 1.4,
+    color: "var(--chat-bubble-text)",
   };
 
   const bubbleStyle = (mine) => ({
     ...bubbleBase,
-    background: mine ? "#eef6ff" : "#f8fafc",
+    background: mine ? "var(--chat-bubble-mine-bg)" : "var(--chat-bubble-other-bg)",
     marginLeft: mine ? "auto" : undefined,
   });
 
   const deletedBubble = {
     ...bubbleBase,
-    background: "#f3f4f6",
+    background: "var(--chat-bubble-deleted-bg)",
     fontSize: 13,
   };
 
@@ -1009,7 +1019,7 @@ export default function ChatDock(props) {
       {status === "none" && <Btn onClick={requestConnect} label="Connect" disabled={busy} />}
       {status === "pending" && toId(conn?.[C.requester]) === myId && (
         <>
-          <span style={{ marginRight: 8, fontSize: 14, opacity: 0.8 }}>Waiting for acceptance…</span>
+          <span style={{ marginRight: 8, fontSize: 14, color: "var(--muted)" }}>Waiting for acceptance…</span>
           <Btn tone="ghost" onClick={cancelPending} label="Cancel" disabled={busy} />
         </>
       )}
@@ -1032,7 +1042,8 @@ export default function ChatDock(props) {
         padding: 12,
         display: "flex",
         flexDirection: "column",
-        background: "#fff",
+        background: "var(--chat-panel-bg)",
+        color: "var(--text)",
         minWidth: 0,
         overflow: "hidden",
       }
@@ -1046,7 +1057,8 @@ export default function ChatDock(props) {
         height: "min(560px, calc(100vh - 120px))",
         border: "1px solid var(--border)",
         borderRadius: 12,
-        background: "#fff",
+        background: "var(--chat-panel-bg)",
+        color: "var(--text)",
         boxShadow: "0 12px 32px rgba(0,0,0,0.12)",
         padding: 12,
         zIndex: 10040,
@@ -1061,7 +1073,8 @@ export default function ChatDock(props) {
         border: "1px solid var(--border)",
         borderRadius: 12,
         padding: 12,
-        background: "#fff",
+        background: "var(--chat-panel-bg)",
+        color: "var(--text)",
         minWidth: 0,
         overflow: "hidden",
       };
@@ -1082,10 +1095,11 @@ export default function ChatDock(props) {
                 width: 44,
                 height: 44,
                 border: "1px solid var(--border)",
-                background: "#fff",
+                background: "var(--chat-panel-bg)",
+                color: "var(--text)",
                 borderRadius: 12,
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 900,
               }}
             >
               ✕
@@ -1114,17 +1128,18 @@ export default function ChatDock(props) {
                 width: 44,
                 height: 44,
                 border: "1px solid var(--border)",
-                background: "#fff",
+                background: "var(--chat-panel-bg)",
+                color: "var(--text)",
                 borderRadius: 12,
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 900,
               }}
             >
               ✕
             </button>
           </div>
         )}
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>Messages</div>
+        <div style={{ fontWeight: 900, marginBottom: 6 }}>Messages</div>
         <div className="muted" style={{ fontSize: 13 }}>
           Loading your latest conversation…
         </div>
@@ -1138,9 +1153,9 @@ export default function ChatDock(props) {
       {isWidget && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <div style={{ fontWeight: 800, lineHeight: 1.1 }}>Messages</div>
+            <div style={{ fontWeight: 900, lineHeight: 1.1 }}>Messages</div>
             {partnerName ? (
-              <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.1 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.1 }}>
                 Chatting with {partnerName}
               </div>
             ) : null}
@@ -1155,10 +1170,11 @@ export default function ChatDock(props) {
                 width: 44,
                 height: 44,
                 border: "1px solid var(--border)",
-                background: "#fff",
+                background: "var(--chat-panel-bg)",
+                color: "var(--text)",
                 borderRadius: 12,
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 900,
               }}
             >
               ✕
@@ -1168,7 +1184,7 @@ export default function ChatDock(props) {
       )}
 
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ fontWeight: 700 }}>Connection</div>
+        <div style={{ fontWeight: 900 }}>Connection</div>
         <div>
           {ACCEPTED.has(status) && Pill("Connected", "#bbf7d0")}
           {status === "pending" && Pill("Pending", "#fde68a")}
@@ -1198,8 +1214,8 @@ export default function ChatDock(props) {
               style={{
                 margin: "0 0 8px",
                 fontSize: 12,
-                color: "#374151",
-                background: "#f8fafc",
+                color: "var(--text)",
+                background: "var(--surface-2)",
                 border: "1px solid var(--border)",
                 borderRadius: 8,
                 padding: "6px 8px",
@@ -1209,19 +1225,21 @@ export default function ChatDock(props) {
                 gap: 8,
               }}
             >
-              <span>Showing messages from previous sessions ({sessionCount})</span>
+              <span style={{ color: "var(--muted)", fontWeight: 700 }}>
+                Showing messages from previous sessions ({sessionCount})
+              </span>
               <button
                 type="button"
                 aria-label="Dismiss"
                 onClick={dismissBanner}
                 style={{
                   border: "1px solid var(--border)",
-                  background: "#fff",
-                  color: "#111",
+                  background: "var(--chat-copy-bg)",
+                  color: "var(--chat-copy-text)",
                   borderRadius: 8,
                   padding: "6px 10px",
                   cursor: "pointer",
-                  fontWeight: 800,
+                  fontWeight: 900,
                   fontSize: 12,
                   lineHeight: 1,
                 }}
@@ -1244,7 +1262,7 @@ export default function ChatDock(props) {
             }}
           >
             <div ref={scrollerRef} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} style={listStyle}>
-              {items.length === 0 && <div style={{ opacity: 0.7, fontSize: 14 }}>Say hello 👋</div>}
+              {items.length === 0 && <div style={{ opacity: 0.8, fontSize: 14, color: "var(--muted)" }}>Say hello 👋</div>}
 
               {items.map((m) => {
                 const mine = isMine(m);
@@ -1281,13 +1299,13 @@ export default function ChatDock(props) {
                             title="Copy message"
                             style={{
                               border: "1px solid var(--border)",
-                              background: "#fff",
-                              color: "#111",
+                              background: "var(--chat-copy-bg)",
+                              color: "var(--chat-copy-text)",
                               borderRadius: 8,
                               padding: "6px 10px",
                               fontSize: 12,
                               cursor: "pointer",
-                              fontWeight: 800,
+                              fontWeight: 900,
                             }}
                           >
                             Copy
@@ -1296,7 +1314,8 @@ export default function ChatDock(props) {
                           <div
                             style={{
                               fontSize: 11,
-                              opacity: 0.6,
+                              color: "var(--chat-bubble-meta)",
+                              opacity: 0.9,
                               textAlign: mine ? "right" : "left",
                               maxWidth: "100%",
                               overflowWrap: "anywhere",
@@ -1314,7 +1333,7 @@ export default function ChatDock(props) {
             </div>
 
             {peerTyping && (
-              <div style={{ fontSize: 12, color: "#6b7280", margin: "0 0 0 6px" }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 0 6px" }}>
                 The other person is typing…
               </div>
             )}
@@ -1371,6 +1390,8 @@ export default function ChatDock(props) {
                   overflowY: "auto",
                   minHeight: 44,
                   maxHeight: isNarrow ? 220 : 160,
+                  background: "var(--chat-input-bg)",
+                  color: "var(--chat-input-text)",
                 }}
               />
 
@@ -1402,12 +1423,13 @@ export default function ChatDock(props) {
                   style={{
                     padding: "10px 14px",
                     borderRadius: 12,
-                    background: !canSend || uploading ? "#cbd5e1" : "#2563eb",
+                    background: !canSend || uploading ? "var(--chat-disabled-bg)" : "var(--chat-send-bg)",
                     color: "#fff",
                     border: "none",
                     cursor: !canSend || uploading ? "not-allowed" : "pointer",
-                    fontWeight: 700,
+                    fontWeight: 900,
                     flex: "0 0 auto",
+                    opacity: !canSend || uploading ? 0.75 : 1,
                   }}
                 >
                   Send
