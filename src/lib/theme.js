@@ -21,7 +21,7 @@ export function applyTheme(theme) {
   const t = theme === "dark" ? "dark" : "light";
   try {
     document.documentElement.dataset.theme = t;
-    // Helps browsers render form controls correctly
+    // Helps browser form controls match theme
     document.documentElement.style.colorScheme = t;
     localStorage.setItem(KEY, t);
   } catch {
@@ -29,3 +29,4 @@ export function applyTheme(theme) {
   }
   return t;
 }
+
