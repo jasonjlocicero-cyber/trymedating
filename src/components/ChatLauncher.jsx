@@ -1,5 +1,5 @@
 // src/components/ChatLauncher.jsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ChatDock from './ChatDock'
 
@@ -26,17 +26,11 @@ const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 // Brand teal/seafoam
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
 
-// Layering (launcher always above the panel)
+// Layering (the key fix: launcher always above the panel)
 const Z_BACKDROP = 10030
 const Z_PANEL = 10040
 const Z_LAUNCHER = 10050
 const Z_TOAST = 10060
-
-// Theme-friendly colors (NO hard-coded #fff)
-const PANEL_BG = 'var(--bg-light)'
-const PANEL_TEXT = 'var(--text)'
-const BORDER = '1px solid var(--border)'
-const SUBTLE_BG = 'var(--surface-2, rgba(255,255,255,0.06))'
 
 // Simple error boundary so chat errors don't blank the whole app
 class DockErrorBoundary extends React.Component {
@@ -54,12 +48,11 @@ class DockErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <div
-          className="tmd-chat-shell"
           style={{
             width: '100%',
             height: '100%',
-            background: PANEL_BG,
-            color: PANEL_TEXT,
+            background: 'var(--chat-panel-bg, var(--bg-light))',
+            color: 'var(--text)',
             padding: 12,
             display: 'flex',
             flexDirection: 'column',
@@ -91,7 +84,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const [recent, setRecent] = useState([])
   const [err, setErr] = useState('')
 
-  // kept for future use / push logic
   const [unreadLocal, setUnreadLocal] = useState(0)
 
   // New-message toast (shows only when dock is closed)
@@ -193,7 +185,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     return () => supabase.removeChannel(channel)
   }, [me?.id, computeUnread])
 
-  // When opening the panel, force a refresh
+  // When opening/closing the panel, force a refresh so badge clears even if UPDATE events don’t fire
   useEffect(() => {
     if (!me?.id) return
     if (!open) return
@@ -211,7 +203,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     return () => window.removeEventListener('keydown', onKey)
   }, [open, closeAll])
 
-  // ------- global opener + events -------
+  // ------- global opener + events (supports BOTH names) -------
   useEffect(() => {
     function openFromEvent(ev) {
       const d = ev?.detail || {}
@@ -348,10 +340,13 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
   const rightCss = `calc(${RIGHT_GUTTER}px + env(safe-area-inset-right, 0px))`
   const panelBottomCss = `calc(${PANEL_BOTTOM}px + env(safe-area-inset-bottom, 0px))`
 
-  // FIX: on narrow screens, pin panel inside the viewport
+  // FIX: on narrow screens, pin panel inside the viewport (prevents left-side cutoff)
   const panelLeftCss = `calc(12px + env(safe-area-inset-left, 0px))`
   const panelRightCss = `calc(12px + env(safe-area-inset-right, 0px))`
   const panelPos = isNarrow ? { left: panelLeftCss, right: panelRightCss } : { right: rightCss }
+
+  const panelBg = 'var(--chat-panel-bg, var(--bg-light))'
+  const panelBorder = '1px solid var(--border)'
 
   return (
     <>
@@ -363,13 +358,13 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'var(--tmd-overlay-backdrop, rgba(0,0,0,0.12))',
+            background: 'rgba(0,0,0,0.10)',
             zIndex: Z_BACKDROP
           }}
         />
       )}
 
-      {/* Floating launcher button */}
+      {/* Floating launcher button (ALWAYS on top) */}
       <button
         type="button"
         disabled={disabled}
@@ -410,19 +405,18 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       {/* Inbox picker */}
       {open && !partnerId && (
         <div
-          className="tmd-chat-shell"
           style={{
             position: 'fixed',
             ...panelPos,
             bottom: panelBottomCss,
             width: isNarrow ? 'auto' : 320,
-            background: PANEL_BG,
-            color: PANEL_TEXT,
-            border: BORDER,
+            background: panelBg,
+            border: panelBorder,
             borderRadius: 14,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             padding: 12,
-            zIndex: Z_PANEL
+            zIndex: Z_PANEL,
+            color: 'var(--text)'
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -436,9 +430,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: BORDER,
-                background: PANEL_BG,
-                color: PANEL_TEXT,
+                border: panelBorder,
+                background: panelBg,
+                color: 'var(--text)',
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -475,19 +469,19 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                             width: 24,
                             height: 24,
                             borderRadius: '50%',
-                            background: SUBTLE_BG,
-                            border: BORDER,
+                            background: 'var(--surface-2)',
+                            border: '1px solid var(--border)',
                             display: 'grid',
                             placeItems: 'center',
                             fontSize: 12,
-                            fontWeight: 800,
-                            color: PANEL_TEXT
+                            fontWeight: 700,
+                            color: 'var(--text)'
                           }}
                         >
                           {(p.display_name || p.handle || '?').slice(0, 1).toUpperCase()}
                         </div>
                         <div style={{ textAlign: 'left' }}>
-                          <div style={{ fontWeight: 800 }}>{p.display_name || 'Unnamed'}</div>
+                          <div style={{ fontWeight: 800, color: 'var(--text)' }}>{p.display_name || 'Unnamed'}</div>
                           {p.handle && <div className="muted">@{p.handle}</div>}
                         </div>
                       </div>
@@ -500,18 +494,17 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
         </div>
       )}
 
-      {/* New-message toast */}
+      {/* New-message toast (bottom-left) */}
       {toast && (
         <div
-          className="tmd-chat-shell"
           role="alert"
           style={{
             position: 'fixed',
             left: 16,
             bottom: bottomCss,
             zIndex: Z_TOAST,
-            background: 'var(--tmd-toast-bg, #111827)',
-            color: 'var(--tmd-toast-text, #fff)',
+            background: '#111827',
+            color: '#fff',
             padding: '10px 12px',
             borderRadius: 10,
             boxShadow: '0 10px 24px rgba(0,0,0,.2)',
@@ -542,7 +535,6 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
       {/* Chat panel */}
       {open && canChat && (
         <div
-          className="tmd-chat-shell"
           style={{
             position: 'fixed',
             ...panelPos,
@@ -550,18 +542,18 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
             width: isNarrow ? 'auto' : 360,
             height: 'min(70vh, 520px)',
             zIndex: Z_PANEL,
-            background: PANEL_BG,
-            color: PANEL_TEXT,
-            border: BORDER,
+            background: panelBg,
+            border: panelBorder,
             borderRadius: 14,
             boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
             overflow: 'hidden',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            color: 'var(--text)'
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header */}
+          {/* Header (bigger touch targets for mobile) */}
           <div
             style={{
               display: 'flex',
@@ -569,9 +561,8 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
               justifyContent: 'space-between',
               gap: 8,
               padding: '8px 10px',
-              borderBottom: BORDER,
-              background: PANEL_BG,
-              color: PANEL_TEXT
+              borderBottom: panelBorder,
+              background: panelBg
             }}
           >
             <button
@@ -583,9 +574,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: BORDER,
-                background: PANEL_BG,
-                color: PANEL_TEXT,
+                border: panelBorder,
+                background: panelBg,
+                color: 'var(--text)',
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -611,9 +602,9 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
                 width: 44,
                 height: 44,
                 borderRadius: 12,
-                border: BORDER,
-                background: PANEL_BG,
-                color: PANEL_TEXT,
+                border: panelBorder,
+                background: panelBg,
+                color: 'var(--text)',
                 fontWeight: 900,
                 cursor: 'pointer'
               }}
@@ -637,6 +628,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     </>
   )
 }
+
 
 
 
