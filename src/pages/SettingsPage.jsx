@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
-import { applyTheme, getTheme, getThemePreference, startThemeSync } from "../lib/theme";
+import { applyTheme, getThemeMode, resolveTheme } from "../lib/theme";
 
 const LS_NOTIF_ENABLED = "tmd_notifications_enabled";
 
@@ -24,17 +24,13 @@ export default function SettingsPage() {
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Theme
-  const [themePref, setThemePref] = useState(() => {
-    try {
-      const v = getThemePreference();
-      return v;
-    } catch {
-      return "system";
-    }
-  });
-  const [themeResolved, setThemeResolved] = useState(() => getTheme());
-  const [themeMsg, setThemeMsg] = useState("");
+  // Appearance (theme)
+  const [themeMode, setThemeMode] = useState(() => getThemeMode());
+  const resolvedTheme = useMemo(() => resolveTheme(themeMode), [themeMode]);
+
+  useEffect(() => {
+    applyTheme(themeMode);
+  }, [themeMode]);
 
   // Notifications
   const supported = useMemo(() => {
@@ -62,17 +58,13 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteMsg, setDeleteMsg] = useState("");
 
-  // Keep "system" theme synced to OS changes
-  useEffect(() => {
-    const stop = startThemeSync?.();
-    return () => stop?.();
-  }, []);
-
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (!alive) return;
         setMe(user || null);
       } finally {
@@ -94,18 +86,6 @@ export default function SettingsPage() {
     }
   }, [notifEnabled]);
 
-  function setTheme(nextPref) {
-    setThemeMsg("");
-    const resolved = applyTheme(nextPref);
-    setThemePref(nextPref);
-    setThemeResolved(resolved);
-
-    const label =
-      nextPref === "system" ? `System (${resolved})` : resolved;
-
-    setThemeMsg(`Theme set to: ${label}`);
-  }
-
   async function testNotification() {
     setNotifMsg("");
     if (!supported) {
@@ -124,7 +104,7 @@ export default function SettingsPage() {
         icon: "/icons/icon-192.png",
         badge: "/icons/icon-192.png",
         tag: "tmd-test",
-        data: { url: "/" }
+        data: { url: "/" },
       });
       setNotifMsg("Test notification sent.");
     } catch (e) {
@@ -143,7 +123,9 @@ export default function SettingsPage() {
     if (next) {
       // iOS guidance: push-style UX is best when installed to Home Screen
       if (isIOS() && !isStandalonePWA()) {
-        setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
+        setNotifMsg(
+          "On iPhone: install the app (Share → Add to Home Screen) for best notification behavior."
+        );
         // still allow enabling; user can proceed
       }
 
@@ -152,7 +134,9 @@ export default function SettingsPage() {
         const perm = await Notification.requestPermission();
         if (perm !== "granted") {
           setNotifEnabled(false);
-          setNotifMsg("Permission denied. Enable notifications in your browser/iOS settings.");
+          setNotifMsg(
+            "Permission denied. Enable notifications in your browser/iOS settings."
+          );
           return;
         }
         setNotifEnabled(true);
@@ -219,43 +203,46 @@ export default function SettingsPage() {
         }}
       >
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Appearance</div>
+
         <div className="muted" style={{ marginBottom: 10 }}>
-          Choose a theme. “System” will follow your device setting.
+          Choose how the app looks. “System” matches your device setting.
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <button
-            type="button"
-            className={`btn btn-pill ${themePref === "system" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setTheme("system")}
-          >
-            System
-          </button>
-          <button
-            type="button"
-            className={`btn btn-pill ${themePref === "light" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setTheme("light")}
-          >
-            Light
-          </button>
-          <button
-            type="button"
-            className={`btn btn-pill ${themePref === "dark" ? "btn-primary" : "btn-neutral"}`}
-            onClick={() => setTheme("dark")}
-          >
-            Dark
-          </button>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+          }}
+        >
+          <label style={{ fontWeight: 800 }}>
+            Theme{" "}
+            <span className="muted" style={{ fontWeight: 700 }}>
+              (current: {resolvedTheme})
+            </span>
+          </label>
 
-          <span className="muted" style={{ fontSize: 13 }}>
-            Current: <code>{themeResolved}</code>
-          </span>
+          <select
+            value={themeMode}
+            onChange={(e) => setThemeMode(e.target.value)}
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: "8px 10px",
+              fontWeight: 800,
+              background: "var(--bg-light)",
+              color: "inherit",
+              minHeight: 44,
+            }}
+            aria-label="Theme"
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
         </div>
-
-        {themeMsg && (
-          <div className="helper-muted" style={{ marginTop: 10 }}>
-            {themeMsg}
-          </div>
-        )}
       </section>
 
       {/* Notifications */}
@@ -271,17 +258,30 @@ export default function SettingsPage() {
         <div style={{ fontWeight: 800, marginBottom: 10 }}>Notifications</div>
 
         {!supported ? (
-          <div className="muted">
-            This device/browser doesn’t support notifications.
-          </div>
+          <div className="muted">This device/browser doesn’t support notifications.</div>
         ) : (
           <>
             <div className="muted" style={{ marginBottom: 10 }}>
               When enabled, you’ll get a phone-style notification when a new message arrives (best in the installed PWA).
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 800 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontWeight: 800,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={notifEnabled}
@@ -304,11 +304,7 @@ export default function SettingsPage() {
 
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
               Permission: <code>{Notification.permission}</code>
-              {isIOS() ? (
-                <>
-                  {" "}• iPhone tip: install to Home Screen for best results
-                </>
-              ) : null}
+              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
             </div>
 
             {notifMsg && (
@@ -414,6 +410,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
 
 
 
