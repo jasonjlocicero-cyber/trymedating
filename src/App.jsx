@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from './lib/supabaseClient'
 import { ChatProvider } from './chat/ChatContext'
+import { applyTheme, getTheme } from './lib/theme'
 
 // Layout
 import Header from './components/Header'
@@ -43,7 +44,7 @@ function Home({ me }) {
   const authed = !!me?.id
 
   return (
-    <div style={{ background: '#fff' }}>
+    <div style={{ background: 'var(--page-bg)' }}>
       <section style={{ padding: '52px 0 36px', borderBottom: '1px solid var(--border)' }}>
         <div
           className="container"
@@ -143,7 +144,7 @@ function Home({ me }) {
           padding: '18px 0',
           borderTop: '1px solid var(--border)',
           borderBottom: '1px solid var(--border)',
-          background: '#fbfbfb'
+          background: 'var(--surface-2)'
         }}
       >
         <div
@@ -171,13 +172,13 @@ function FeatureCard({ title, text, icon }) {
       border: '1px solid var(--border)',
       borderRadius: 12,
       padding: 16,
-      background: '#fff',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+      background: 'var(--bg-light)',
+      boxShadow: '0 2px 8px var(--shadow-card)'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <div style={{
           width: 32, height: 32, borderRadius: 8, display: 'grid', placeItems: 'center',
-          background: '#f8fafc', border: '1px solid var(--border)', fontSize: 16
+          background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 16
         }} aria-hidden>
           <span>{icon}</span>
         </div>
@@ -248,6 +249,11 @@ export default function App() {
   const showChatLauncher = !pathname.startsWith('/chat')
 
   useDesktopDeepLinks()
+
+  // Apply theme on app start (saved theme, else system preference)
+  useEffect(() => {
+    applyTheme(getTheme())
+  }, [])
 
   // Resume pending /connect after auth (critical for iOS QR scans)
   useEffect(() => {
