@@ -226,7 +226,7 @@ h1,h2,h3{ font-weight:700; line-height:1.2; margin-bottom:12px; }
 .avatar-frame{ width:104px; height:104px; border-radius:50%; border:2px solid var(--border); background:var(--bg-light); display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06); }
 .avatar-initials{
   width:100%; height:100%; border-radius:50%; display:grid; place-items:center;
-  font-weight:800; font-size:32px; color:var(--text);
+  font-weight:800; fontSize:32px; color:var(--text);
   background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(244,63,94,.10));
 }
 .qr-caption{ font-size:12px; color:var(--muted); text-align:center; margin-top:6px; }
@@ -358,42 +358,78 @@ html[data-theme="dark"] .modal-backdrop{
 }
 
 /* ------------------------------------------------------------------
-   ✅ Fix “greyed out” readability caused by inline white backgrounds
-   (common in Terms/Privacy/Chat panels)
+   ✅ HARD FIX: chat bubbles + inline “light” surfaces in dark mode
+   - Incoming/received bubbles often use background-color (#fff/#f8fafc/#f1f5f9)
+   - Dark mode text is light, so those turn faint.
+   - Force those light surfaces to a dark surface + readable text.
    ------------------------------------------------------------------ */
 
-/* Catch BOTH background + background-color inline styles */
 html[data-theme="dark"] [style*="background: #fff"],
 html[data-theme="dark"] [style*="background:#fff"],
 html[data-theme="dark"] [style*="background: #ffffff"],
 html[data-theme="dark"] [style*="background:#ffffff"],
-html[data-theme="dark"] [style*="background: rgb(255, 255, 255)"],
-html[data-theme="dark"] [style*="background:rgb(255, 255, 255)"],
 html[data-theme="dark"] [style*="background-color: #fff"],
 html[data-theme="dark"] [style*="background-color:#fff"],
 html[data-theme="dark"] [style*="background-color: #ffffff"],
 html[data-theme="dark"] [style*="background-color:#ffffff"],
-html[data-theme="dark"] [style*="background-color: rgb(255, 255, 255)"],
-html[data-theme="dark"] [style*="background-color:rgb(255, 255, 255)"]{
+html[data-theme="dark"] [style*="rgb(255, 255, 255)"],
+html[data-theme="dark"] [style*="rgb(255,255,255)"],
+
+/* slate-50 */
+html[data-theme="dark"] [style*="background: #f8fafc"],
+html[data-theme="dark"] [style*="background:#f8fafc"],
+html[data-theme="dark"] [style*="background-color: #f8fafc"],
+html[data-theme="dark"] [style*="background-color:#f8fafc"],
+html[data-theme="dark"] [style*="rgb(248, 250, 252)"],
+html[data-theme="dark"] [style*="rgb(248,250,252)"],
+
+/* slate-100 */
+html[data-theme="dark"] [style*="background: #f1f5f9"],
+html[data-theme="dark"] [style*="background:#f1f5f9"],
+html[data-theme="dark"] [style*="background-color: #f1f5f9"],
+html[data-theme="dark"] [style*="background-color:#f1f5f9"],
+html[data-theme="dark"] [style*="rgb(241, 245, 249)"],
+html[data-theme="dark"] [style*="rgb(241,245,249)"],
+
+/* slate-200 */
+html[data-theme="dark"] [style*="background: #e2e8f0"],
+html[data-theme="dark"] [style*="background:#e2e8f0"],
+html[data-theme="dark"] [style*="background-color: #e2e8f0"],
+html[data-theme="dark"] [style*="background-color:#e2e8f0"],
+html[data-theme="dark"] [style*="rgb(226, 232, 240)"],
+html[data-theme="dark"] [style*="rgb(226,232,240)"],
+
+/* legacy section gray */
+html[data-theme="dark"] [style*="background: #fbfbfb"],
+html[data-theme="dark"] [style*="background:#fbfbfb"],
+html[data-theme="dark"] [style*="background-color: #fbfbfb"],
+html[data-theme="dark"] [style*="background-color:#fbfbfb"],
+html[data-theme="dark"] [style*="rgb(251, 251, 251)"],
+html[data-theme="dark"] [style*="rgb(251,251,251)"]{
   background: var(--surface) !important;
   background-color: var(--surface) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
+  opacity: 1 !important;
 }
 
-html[data-theme="dark"] [style*="background: #fbfbfb"],
-html[data-theme="dark"] [style*="background:#fbfbfb"],
-html[data-theme="dark"] [style*="background: rgb(251, 251, 251)"],
-html[data-theme="dark"] [style*="background:rgb(251, 251, 251)"],
-html[data-theme="dark"] [style*="background-color: #fbfbfb"],
-html[data-theme="dark"] [style*="background-color:#fbfbfb"],
-html[data-theme="dark"] [style*="background-color: rgb(251, 251, 251)"],
-html[data-theme="dark"] [style*="background-color:rgb(251, 251, 251)"]{
-  background: var(--surface-2) !important;
-  background-color: var(--surface-2) !important;
-  color: var(--text) !important;
-  border-color: var(--border) !important;
+/* Force children inside those bubbles/panels to inherit readable text
+   (prevents inline light-gray text from staying faint) */
+html[data-theme="dark"]
+  [style*="background"]:where([style*="#fff"],[style*="#ffffff"],[style*="#f8fafc"],[style*="#f1f5f9"],[style*="#e2e8f0"],[style*="#fbfbfb"])
+  :where(*):not(button):not(.btn){
+  color: inherit !important;
+  opacity: 1 !important;
 }
+
+/* Keep muted text readable (timestamps, sublabels) */
+html[data-theme="dark"]
+  [style*="background"]:where([style*="#fff"],[style*="#ffffff"],[style*="#f8fafc"],[style*="#f1f5f9"],[style*="#e2e8f0"],[style*="#fbfbfb"])
+  :where(.muted,.helper-muted){
+  color: var(--muted) !important;
+  opacity: 1 !important;
+}
+
 
 
 
