@@ -5,9 +5,9 @@ import { BrowserRouter, HashRouter } from "react-router-dom";
 import App from "./App.jsx";
 import "./index.css";
 import maybeRegisterSW from "./pwa/maybeRegisterSW";
-import { getTheme, applyTheme } from "./lib/theme";
+import { applyTheme, getTheme } from "./lib/theme";
 
-// Apply theme ASAP (before first paint)
+// ✅ Apply theme ASAP (prevents flash + ensures Electron uses the saved theme)
 applyTheme(getTheme());
 
 // Reliable Electron detection:
@@ -93,6 +93,7 @@ ReactDOM.createRoot(rootEl).render(
     )}
   </React.StrictMode>
 );
+
 
 
 
