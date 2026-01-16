@@ -86,6 +86,25 @@ footer{
   color: var(--text);
 }
 
+/* ✅ HARD FIX: footer must obey dark mode even if inline styles set background:#fff */
+html[data-theme="dark"] .site-footer,
+html[data-theme="dark"] footer.site-footer,
+html[data-theme="dark"] footer{
+  background: var(--bg-light) !important;
+  color: var(--text) !important;
+  border-top-color: var(--border) !important;
+}
+
+/* If footer contains inner wrappers with inline background:#fff, override them too */
+html[data-theme="dark"] .site-footer [style*="background: #fff"],
+html[data-theme="dark"] .site-footer [style*="background:#fff"],
+html[data-theme="dark"] .site-footer [style*="background: rgb(255, 255, 255)"],
+html[data-theme="dark"] .site-footer [style*="background:rgb(255, 255, 255)"]{
+  background: var(--bg-light) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
 /* Cards */
 .card{
   border:1px solid var(--border);
@@ -359,7 +378,7 @@ html[data-theme="dark"] .modal-backdrop{
 
 /* ------------------------------------------------------------------
    ✅ Fix “greyed out” readability caused by inline white backgrounds
-   Scope it to MAIN PAGE CONTENT ONLY (prevents breaking Chat bubbles)
+   (scoped to MAIN to avoid accidentally theming overlays/tooling)
    ------------------------------------------------------------------ */
 html[data-theme="dark"] main [style*="background: #fff"],
 html[data-theme="dark"] main [style*="background:#fff"],
@@ -377,49 +396,6 @@ html[data-theme="dark"] main [style*="background:rgb(251, 251, 251)"]{
   background: var(--surface-2) !important;
   color: var(--text) !important;
   border-color: var(--border) !important;
-}
-
-/* ------------------------------------------------------------------
-   ✅ Chat readability (dark mode)
-   - Chat panels live OUTSIDE <main>, so we theme them separately
-   - Force readable text inside LIGHT bubbles (sent or received)
-   ------------------------------------------------------------------ */
-.tmd-chat-panel{
-  background: var(--bg-light);
-  color: var(--text);
-}
-
-/* In dark mode, ensure panel itself is true dark surface */
-html[data-theme="dark"] .tmd-chat-panel{
-  background: var(--surface) !important;
-  color: var(--text) !important;
-  border-color: var(--border) !important;
-}
-
-/* LIGHT bubble backgrounds → force DARK text (high contrast) */
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #fff"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#fff"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background: rgb(255, 255, 255)"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background:rgb(255, 255, 255)"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #f8fafc"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#f8fafc"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #eff6ff"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#eff6ff"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #eef2ff"],
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#eef2ff"]{
-  color: #0b1220 !important;
-  opacity: 1 !important;
-}
-
-/* If ChatDock sets faint text on inner nodes, punch it up (but don’t touch buttons) */
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #fff"] div,
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#fff"] div,
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #fff"] span,
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#fff"] span,
-html[data-theme="dark"] .tmd-chat-panel [style*="background: #fff"] p,
-html[data-theme="dark"] .tmd-chat-panel [style*="background:#fff"] p{
-  color: #0b1220 !important;
-  opacity: 1 !important;
 }
 
 
