@@ -57,8 +57,15 @@ export default function Connections() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+
+  // Dropdown filter (NO pending here anymore)
   const [statusFilter, setStatusFilter] = useState("accepted");
+
+  // View mode: main list vs incoming pending list
+  const [view, setView] = useState("main"); // 'main' | 'pending'
+
   const [total, setTotal] = useState(null); // exact count (if available)
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -107,6 +114,26 @@ export default function Connections() {
     [navigate]
   );
 
+  // Fetch incoming pending count (for the Pending button)
+  const refreshPendingCount = useCallback(async () => {
+    if (!myId) return;
+    try {
+      const { count, error: cntErr } = await supabase
+        .from(CONN_TABLE)
+        .select("id", { count: "exact", head: true })
+        .eq(C.addressee, myId)
+        .eq(C.status, "pending");
+
+      if (!cntErr && typeof count === "number") setPendingCount(count);
+    } catch {
+      // ignore
+    }
+  }, [myId]);
+
+  useEffect(() => {
+    if (myId) refreshPendingCount();
+  }, [myId, refreshPendingCount]);
+
   const loadPage = useCallback(
     async (reset = false) => {
       if (!myId || loading || (done && !reset)) return;
@@ -118,16 +145,27 @@ export default function Connections() {
         const from = pageIndex * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // Pull connections (prefer exact count for better paging UX)
         let q = supabase
           .from(CONN_TABLE)
           .select("*", { count: "exact" })
-          .or(`${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`)
           .order(C.updatedAt, { ascending: false })
           .order(C.createdAt, { ascending: false })
           .range(from, to);
 
-        if (statusFilter !== "all") q = q.eq(C.status, statusFilter);
+        if (view === "pending") {
+          // ✅ INCOMING pending only (requests sent to me)
+          q = q.eq(C.addressee, myId).eq(C.status, "pending");
+        } else {
+          // ✅ Main list (non-pending filters live in dropdown)
+          q = q.or(`${C.requester}.eq.${myId},${C.addressee}.eq.${myId}`);
+
+          if (statusFilter === "all") {
+            // "All statuses" here means all NON-pending (pending has its own button)
+            q = q.neq(C.status, "pending");
+          } else {
+            q = q.eq(C.status, statusFilter);
+          }
+        }
 
         const { data: rows, error: rowsErr, count } = await q;
         if (rowsErr) throw rowsErr;
@@ -143,6 +181,7 @@ export default function Connections() {
             setDone(true);
           }
           setLoading(false);
+          await refreshPendingCount();
           return;
         }
 
@@ -214,30 +253,35 @@ export default function Connections() {
         if (reset) {
           setItems(normalized);
           setPage(1);
-          setDone(
-            normalized.length < PAGE_SIZE ||
-              (typeof total === "number" && normalized.length >= total)
-          );
+
+          const reachedTotal =
+            typeof count === "number" ? normalized.length >= count : false;
+
+          setDone(normalized.length < PAGE_SIZE || reachedTotal);
         } else {
           setItems((prev) => [...prev, ...normalized]);
           setPage(pageIndex + 1);
+
           const reachedTotal =
-            typeof total === "number" ? from + normalized.length >= total : false;
+            typeof count === "number" ? from + normalized.length >= count : false;
+
           if (normalized.length < PAGE_SIZE || reachedTotal) setDone(true);
         }
+
+        await refreshPendingCount();
       } catch (e) {
         setError(e.message || "Failed to load connections.");
       } finally {
         setLoading(false);
       }
     },
-    [myId, page, loading, done, statusFilter, total]
+    [myId, page, loading, done, statusFilter, view, refreshPendingCount]
   );
 
-  // On auth or filter changes, reset and load
+  // On auth or filter/view changes, reset and load
   useEffect(() => {
     if (myId) loadPage(true);
-  }, [myId, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [myId, statusFilter, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = useMemo(() => {
     if (typeof total !== "number" || total === 0) return 1;
@@ -267,30 +311,96 @@ export default function Connections() {
         <div>
           <h1 style={{ fontWeight: 900, marginBottom: 4 }}>Connections</h1>
           <div className="muted" style={{ fontSize: 13 }}>
-            Your recent connections sorted by latest activity. Tap a card to view their public profile.
+            {view === "pending"
+              ? "Incoming requests waiting on you. Open chat to accept/reject."
+              : "Your recent connections sorted by latest activity. Tap a card to view their public profile."}
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* ✅ Pending button (brand coral) */}
+          <button
+            type="button"
+            className="btn btn-accent btn-pill"
+            onClick={() => setView("pending")}
+            disabled={loading}
+            title="View incoming pending requests"
+            style={{
+              background: "var(--brand-coral)",
+              borderColor: "var(--brand-coral)",
+              color: "#fff",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            Pending
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 24,
+                height: 20,
+                padding: "0 8px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.22)",
+                color: "#fff",
+                fontWeight: 900,
+                fontSize: 12,
+                lineHeight: 1,
+              }}
+              aria-label={`${pendingCount} pending requests`}
+              title={`${pendingCount} pending requests`}
+            >
+              {pendingCount}
+            </span>
+          </button>
+
+          {/* When in pending view, give an obvious way back */}
+          {view === "pending" && (
+            <button
+              type="button"
+              className="btn btn-neutral btn-pill"
+              onClick={() => setView("main")}
+              disabled={loading}
+              title="Back to connections"
+            >
+              All connections
+            </button>
+          )}
+
+          {/* Dropdown ONLY for main view filters */}
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setView("main");
+              setStatusFilter(e.target.value);
+            }}
             style={{
               border: "1px solid var(--border)",
               borderRadius: 10,
               padding: "6px 10px",
               fontWeight: 700,
+              opacity: view === "pending" ? 0.6 : 1,
             }}
             aria-label="Filter by status"
+            disabled={view === "pending"}
+            title={view === "pending" ? "Switch back to All connections to use filters" : "Filter by status"}
           >
             <option value="all">All statuses</option>
             <option value="accepted">Accepted</option>
-            <option value="pending">Pending</option>
+            {/* ✅ removed Pending from dropdown */}
             <option value="rejected">Rejected</option>
             <option value="disconnected">Disconnected</option>
           </select>
+
           <button
             className="btn btn-neutral btn-pill"
-            onClick={() => loadPage(true)}
+            onClick={async () => {
+              await loadPage(true);
+              await refreshPendingCount();
+            }}
             disabled={loading}
           >
             {loading ? "Refreshing…" : "Refresh"}
@@ -331,7 +441,6 @@ export default function Connections() {
           const canViewProfile = !!it.otherIsPublic && !!it.otherHandle;
 
           const handleCardClick = () => {
-            // Main new behavior:
             // - If public profile exists => go to /u/:handle
             // - Otherwise fallback to opening chat
             if (canViewProfile) {
@@ -488,7 +597,7 @@ export default function Connections() {
               background: "#fff",
             }}
           >
-            No connections to show yet.
+            {view === "pending" ? "No pending requests right now." : "No connections to show yet."}
           </div>
         )}
       </div>
