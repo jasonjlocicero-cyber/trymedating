@@ -7,6 +7,9 @@ import "./index.css";
 import maybeRegisterSW from "./pwa/maybeRegisterSW";
 import { applyTheme, getTheme } from "./lib/theme";
 
+// ✅ Ensure theme is applied (index.html snippet handles first paint; this keeps it consistent)
+applyTheme(getTheme());
+
 // Reliable Electron detection:
 // - In Electron, preload should expose window.tmd.isElectron (recommended)
 // - In packaged builds, protocol will be file: (also true)
@@ -18,9 +21,6 @@ const isElectronFromPreload =
   Boolean(window?.isElectron); // fallback if set elsewhere
 
 const isElectron = isFileProtocol || isElectronFromPreload;
-
-// ✅ Ensure theme is applied (index.html already sets it early; this keeps it consistent)
-applyTheme(getTheme());
 
 // IMPORTANT: PWA/SW should NOT run in Electron.
 maybeRegisterSW({ isElectron });
