@@ -40,7 +40,7 @@ export default function Header({ me, onSignOut }) {
             textDecoration: "none",
             color: "inherit",
             minWidth: 0,
-        }}
+          }}
         >
           {/* Heart + wristband logo (inline SVG) */}
           <svg
@@ -112,19 +112,22 @@ export default function Header({ me, onSignOut }) {
             to="/"
             end
             className="btn btn-neutral btn-pill"
-            style={({ isActive }) => ({
+            style={{
               // ✅ force true centering for the label on all devices
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
               lineHeight: 1,
-              background: isActive ? "var(--brand-teal)" : undefined,
-              color: isActive ? "#fff" : undefined,
-              borderColor: isActive ? "var(--brand-teal-700)" : undefined,
+
+              // ✅ ALWAYS teal (not just when active)
+              background: "var(--brand-teal)",
+              color: "#fff",
+              borderColor: "var(--brand-teal-700)",
+
               // ✅ slightly larger tap target without pushing into the notch
               minHeight: 44,
               padding: "10px 14px",
-            })}
+            }}
           >
             Home
           </NavLink>
