@@ -4,9 +4,10 @@
 
 /* ---------- CSS Variables / Theme ---------- */
 :root {
-  --brand-teal: #14b8a6;
-  --brand-teal-700: #0f766e;
-  --brand-coral: #f43f5e;
+  /* Updated brand palette (royal blue + pink) */
+  --brand-teal: #2563eb;        /* primary */
+  --brand-teal-700: #1d4ed8;    /* primary dark */
+  --brand-coral: #ec4899;       /* accent */
 
   --text: #111827;
   --muted: #6b7280;
@@ -49,7 +50,7 @@ a:not(.btn):hover { text-decoration: underline; }
 .btn:hover { text-decoration: none; }
 
 /* Selection */
-::selection { background: rgba(20,184,166,.18); }
+::selection { background: rgba(37, 99, 235, .18); }
 
 /* Utility containers */
 .container {
@@ -111,7 +112,7 @@ a:not(.btn):hover { text-decoration: underline; }
 
 .input:focus {
   border-color: var(--brand-teal-700);
-  box-shadow: 0 0 0 3px rgba(20,184,166,.25);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .25);
 }
 
 .form-label {
@@ -199,11 +200,11 @@ button, .btn { min-height: 44px; }
   cursor: not-allowed;
 }
 
-/* Keyboard focus (a11y) — subtle teal ring, no visual change otherwise */
+/* Keyboard focus (a11y) — subtle primary ring, no visual change otherwise */
 .btn:focus { outline: none; }
 .btn:focus-visible {
   border-color: var(--brand-teal-700);
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.25);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
 }
 
 /* ===== Shapes ===== */
@@ -218,7 +219,7 @@ button, .btn { min-height: 44px; }
 .btn-primary:hover { filter: brightness(1.02); }
 .btn-primary:active { filter: brightness(.98); }
 
-/* IMPORTANT: make accent = CORAL globally */
+/* IMPORTANT: make accent = PINK globally */
 .btn-accent {
   background: var(--brand-coral);
   color: #fff;
@@ -276,8 +277,8 @@ button, .btn { min-height: 44px; }
   color: #111;
   border-color: var(--brand-teal-700);
 }
-.btn-outline:hover { background: rgba(20, 184, 166, 0.06); }
-.btn-outline:active { background: rgba(20, 184, 166, 0.1); }
+.btn-outline:hover { background: rgba(37, 99, 235, 0.06); }
+.btn-outline:active { background: rgba(37, 99, 235, 0.1); }
 
 /* Optional loading state (opt-in via .is-loading) */
 .btn.is-loading {
