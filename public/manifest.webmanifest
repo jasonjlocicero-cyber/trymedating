@@ -7,7 +7,7 @@
   "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#14b8a6",
+  "theme_color": "#2563eb",
   "orientation": "portrait-primary",
   "prefer_related_applications": false,
   "categories": ["social", "lifestyle"],
@@ -38,6 +38,7 @@
     }
   ]
 }
+
 
 
 
