@@ -5,17 +5,20 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root{
-  /* Brand tokens */
-  --brand-teal-50:#f0fdf9; --brand-teal-100:#ccfbf1; --brand-teal-200:#99f6e4;
-  --brand-teal-300:#5eead4; --brand-teal-400:#2dd4bf; --brand-teal-500:#14b8a6;
-  --brand-teal-600:#0fa37f; --brand-teal-700:#0f766e; --brand-teal-800:#115e59;
+  /* Brand tokens (Updated: Royal Blue + Pink) */
+  /* Blue scale (Tailwind-esque) */
+  --brand-teal-50:#eff6ff;  --brand-teal-100:#dbeafe; --brand-teal-200:#bfdbfe;
+  --brand-teal-300:#93c5fd; --brand-teal-400:#60a5fa; --brand-teal-500:#3b82f6;
+  --brand-teal-600:#2563eb; --brand-teal-700:#1d4ed8; --brand-teal-800:#1e40af;
 
-  --brand-coral-50:#fff1f3; --brand-coral-100:#ffe4e8; --brand-coral-200:#fecdd3;
-  --brand-coral-300:#fda4af; --brand-coral-400:#fb7185; --brand-coral-500:#f43f5e;
-  --brand-coral-600:#e11d48; --brand-coral-700:#be123c; --brand-coral-800:#9f1239;
+  /* Pink scale (Tailwind-esque) */
+  --brand-coral-50:#fdf2f8;  --brand-coral-100:#fce7f3; --brand-coral-200:#fbcfe8;
+  --brand-coral-300:#f9a8d4; --brand-coral-400:#f472b6; --brand-coral-500:#ec4899;
+  --brand-coral-600:#db2777; --brand-coral-700:#be185d; --brand-coral-800:#9d174d;
 
   /* convenient aliases */
-  --brand-teal: var(--brand-teal-500);
+  /* Keep aligned with src/styles.css: primary #2563eb, primary-dark #1d4ed8, accent #ec4899 */
+  --brand-teal: var(--brand-teal-600);
   --brand-coral: var(--brand-coral-500);
 
   /* Theme tokens (LIGHT) */
@@ -58,7 +61,8 @@
   --chat-disabled-bg: #cbd5e1;
   --chat-disabled-text: #475569;
 
-  --chat-send-bg: #2563eb;
+  /* Match primary */
+  --chat-send-bg: var(--brand-teal);
 }
 
 /* ✅ DARK theme overrides */
@@ -79,7 +83,8 @@ html[data-theme="dark"]{
   --chat-panel-bg: var(--surface);
   --chat-list-bg: var(--surface-2);
 
-  --chat-bubble-mine-bg: rgba(20,184,166,0.18);
+  /* Make mine-bubble match primary (blue) instead of old teal */
+  --chat-bubble-mine-bg: rgba(37,99,235,0.18);
   --chat-bubble-other-bg: rgba(255,255,255,0.08);
   --chat-bubble-deleted-bg: rgba(255,255,255,0.06);
 
@@ -98,7 +103,7 @@ html[data-theme="dark"]{
   --chat-disabled-bg: rgba(255,255,255,0.08);
   --chat-disabled-text: rgba(255,255,255,0.65);
 
-  --chat-send-bg: #2563eb;
+  --chat-send-bg: var(--brand-teal);
 }
 
 html, body {
@@ -111,7 +116,7 @@ html, body {
 a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; }
 
-::selection { background: rgba(20,184,166,.18); }
+::selection { background: rgba(37,99,235,.18); }
 
 /* Layout */
 .container{ max-width:1100px; margin:0 auto; padding:0 16px; }
@@ -165,16 +170,16 @@ footer{
 .btn:focus{ outline:none; }
 .btn:focus-visible{
   border-color: var(--brand-teal-700);
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.25);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
 }
 
-/* primary = teal */
+/* primary = blue */
 .btn-primary{
   background:var(--brand-teal); color:#fff; border-color:var(--brand-teal-700);
 }
 .btn-primary:hover{ background:var(--brand-teal-700); }
 
-/* accent = coral */
+/* accent = pink */
 .btn-accent{
   background:var(--brand-coral); color:#fff; border-color:var(--brand-coral-600);
 }
@@ -213,9 +218,9 @@ h1,h2,h3{ font-weight:700; line-height:1.2; margin-bottom:12px; }
 
 /* Alerts */
 .helper-error{
-  background: rgba(244,63,94,0.12);
+  background: rgba(236,72,153,0.12);
   color: var(--text);
-  border:1px solid rgba(244,63,94,0.25);
+  border:1px solid rgba(236,72,153,0.25);
   padding:10px 12px;
   border-radius:12px;
   font-weight:700;
@@ -280,7 +285,7 @@ h1,h2,h3{ font-weight:700; line-height:1.2; margin-bottom:12px; }
 .avatar-initials{
   width:100%; height:100%; border-radius:50%; display:grid; place-items:center;
   font-weight:800; font-size:32px; color:var(--text);
-  background:linear-gradient(135deg, rgba(20,184,166,.10), rgba(244,63,94,.10));
+  background:linear-gradient(135deg, rgba(37,99,235,.10), rgba(236,72,153,.10));
 }
 .qr-caption{ font-size:12px; color:var(--muted); text-align:center; margin-top:6px; }
 
@@ -333,7 +338,7 @@ select{
 textarea.input:focus,
 select:focus{
   border-color:var(--brand-teal);
-  box-shadow:0 0 0 4px rgba(14,164,122,0.15);
+  box-shadow:0 0 0 4px rgba(37,99,235,0.15);
 }
 
 textarea.input{
@@ -448,6 +453,7 @@ html[data-theme="dark"] [style*="background-color: #eef6ff"]{
   color: var(--text) !important;
   border-color: var(--border) !important;
 }
+
 
 
 
