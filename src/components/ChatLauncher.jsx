@@ -23,8 +23,8 @@ const LAUNCHER_SIZE = 56
 // keep a real gap between bubble and panel (bubble height 56 + ~16 gap)
 const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 
-// Brand teal/seafoam
-const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #14b8a6))'
+// Brand primary (supports both new CSS var + legacy var; hard fallback updated to #2563eb)
+const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #2563eb))'
 
 // Layering (launcher always above the panel)
 const Z_BACKDROP = 10030
