@@ -1,7 +1,10 @@
 // src/pages/Home.jsx
 import React from 'react'
 import { Link } from 'react-router-dom'
-import tmdlogo from '../assets/tmdlogo.png' // hero logo (blue/pink mark)
+
+// Use the public master logo so Home always matches PWA/app branding
+// (public/icons/logo.png)
+const HERO_LOGO = '/icons/logo.png'
 
 export default function Home() {
   const heroStyle = {
@@ -16,29 +19,11 @@ export default function Home() {
     marginTop: 20
   }
 
-  // Centered logo wrapper so it sits perfectly in the hero
-  const logoWrap = {
-    width: 'min(220px, 70vw)',
-    display: 'grid',
-    placeItems: 'center',
-    marginTop: 4
-  }
-
-  // Crisp sizing across devices (keeps aspect ratio)
-  const logoImg = {
-    width: '100%',
-    height: 'auto',
-    maxWidth: 180,
-    objectFit: 'contain',
-    display: 'block'
-  }
-
   const brandTitle = {
     fontSize: 'clamp(28px, 4vw, 44px)',
     lineHeight: 1.1,
     margin: '8px 0 6px',
-    fontWeight: 900,
-    letterSpacing: '-0.02em'
+    fontWeight: 800
   }
 
   const sub = {
@@ -47,27 +32,19 @@ export default function Home() {
     margin: 0
   }
 
-  const actionsRow = {
-    display: 'flex',
-    gap: 10,
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 6
-  }
-
   const featuresGrid = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(12, 1fr)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
     gap: 16
   }
 
   const card = {
-    gridColumn: 'span 12',
     background: 'var(--bg-light)',
     border: '1px solid var(--border)',
     borderRadius: 12,
-    padding: 16
+    padding: 16,
+    display: 'grid',
+    gap: 8
   }
 
   const teaserStrip = {
@@ -83,22 +60,15 @@ export default function Home() {
     justifyContent: 'space-between'
   }
 
-  const teaserLeft = { fontWeight: 800 }
-  const teaserBtns = { display: 'flex', gap: 8, flexWrap: 'wrap' }
-
   return (
     <main className="container" style={{ maxWidth: 1100 }}>
       {/* Hero */}
       <section style={heroStyle}>
-        {/* Centered hero mark */}
-        <div style={logoWrap}>
-          <img
-            src={tmdlogo}
-            alt="TryMeDating"
-            style={logoImg}
-            draggable="false"
-          />
-        </div>
+        <img
+          src={HERO_LOGO}
+          alt="TryMeDating"
+          style={{ height: 110, width: 'auto', objectFit: 'contain' }}
+        />
 
         <h1 style={brandTitle}>
           Welcome to{' '}
@@ -111,53 +81,35 @@ export default function Home() {
           connect privately by default, and move at your own pace.
         </p>
 
-        <div style={actionsRow}>
-          {/* Using existing classes (we’ll adjust header buttons when we do Header.jsx) */}
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6, justifyContent: 'center' }}>
           <Link to="/auth" className="btn btn-primary">Get started</Link>
           <Link to="/privacy" className="btn btn-neutral">Privacy</Link>
           <Link to="/terms" className="btn btn-neutral">Terms</Link>
           <Link to="/contact" className="btn btn-neutral">Contact</Link>
         </div>
-
-        {/* Subtle brand divider */}
-        <div
-          aria-hidden="true"
-          style={{
-            width: 'min(760px, 92%)',
-            height: 1,
-            background: 'var(--border)',
-            marginTop: 6
-          }}
-        />
       </section>
 
       {/* Features */}
       <section style={{ marginTop: 20 }}>
         <div style={featuresGrid}>
-          <div style={{ ...card, display: 'grid', gap: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>
-              💬 Real conversations, not swipes
-            </div>
+          <div style={card}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>💬 Real conversations, not swipes</div>
             <p className="muted" style={{ margin: 0 }}>
               You control who can reach you. Messaging opens after you’ve shared your invite QR
               or handle in person—so every chat starts with context.
             </p>
           </div>
 
-          <div style={{ ...card, display: 'grid', gap: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>
-              🔒 Private by default
-            </div>
+          <div style={card}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>🔒 Private by default</div>
             <p className="muted" style={{ margin: 0 }}>
               Your profile stays private unless you decide to make it public. Toggle visibility
               anytime. Share only what you want, when you want.
             </p>
           </div>
 
-          <div style={{ ...card, display: 'grid', gap: 8 }}>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>
-              🪪 Your invite QR
-            </div>
+          <div style={card}>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>🪪 Your invite QR</div>
             <p className="muted" style={{ margin: 0 }}>
               Generate a personal QR right from your profile. Meet someone? Let them scan to connect.
               No handles to type, no awkward search.
@@ -168,8 +120,8 @@ export default function Home() {
 
       {/* CTA strip */}
       <section style={teaserStrip}>
-        <div style={teaserLeft}>Ready to try it?</div>
-        <div style={teaserBtns}>
+        <div style={{ fontWeight: 800 }}>Ready to try it?</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Link to="/auth" className="btn btn-accent">Create your profile</Link>
           <Link to="/u/your-handle" className="btn btn-neutral">See a sample profile</Link>
         </div>
@@ -177,6 +129,7 @@ export default function Home() {
     </main>
   )
 }
+
 
 
 
