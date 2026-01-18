@@ -6,22 +6,8 @@
     <!-- Viewport / safe areas for iOS notches -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <!-- ✅ Theme preflight (prevents flash + fixes "light panels in dark mode") -->
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem("tmd_theme");
-          if (t !== "light" && t !== "dark") {
-            var prefersDark =
-              window.matchMedia &&
-              window.matchMedia("(prefers-color-scheme: dark)").matches;
-            t = prefersDark ? "dark" : "light";
-          }
-          document.documentElement.dataset.theme = t;
-          document.documentElement.style.colorScheme = t;
-        } catch (e) {}
-      })();
-    </script>
+    <!-- ✅ CSP-safe theme preflight (external file, allowed by script-src 'self') -->
+    <script src="/theme-preflight.js"></script>
 
     <!-- Basic SEO -->
     <title>TryMeDating</title>
@@ -33,15 +19,20 @@
     <!-- PWA manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Icons (keep these aligned with /public files) -->
+    <!-- Icons (aligned to scripts/gen-icons.mjs outputs) -->
     <link rel="icon" href="/favicon.ico" sizes="any" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/pwa-192.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
-    <!-- iOS standalone tweaks -->
+    <!-- iOS / Android install meta -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
+
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
