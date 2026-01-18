@@ -23,7 +23,8 @@ const LAUNCHER_SIZE = 56
 // keep a real gap between bubble and panel (bubble height 56 + ~16 gap)
 const PANEL_BOTTOM = LAUNCHER_BOTTOM + (LAUNCHER_SIZE + 16)
 
-// Brand primary (supports both new CSS var + legacy var; hard fallback updated to #2563eb)
+// Brand teal/seafoam
+// ✅ Updated fallback from old teal to new primary blue
 const BRAND_TEAL = 'var(--brand-teal, var(--tmd-teal, #2563eb))'
 
 // Layering (launcher always above the panel)
@@ -634,6 +635,7 @@ export default function ChatLauncher({ disabled = false, onUnreadChange = () => 
     </>
   )
 }
+
 
 
 
