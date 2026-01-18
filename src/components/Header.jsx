@@ -22,6 +22,7 @@ export default function Header({ me, onSignOut }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
+          // ✅ a touch more vertical padding so buttons aren’t cramped
           padding: "12px 0",
         }}
       >
@@ -42,6 +43,7 @@ export default function Header({ me, onSignOut }) {
             minWidth: 0,
           }}
         >
+          {/* ✅ Use the new blue/pink mark */}
           <img
             src={tmdlogo}
             alt=""
@@ -76,12 +78,18 @@ export default function Header({ me, onSignOut }) {
           <NavLink
             to="/"
             end
-            className="btn btn-primary btn-pill"
+            className="btn btn-neutral btn-pill"
             style={{
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
               lineHeight: 1,
+
+              // ✅ ALWAYS teal/primary
+              background: "var(--brand-teal)",
+              color: "#fff",
+              borderColor: "var(--brand-teal-700)",
+
               minHeight: 44,
               padding: "10px 14px",
             }}
@@ -127,6 +135,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
