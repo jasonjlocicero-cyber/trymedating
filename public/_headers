@@ -11,7 +11,11 @@
 /favicon.ico
   Cache-Control: no-store, no-cache, must-revalidate
 
-/favicon-*.png
+/favicon-16.png
   Cache-Control: no-store, no-cache, must-revalidate
+
+/favicon-32.png
+  Cache-Control: no-store, no-cache, must-revalidate
+
 
 
