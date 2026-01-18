@@ -1,7 +1,8 @@
 // src/components/Header.jsx
-import React from "react"
-import { Link, NavLink } from "react-router-dom"
-import tmdlogo from "../assets/tmdlogo.png" // ✅ new blue/pink hero mark
+import React from "react";
+import { Link, NavLink } from "react-router-dom";
+
+const BRAND_LOGO = "/icons/logo.png"; // ✅ new blue/pink mark from /public/icons/logo.png
 
 export default function Header({ me, onSignOut }) {
   return (
@@ -18,22 +19,25 @@ export default function Header({ me, onSignOut }) {
       <div
         className="container"
         style={{
-          display: "flex",
+          // ✅ true centered brand, nav stays right
+          display: "grid",
+          gridTemplateColumns: "1fr auto 1fr",
           alignItems: "center",
-          justifyContent: "space-between",
           gap: 12,
-          // ✅ a touch more vertical padding so buttons aren’t cramped
           padding: "12px 0",
-          flexWrap: "wrap",
         }}
       >
+        {/* Left spacer (keeps brand centered even with right-side nav width) */}
+        <div aria-hidden="true" />
+
         {/* Brand (icon + wordmark) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
+            justifyContent: "center",
             gap: 10,
             fontWeight: 900,
             fontSize: 22,
@@ -42,31 +46,21 @@ export default function Header({ me, onSignOut }) {
             textDecoration: "none",
             color: "inherit",
             minWidth: 0,
+            justifySelf: "center",
           }}
         >
-          {/* ✅ NEW hero mark image (replaces old inline SVG) */}
-          <span
+          <img
+            src={BRAND_LOGO}
+            alt=""
             aria-hidden="true"
             style={{
-              width: 34,
-              height: 34,
-              display: "grid",
-              placeItems: "center",
+              height: 30,
+              width: "auto",
+              objectFit: "contain",
+              display: "block",
               flex: "0 0 auto",
             }}
-          >
-            <img
-              src={tmdlogo}
-              alt=""
-              draggable="false"
-              style={{
-                width: 34,
-                height: 34,
-                display: "block",
-                objectFit: "contain",
-              }}
-            />
-          </span>
+          />
 
           <span style={{ whiteSpace: "nowrap" }}>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
@@ -84,6 +78,7 @@ export default function Header({ me, onSignOut }) {
             justifyContent: "flex-end",
             gap: 10,
             flexWrap: "wrap",
+            justifySelf: "end",
           }}
         >
           <NavLink
@@ -91,18 +86,16 @@ export default function Header({ me, onSignOut }) {
             end
             className="btn btn-neutral btn-pill"
             style={{
-              // ✅ force true centering for the label on all devices
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
               lineHeight: 1,
 
-              // ✅ ALWAYS primary (blue) (not just when active)
+              // ✅ ALWAYS primary blue (not just when active)
               background: "var(--brand-teal)",
               color: "#fff",
               borderColor: "var(--brand-teal-700)",
 
-              // ✅ slightly larger tap target without pushing into the notch
               minHeight: 44,
               padding: "10px 14px",
             }}
@@ -146,8 +139,9 @@ export default function Header({ me, onSignOut }) {
         </nav>
       </div>
     </header>
-  )
+  );
 }
+
 
 
 
