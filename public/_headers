@@ -1,4 +1,4 @@
-/manifest.webmanifest
+﻿/manifest.webmanifest
   Content-Type: application/manifest+json; charset=utf-8
   Cache-Control: no-store, no-cache, must-revalidate
 
@@ -16,6 +16,3 @@
 
 /favicon-32.png
   Cache-Control: no-store, no-cache, must-revalidate
-
-
-
