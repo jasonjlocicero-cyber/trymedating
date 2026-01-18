@@ -19,8 +19,8 @@ const outDir = path.join(root, "public", "icons");
 // Optional micro-adjust (in case you want a tiny optical tweak later)
 // Positive X moves RIGHT, negative moves LEFT
 // Positive Y moves DOWN, negative moves UP
-const OPTICAL_X_AT_1024 = 12;
-const OPTICAL_Y_AT_1024 = 12;
+const OPTICAL_X_AT_1024 = 180;
+const OPTICAL_Y_AT_1024 = 0;
 
 async function safeUnlink(p) {
   try {
