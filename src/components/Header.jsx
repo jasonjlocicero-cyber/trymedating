@@ -1,7 +1,7 @@
 // src/components/Header.jsx
 import React from "react";
 import { Link, NavLink } from "react-router-dom";
-import tmdlogo from "../assets/tmdlogo.png"; // ✅ blue/pink mark
+import tmdlogo from "../assets/tmdlogo.png"; // ✅ blue/pink hero mark (the one you want)
 
 export default function Header({ me, onSignOut }) {
   return (
@@ -22,11 +22,10 @@ export default function Header({ me, onSignOut }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 12,
-          // ✅ a touch more vertical padding so buttons aren’t cramped
           padding: "12px 0",
         }}
       >
-        {/* Brand (icon + wordmark) */}
+        {/* Brand (image mark + wordmark) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -43,14 +42,12 @@ export default function Header({ me, onSignOut }) {
             minWidth: 0,
           }}
         >
-          {/* ✅ Use the new blue/pink mark */}
           <img
             src={tmdlogo}
-            alt=""
-            aria-hidden="true"
+            alt="TryMeDating"
             style={{
-              width: 30,
-              height: 30,
+              width: 34,
+              height: 34,
               objectFit: "contain",
               display: "block",
               flex: "0 0 auto",
@@ -85,7 +82,7 @@ export default function Header({ me, onSignOut }) {
               justifyContent: "center",
               lineHeight: 1,
 
-              // ✅ ALWAYS teal/primary
+              // ✅ ALWAYS primary brand color
               background: "var(--brand-teal)",
               color: "#fff",
               borderColor: "var(--brand-teal-700)",
@@ -135,6 +132,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
