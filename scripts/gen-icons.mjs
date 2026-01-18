@@ -1,8 +1,9 @@
+// scripts/gen-icons.mjs
 // IMPORTANT:
-// - public/logo-mark.png is the ONLY source asset
+// - public/logo-mark.png is the ONLY source asset (heart-only recommended)
 // - All icons are generated — do NOT hand-edit files in public/icons
 // - Run `npm run gen:icons` after changing the logo
-// scripts/gen-icons.mjs
+
 import fs from "fs/promises";
 import path from "path";
 import sharp from "sharp";
@@ -10,58 +11,113 @@ import pngToIco from "png-to-ico";
 
 const root = process.cwd();
 
-// ✅ SINGLE SOURCE OF TRUTH (heart-only)
+// ✅ SINGLE SOURCE OF TRUTH
 const input = path.join(root, "public", "logo-mark.png");
 
 // Output folder
 const outDir = path.join(root, "public", "icons");
 
-// Optional micro-adjust (in case you want a tiny optical tweak later)
-// Positive X moves RIGHT, negative moves LEFT
-// Positive Y moves DOWN, negative moves UP
-const OPTICAL_X_AT_1024 = 0;
-const OPTICAL_Y_AT_1024 = 0;
+// Optional manual nudge (in 1024-scale pixels). Usually leave at 0.
+// You can override without editing the file:
+//   $env:TMD_ICON_X = "40"; $env:TMD_ICON_Y = "0"; npm run gen:icons
+const EXTRA_X_AT_1024 = parseInt(process.env.TMD_ICON_X || "0", 10);
+const EXTRA_Y_AT_1024 = parseInt(process.env.TMD_ICON_Y || "0", 10);
 
 async function safeUnlink(p) {
-  try {
-    await fs.unlink(p);
-  } catch {
-    // ignore missing
-  }
+  try { await fs.unlink(p); } catch { /* ignore */ }
 }
 
 async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
 }
 
-// ✅ Trim away any extra transparent/flat padding so the mark is truly centered
-async function loadTrimmedPngBuffer(srcPath) {
-  // trim() uses the top-left pixel as the "background" reference.
-  // Works great for transparent or flat borders (common in exported marks).
-  return sharp(srcPath)
-    .trim()
-    .png()
-    .toBuffer();
+function computeAlphaCentroidShift(raw, w, h) {
+  // raw is RGBA
+  let sumA = 0;
+  let sumX = 0;
+  let sumY = 0;
+
+  // Iterate pixels (alpha-weighted)
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const a = raw[row + x * 4 + 3]; // 0..255
+      if (!a) continue;
+      sumA += a;
+      sumX += x * a;
+      sumY += y * a;
+    }
+  }
+
+  if (sumA === 0) return { dx: 0, dy: 0 };
+
+  const cx = sumX / sumA;
+  const cy = sumY / sumA;
+
+  const midX = (w - 1) / 2;
+  const midY = (h - 1) / 2;
+
+  // dx/dy to move centroid to center
+  const dx = Math.round(midX - cx);
+  const dy = Math.round(midY - cy);
+
+  return { dx, dy };
 }
 
-async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
-  const trimmed = await loadTrimmedPngBuffer(srcPath);
-
-  // Resize the trimmed mark into a square "inner" box
-  const logo = await sharp(trimmed)
+async function makeCenteredInnerPng(srcPath, inner, label) {
+  // 1) Trim transparent edges, resize to "inner", keep alpha
+  const { data, info } = await sharp(srcPath)
+    .ensureAlpha()
+    .trim() // trims based on corner pixel (works well when corners are transparent)
     .resize(inner, inner, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const w = info.width;
+  const h = info.height;
+
+  // 2) Compute optical/centroid shift
+  const { dx, dy } = computeAlphaCentroidShift(data, w, h);
+
+  // 3) Add optional manual nudge (scaled to current inner size)
+  const extraX = Math.round((EXTRA_X_AT_1024 * inner) / 1024);
+  const extraY = Math.round((EXTRA_Y_AT_1024 * inner) / 1024);
+
+  const finalX = dx + extraX;
+  const finalY = dy + extraY;
+
+  console.log(
+    `🧭 ${label}: centroid shift dx=${dx}, dy=${dy} | extra dx=${extraX}, dy=${extraY} | final dx=${finalX}, dy=${finalY}`
+  );
+
+  // 4) Re-compose into same-size inner canvas with the shift applied
+  const centered = await sharp({
+    create: {
+      width: w,
+      height: h,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([
+      {
+        input: data,
+        raw: { width: w, height: h, channels: 4 },
+        left: finalX,
+        top: finalY,
+      },
+    ])
     .png()
     .toBuffer();
 
-  const pad = Math.floor((size - inner) / 2);
+  return centered;
+}
 
-  // Scale optical tweak proportionally
-  const scale = size / 1024;
-  const opticalX = Math.round(OPTICAL_X_AT_1024 * scale);
-  const opticalY = Math.round(OPTICAL_Y_AT_1024 * scale);
+async function makeSquare(size, innerPng, inner) {
+  const pad = Math.floor((size - inner) / 2);
 
   return sharp({
     create: {
@@ -71,13 +127,7 @@ async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     },
   })
-    .composite([
-      {
-        input: logo,
-        left: pad + opticalX,
-        top: pad + opticalY,
-      },
-    ])
+    .composite([{ input: innerPng, left: pad, top: pad }])
     .png()
     .toBuffer();
 }
@@ -93,7 +143,7 @@ async function main() {
     process.exit(1);
   }
 
-  // ✅ Delete previously generated outputs (prevents stale icons)
+  // Delete generated outputs (prevents stale results)
   const generated = [
     path.join(outDir, "icon-1024.png"),
     path.join(outDir, "icon-512.png"),
@@ -102,6 +152,8 @@ async function main() {
     path.join(outDir, "maskable-512.png"),
     path.join(outDir, "maskable-192.png"),
     path.join(outDir, "apple-touch-icon.png"),
+    path.join(outDir, "pwa-192.png"),
+    path.join(outDir, "pwa-512.png"),
     path.join(outDir, "icon.ico"),
     path.join(root, "public", "favicon-32.png"),
     path.join(root, "public", "favicon-16.png"),
@@ -109,30 +161,36 @@ async function main() {
   ];
   for (const f of generated) await safeUnlink(f);
 
-  // 1) Centered/padded 1024 master (now auto-trimmed -> truly centered)
-  const master1024 = await makePaddedSquareMaster(input, 1024, 860);
+  // ---- Standard icon set (nice padding) ----
+  const INNER_STD = 860; // padding for normal icons
+  const innerStdPng = await makeCenteredInnerPng(input, INNER_STD, "STD(inner=860)");
+  const master1024 = await makeSquare(1024, innerStdPng, INNER_STD);
   await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
-
-  // 2) Standard PWA icons
   await sharp(master1024).resize(512, 512).png().toFile(path.join(outDir, "icon-512.png"));
   await sharp(master1024).resize(192, 192).png().toFile(path.join(outDir, "icon-192.png"));
 
-  // 3) Maskable set (extra safe padding)
-  const maskable1024 = await makePaddedSquareMaster(input, 1024, 780);
+  // ---- Maskable set (extra safe padding) ----
+  const INNER_MASK = 780; // more padding so Android launchers don't clip
+  const innerMaskPng = await makeCenteredInnerPng(input, INNER_MASK, "MASK(inner=780)");
+  const maskable1024 = await makeSquare(1024, innerMaskPng, INNER_MASK);
   await fs.writeFile(path.join(outDir, "maskable-1024.png"), maskable1024);
   await sharp(maskable1024).resize(512, 512).png().toFile(path.join(outDir, "maskable-512.png"));
   await sharp(maskable1024).resize(192, 192).png().toFile(path.join(outDir, "maskable-192.png"));
 
-  // 4) Apple touch icon
+  // ---- Apple touch icon ----
   await sharp(master1024).resize(180, 180).png().toFile(path.join(outDir, "apple-touch-icon.png"));
 
-  // 5) Favicons PNG
+  // ---- PWA aliases (if manifest references pwa-192/pwa-512) ----
+  await fs.copyFile(path.join(outDir, "icon-192.png"), path.join(outDir, "pwa-192.png"));
+  await fs.copyFile(path.join(outDir, "icon-512.png"), path.join(outDir, "pwa-512.png"));
+
+  // ---- Favicons (root) ----
   const fav32 = await sharp(master1024).resize(32, 32).png().toBuffer();
   const fav16 = await sharp(master1024).resize(16, 16).png().toBuffer();
   await fs.writeFile(path.join(root, "public", "favicon-32.png"), fav32);
   await fs.writeFile(path.join(root, "public", "favicon-16.png"), fav16);
 
-  // 6) Windows ICO (must include 256x256 frame)
+  // ---- Windows ICO (include 256 frame) ----
   const ico256 = await sharp(master1024).resize(256, 256).png().toBuffer();
   const ico128 = await sharp(master1024).resize(128, 128).png().toBuffer();
   const ico64  = await sharp(master1024).resize(64, 64).png().toBuffer();
@@ -141,14 +199,10 @@ async function main() {
   const ico16  = await sharp(master1024).resize(16, 16).png().toBuffer();
 
   const ico = await pngToIco([ico16, ico32, ico48, ico64, ico128, ico256]);
-
-  // Write BOTH:
-  // - public/favicon.ico (web)
-  // - public/icons/icon.ico (electron-builder Windows icon)
   await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
   await fs.writeFile(path.join(outDir, "icon.ico"), ico);
 
-  console.log("✅ Icons generated from public/logo-mark.png (auto-trimmed + centered).");
+  console.log("✅ Icons generated from public/logo-mark.png (auto-trimmed + centroid-centered).");
   console.log("✅ Generated public/icons/icon.ico with 256x256 included.");
 }
 
@@ -156,6 +210,7 @@ main().catch((err) => {
   console.error("❌ gen-icons failed:", err);
   process.exit(1);
 });
+
 
 
 
