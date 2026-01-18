@@ -1,18 +1,9 @@
 // src/components/Header.jsx
 import React from "react";
 import { Link, NavLink } from "react-router-dom";
-import tmdlogo from "../assets/tmdlogo.png";
+import tmdlogo from "../assets/tmdlogo.png"; // ✅ blue/pink mark
 
 export default function Header({ me, onSignOut }) {
-  const pillBase = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    lineHeight: 1,
-    minHeight: 44,
-    padding: "10px 14px",
-  };
-
   return (
     <header
       className="site-header"
@@ -20,6 +11,7 @@ export default function Header({ me, onSignOut }) {
         background: "var(--bg-light)",
         borderBottom: "1px solid var(--border)",
         boxShadow: "0 2px 4px rgba(0,0,0,.04)",
+        // ✅ keeps header content below iPhone notch/status bar
         paddingTop: "env(safe-area-inset-top, 0px)",
       }}
     >
@@ -33,7 +25,7 @@ export default function Header({ me, onSignOut }) {
           padding: "12px 0",
         }}
       >
-        {/* Brand (mark + word) */}
+        {/* Brand (icon + wordmark) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
@@ -55,11 +47,11 @@ export default function Header({ me, onSignOut }) {
             alt=""
             aria-hidden="true"
             style={{
+              width: 30,
               height: 30,
-              width: "auto",
+              objectFit: "contain",
               display: "block",
               flex: "0 0 auto",
-              objectFit: "contain",
             }}
           />
 
@@ -84,12 +76,14 @@ export default function Header({ me, onSignOut }) {
           <NavLink
             to="/"
             end
-            className="btn btn-neutral btn-pill"
+            className="btn btn-primary btn-pill"
             style={{
-              ...pillBase,
-              background: "var(--brand-teal)",
-              color: "#fff",
-              borderColor: "var(--brand-teal-700)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: 1,
+              minHeight: 44,
+              padding: "10px 14px",
             }}
           >
             Home
@@ -101,7 +95,14 @@ export default function Header({ me, onSignOut }) {
               onClick={onSignOut}
               className="btn btn-accent btn-pill"
               title="Sign out"
-              style={pillBase}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 1,
+                minHeight: 44,
+                padding: "10px 14px",
+              }}
             >
               Sign out
             </button>
@@ -109,7 +110,14 @@ export default function Header({ me, onSignOut }) {
             <NavLink
               to="/auth"
               className="btn btn-primary btn-pill"
-              style={pillBase}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                lineHeight: 1,
+                minHeight: 44,
+                padding: "10px 14px",
+              }}
             >
               Sign in
             </NavLink>
@@ -119,6 +127,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
