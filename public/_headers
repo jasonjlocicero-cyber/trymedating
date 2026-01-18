@@ -1,3 +1,5 @@
+# public/_headers
+
 /manifest.webmanifest
   Content-Type: application/manifest+json; charset=utf-8
   Cache-Control: no-store, no-cache, must-revalidate
@@ -5,6 +7,21 @@
 /sw.js
   Cache-Control: no-store, no-cache, must-revalidate
 
+# IMPORTANT:
+# These icons are referenced by the manifest + installed app shortcuts.
+# If you cache them for days, Android/Windows may keep using the old bitmaps.
+# We force short cache so icon updates propagate quickly.
+# After things are stable you can raise max-age again.
+
+/favicon.ico
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/favicon-16.png
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/favicon-32.png
+  Cache-Control: no-store, no-cache, must-revalidate
+
 /icons/*
-  Cache-Control: public, max-age=604800
+  Cache-Control: public, max-age=300, must-revalidate
 
