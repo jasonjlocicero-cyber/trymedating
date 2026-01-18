@@ -13,11 +13,13 @@ const root = process.cwd();
 // ✅ SINGLE SOURCE OF TRUTH (heart-only)
 const input = path.join(root, "public", "logo-mark.png");
 
-// Output folders
+// Output folder
 const outDir = path.join(root, "public", "icons");
 
-// Optical centering tweak (scaled for each size)
-const OPTICAL_X_AT_1024 = -64; // negative moves LEFT
+// Optional micro-adjust (in case you want a tiny optical tweak later)
+// Positive X moves RIGHT, negative moves LEFT
+// Positive Y moves DOWN, negative moves UP
+const OPTICAL_X_AT_1024 = 0;
 const OPTICAL_Y_AT_1024 = 0;
 
 async function safeUnlink(p) {
@@ -32,8 +34,21 @@ async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
 }
 
+// ✅ Trim away any extra transparent/flat padding so the mark is truly centered
+async function loadTrimmedPngBuffer(srcPath) {
+  // trim() uses the top-left pixel as the "background" reference.
+  // Works great for transparent or flat borders (common in exported marks).
+  return sharp(srcPath)
+    .trim()
+    .png()
+    .toBuffer();
+}
+
 async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
-  const logo = await sharp(srcPath)
+  const trimmed = await loadTrimmedPngBuffer(srcPath);
+
+  // Resize the trimmed mark into a square "inner" box
+  const logo = await sharp(trimmed)
     .resize(inner, inner, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
@@ -43,6 +58,7 @@ async function makePaddedSquareMaster(srcPath, size = 1024, inner = 860) {
 
   const pad = Math.floor((size - inner) / 2);
 
+  // Scale optical tweak proportionally
   const scale = size / 1024;
   const opticalX = Math.round(OPTICAL_X_AT_1024 * scale);
   const opticalY = Math.round(OPTICAL_Y_AT_1024 * scale);
@@ -77,7 +93,7 @@ async function main() {
     process.exit(1);
   }
 
-  // ✅ Delete previously generated outputs (prevents stale "text" icons)
+  // ✅ Delete previously generated outputs (prevents stale icons)
   const generated = [
     path.join(outDir, "icon-1024.png"),
     path.join(outDir, "icon-512.png"),
@@ -91,10 +107,9 @@ async function main() {
     path.join(root, "public", "favicon-16.png"),
     path.join(root, "public", "favicon.ico"),
   ];
-
   for (const f of generated) await safeUnlink(f);
 
-  // 1) Centered/padded 1024 master (optically centered)
+  // 1) Centered/padded 1024 master (now auto-trimmed -> truly centered)
   const master1024 = await makePaddedSquareMaster(input, 1024, 860);
   await fs.writeFile(path.join(outDir, "icon-1024.png"), master1024);
 
@@ -133,7 +148,7 @@ async function main() {
   await fs.writeFile(path.join(root, "public", "favicon.ico"), ico);
   await fs.writeFile(path.join(outDir, "icon.ico"), ico);
 
-  console.log("✅ Icons generated from public/logo-mark.png (heart-only).");
+  console.log("✅ Icons generated from public/logo-mark.png (auto-trimmed + centered).");
   console.log("✅ Generated public/icons/icon.ico with 256x256 included.");
 }
 
