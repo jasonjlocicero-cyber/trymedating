@@ -12,7 +12,7 @@ const outDir = path.join(root, "public", "icons");
 
 // Offsets in *1024-space* (scaled down automatically for smaller sizes)
 // Positive X moves RIGHT, negative moves LEFT
-const OPTICAL_X_AT_1024 = Number(process.env.TMD_ICON_X ?? "-60");
+const OPTICAL_X_AT_1024 = Number(process.env.TMD_ICON_X ?? "0");
 const OPTICAL_Y_AT_1024 = Number(process.env.TMD_ICON_Y ?? "0");
 
 async function safeUnlink(p) {
