@@ -1,6 +1,7 @@
 // src/components/Header.jsx
-import React from "react";
-import { Link, NavLink } from "react-router-dom";
+import React from "react"
+import { Link, NavLink } from "react-router-dom"
+import tmdlogo from "../assets/tmdlogo.png" // ✅ new blue/pink hero mark
 
 export default function Header({ me, onSignOut }) {
   return (
@@ -23,6 +24,7 @@ export default function Header({ me, onSignOut }) {
           gap: 12,
           // ✅ a touch more vertical padding so buttons aren’t cramped
           padding: "12px 0",
+          flexWrap: "wrap",
         }}
       >
         {/* Brand (icon + wordmark) */}
@@ -42,53 +44,29 @@ export default function Header({ me, onSignOut }) {
             minWidth: 0,
           }}
         >
-          {/* Heart + wristband logo (inline SVG) */}
-          <svg
-            width="30"
-            height="30"
-            viewBox="0 0 64 64"
+          {/* ✅ NEW hero mark image (replaces old inline SVG) */}
+          <span
             aria-hidden="true"
-            focusable="false"
-            style={{ display: "block", flex: "0 0 auto" }}
+            style={{
+              width: 34,
+              height: 34,
+              display: "grid",
+              placeItems: "center",
+              flex: "0 0 auto",
+            }}
           >
-            <path
-              d="M32 55
-                 C29 52 21 46 16 42
-                 C9 36 6 31 6 25
-                 C6 19 11 14 17 14
-                 C21 14 25 16 28 20
-                 C31 16 35 14 39 14
-                 C45 14 50 19 50 25
-                 C50 33 44 38 37 43
-                 C35 45 33.5 46.1 32 47.2
-                 Z"
-              fill="none"
-              stroke="var(--brand-coral)"
-              strokeWidth="4.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            <img
+              src={tmdlogo}
+              alt=""
+              draggable="false"
+              style={{
+                width: 34,
+                height: 34,
+                display: "block",
+                objectFit: "contain",
+              }}
             />
-            <g transform="rotate(-18 40 42)">
-              <ellipse
-                cx="40"
-                cy="42"
-                rx="18"
-                ry="9"
-                fill="none"
-                stroke="var(--brand-teal)"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-              <ellipse cx="40" cy="42" rx="13" ry="6.5" fill="var(--bg-light)" />
-            </g>
-            <path
-              d="M21 39 C23 40 25 42 27 44"
-              fill="none"
-              stroke="var(--bg-light)"
-              strokeWidth="6"
-              strokeLinecap="round"
-            />
-          </svg>
+          </span>
 
           <span style={{ whiteSpace: "nowrap" }}>
             <span style={{ color: "var(--brand-teal)" }}>Try</span>
@@ -119,7 +97,7 @@ export default function Header({ me, onSignOut }) {
               justifyContent: "center",
               lineHeight: 1,
 
-              // ✅ ALWAYS teal (not just when active)
+              // ✅ ALWAYS primary (blue) (not just when active)
               background: "var(--brand-teal)",
               color: "#fff",
               borderColor: "var(--brand-teal-700)",
@@ -168,7 +146,7 @@ export default function Header({ me, onSignOut }) {
         </nav>
       </div>
     </header>
-  );
+  )
 }
 
 
