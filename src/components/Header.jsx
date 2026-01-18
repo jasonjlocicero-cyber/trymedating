@@ -1,10 +1,18 @@
 // src/components/Header.jsx
 import React from "react";
 import { Link, NavLink } from "react-router-dom";
-
-const BRAND_LOGO = "/icons/logo.png"; // ✅ new blue/pink mark from /public/icons/logo.png
+import tmdlogo from "../assets/tmdlogo.png";
 
 export default function Header({ me, onSignOut }) {
+  const pillBase = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
+    minHeight: 44,
+    padding: "10px 14px",
+  };
+
   return (
     <header
       className="site-header"
@@ -12,32 +20,26 @@ export default function Header({ me, onSignOut }) {
         background: "var(--bg-light)",
         borderBottom: "1px solid var(--border)",
         boxShadow: "0 2px 4px rgba(0,0,0,.04)",
-        // ✅ keeps header content below iPhone notch/status bar
         paddingTop: "env(safe-area-inset-top, 0px)",
       }}
     >
       <div
         className="container"
         style={{
-          // ✅ true centered brand, nav stays right
-          display: "grid",
-          gridTemplateColumns: "1fr auto 1fr",
+          display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           gap: 12,
           padding: "12px 0",
         }}
       >
-        {/* Left spacer (keeps brand centered even with right-side nav width) */}
-        <div aria-hidden="true" />
-
-        {/* Brand (icon + wordmark) */}
+        {/* Brand (mark + word) */}
         <Link
           to="/"
           aria-label="TryMeDating home"
           style={{
-            display: "inline-flex",
+            display: "flex",
             alignItems: "center",
-            justifyContent: "center",
             gap: 10,
             fontWeight: 900,
             fontSize: 22,
@@ -46,19 +48,18 @@ export default function Header({ me, onSignOut }) {
             textDecoration: "none",
             color: "inherit",
             minWidth: 0,
-            justifySelf: "center",
           }}
         >
           <img
-            src={BRAND_LOGO}
+            src={tmdlogo}
             alt=""
             aria-hidden="true"
             style={{
               height: 30,
               width: "auto",
-              objectFit: "contain",
               display: "block",
               flex: "0 0 auto",
+              objectFit: "contain",
             }}
           />
 
@@ -78,7 +79,6 @@ export default function Header({ me, onSignOut }) {
             justifyContent: "flex-end",
             gap: 10,
             flexWrap: "wrap",
-            justifySelf: "end",
           }}
         >
           <NavLink
@@ -86,18 +86,10 @@ export default function Header({ me, onSignOut }) {
             end
             className="btn btn-neutral btn-pill"
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              lineHeight: 1,
-
-              // ✅ ALWAYS primary blue (not just when active)
+              ...pillBase,
               background: "var(--brand-teal)",
               color: "#fff",
               borderColor: "var(--brand-teal-700)",
-
-              minHeight: 44,
-              padding: "10px 14px",
             }}
           >
             Home
@@ -109,14 +101,7 @@ export default function Header({ me, onSignOut }) {
               onClick={onSignOut}
               className="btn btn-accent btn-pill"
               title="Sign out"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                lineHeight: 1,
-                minHeight: 44,
-                padding: "10px 14px",
-              }}
+              style={pillBase}
             >
               Sign out
             </button>
@@ -124,14 +109,7 @@ export default function Header({ me, onSignOut }) {
             <NavLink
               to="/auth"
               className="btn btn-primary btn-pill"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                lineHeight: 1,
-                minHeight: 44,
-                padding: "10px 14px",
-              }}
+              style={pillBase}
             >
               Sign in
             </NavLink>
@@ -141,6 +119,7 @@ export default function Header({ me, onSignOut }) {
     </header>
   );
 }
+
 
 
 
