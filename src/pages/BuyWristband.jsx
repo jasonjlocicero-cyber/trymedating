@@ -2,8 +2,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 
-const PAYMENT_LINK =
-  import.meta.env.VITE_TMD_WRISTBAND_LINK || ""; // set in Netlify env vars
+const PAYMENT_LINK = import.meta.env.VITE_TMD_WRISTBAND_LINK || ""; // set in Netlify env vars
 
 export default function BuyWristband() {
   const canBuy = !!PAYMENT_LINK;
@@ -13,6 +12,11 @@ export default function BuyWristband() {
     // Use same-tab navigation for best reliability in PWA/installed app
     window.location.href = PAYMENT_LINK;
   }
+
+  // ✅ This panel is intentionally LIGHT even in dark mode,
+  // so we force readable (dark) text inside it.
+  const lightPanelText = { color: "#0f172a" };
+  const lightPanelMuted = { color: "rgba(15, 23, 42, 0.72)" };
 
   return (
     <div className="container" style={{ padding: "28px 0", maxWidth: 920 }}>
@@ -35,8 +39,8 @@ export default function BuyWristband() {
         <h2 style={{ fontWeight: 900, marginBottom: 8 }}>TryMeDating Wristband</h2>
 
         <div className="muted" style={{ lineHeight: 1.6 }}>
-          The wristband is a real-world “signal” that you’re open to a warm, respectful approach to dating.
-          It’s meant for people who want to meet intentionally — not endlessly swipe.
+          The wristband is a real-world “signal” that you’re open to a warm, respectful approach to dating. It’s meant
+          for people who want to meet intentionally — not endlessly swipe.
         </div>
 
         <ul style={{ marginTop: 12, paddingLeft: 18, lineHeight: 1.7 }}>
@@ -52,13 +56,16 @@ export default function BuyWristband() {
             gap: 10,
             padding: 12,
             borderRadius: 12,
-            border: "1px solid var(--border)",
+            // Use a predictable border for a light panel (var(--border) can be "dark-mode tuned")
+            border: "1px solid rgba(0,0,0,0.10)",
             background: "#fafafa",
+            ...lightPanelText,
           }}
         >
           <div style={{ fontWeight: 800 }}>Shipping & returns</div>
-          <div className="muted" style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Orders ship to your provided address. If there’s an issue with your order, contact us and we’ll make it right.
+          <div style={{ fontSize: 14, lineHeight: 1.6, ...lightPanelMuted }}>
+            Orders ship to your provided address. If there’s an issue with your order, contact us and we’ll make it
+            right.
           </div>
         </div>
 
