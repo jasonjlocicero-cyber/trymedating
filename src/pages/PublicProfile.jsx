@@ -12,7 +12,6 @@ export default function PublicProfile() {
   const [profile, setProfile] = useState(null)
   const [photos, setPhotos] = useState([])
 
-  // If we navigated here from Connections, show a "Back to connections" button
   const backTo = location?.state?.from === 'connections' ? '/connections' : '/'
   const backLabel = location?.state?.from === 'connections' ? 'Back to connections' : 'Back home'
 
@@ -26,7 +25,6 @@ export default function PublicProfile() {
       setPhotos([])
 
       try {
-        // 1) Load profile by handle (IMPORTANT: include user_id)
         const { data: p, error: pErr } = await supabase
           .from('profiles')
           .select('user_id, handle, display_name, bio, avatar_url, is_public')
@@ -40,7 +38,6 @@ export default function PublicProfile() {
         }
         if (mounted) setProfile(p)
 
-        // 2) Load public photos by user_id (NOT handle)
         const { data: rows, error: rErr } = await supabase
           .from('profile_photos')
           .select('id, path, caption, sort_order')
@@ -56,11 +53,10 @@ export default function PublicProfile() {
           return
         }
 
-        // 3) Signed URLs (works even if the bucket is private)
         const paths = list.map((x) => x.path)
         const { data: signed, error: sErr } = await supabase.storage
           .from('profile-photos')
-          .createSignedUrls(paths, 60 * 60) // 1 hour
+          .createSignedUrls(paths, 60 * 60)
 
         if (sErr) throw sErr
 
@@ -89,11 +85,12 @@ export default function PublicProfile() {
 
   return (
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
-      {/* Local-only styling to guarantee no weird stretching on avatar + better mobile photo behavior */}
       <style>{`
+        /* Avatar: force a true square so it can NEVER become an oval */
         .pp-avatar {
           width: 56px;
           height: 56px;
+          aspect-ratio: 1 / 1;
           border-radius: 9999px;
           overflow: hidden;
           background: #e5e7eb;
@@ -122,25 +119,27 @@ export default function PublicProfile() {
           background: #fff;
         }
 
-        /* This is the key fix for mobile: show the whole image instead of cropping top/bottom */
+        /* Keep consistent tiles */
         .pp-photo-media {
           width: 100%;
           aspect-ratio: 1 / 1;
           background: #fff;
         }
+
+        /* Default: desktop look (full bleed) */
         .pp-photo-img {
           width: 100%;
           height: 100%;
           display: block;
-          object-fit: contain;
+          object-fit: cover !important;
           object-position: center;
           background: #fff;
         }
 
-        /* Desktop/tablet can go back to cover (looks “full bleed”) */
-        @media (min-width: 640px) {
+        /* Mobile/touch: show the full photo (NO top/bottom cutoff) */
+        @media (hover: none) and (pointer: coarse) {
           .pp-photo-img {
-            object-fit: cover;
+            object-fit: contain !important;
           }
         }
       `}</style>
@@ -175,7 +174,6 @@ export default function PublicProfile() {
               alignItems: 'center'
             }}
           >
-            {/* Avatar: force a true square container + overflow hidden so it can never “oval” */}
             <div className="pp-avatar" aria-label="Avatar">
               {profile.avatar_url ? (
                 <img src={profile.avatar_url} alt="Avatar" />
