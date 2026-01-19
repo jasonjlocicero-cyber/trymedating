@@ -89,6 +89,62 @@ export default function PublicProfile() {
 
   return (
     <div className="container" style={{ padding: '28px 0', maxWidth: 920 }}>
+      {/* Local-only styling to guarantee no weird stretching on avatar + better mobile photo behavior */}
+      <style>{`
+        .pp-avatar {
+          width: 56px;
+          height: 56px;
+          border-radius: 9999px;
+          overflow: hidden;
+          background: #e5e7eb;
+          flex-shrink: 0;
+          display: grid;
+          place-items: center;
+        }
+        .pp-avatar img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: cover;
+          object-position: center;
+        }
+
+        .pp-photos-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 12px;
+        }
+
+        .pp-photo-card {
+          border: 1px solid rgba(0,0,0,0.08);
+          border-radius: 14px;
+          overflow: hidden;
+          background: #fff;
+        }
+
+        /* This is the key fix for mobile: show the whole image instead of cropping top/bottom */
+        .pp-photo-media {
+          width: 100%;
+          aspect-ratio: 1 / 1;
+          background: #fff;
+        }
+        .pp-photo-img {
+          width: 100%;
+          height: 100%;
+          display: block;
+          object-fit: contain;
+          object-position: center;
+          background: #fff;
+        }
+
+        /* Desktop/tablet can go back to cover (looks “full bleed”) */
+        @media (min-width: 640px) {
+          .pp-photo-img {
+            object-fit: cover;
+          }
+        }
+      `}</style>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <h1 style={{ fontWeight: 900, margin: 0 }}>Profile</h1>
         <Link className="btn btn-neutral btn-pill" to={backTo}>
@@ -119,15 +175,12 @@ export default function PublicProfile() {
               alignItems: 'center'
             }}
           >
-            <div className="avatar-frame" style={{ width: 56, height: 56 }}>
+            {/* Avatar: force a true square container + overflow hidden so it can never “oval” */}
+            <div className="pp-avatar" aria-label="Avatar">
               {profile.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt="Avatar"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
-                />
+                <img src={profile.avatar_url} alt="Avatar" />
               ) : (
-                <div className="avatar-initials">
+                <div style={{ fontWeight: 900, color: '#1d4ed8' }}>
                   {(profile.display_name || profile.handle || 'U').slice(0, 2).toUpperCase()}
                 </div>
               )}
@@ -146,29 +199,17 @@ export default function PublicProfile() {
             {photos.length === 0 ? (
               <div className="muted">No public photos yet.</div>
             ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-                  gap: 12
-                }}
-              >
+              <div className="pp-photos-grid">
                 {photos.map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      border: '1px solid rgba(0,0,0,0.08)',
-                      borderRadius: 14,
-                      overflow: 'hidden',
-                      background: '#fff'
-                    }}
-                  >
-                    <img
-                      src={p.url}
-                      alt={p.caption || 'Photo'}
-                      style={{ width: '100%', height: 220, objectFit: 'cover', display: 'block' }}
-                      loading="lazy"
-                    />
+                  <div key={p.id} className="pp-photo-card">
+                    <div className="pp-photo-media">
+                      <img
+                        src={p.url}
+                        alt={p.caption || 'Photo'}
+                        className="pp-photo-img"
+                        loading="lazy"
+                      />
+                    </div>
                     {p.caption ? (
                       <div style={{ padding: 10, fontSize: 13 }} className="muted">
                         {p.caption}
@@ -184,6 +225,7 @@ export default function PublicProfile() {
     </div>
   )
 }
+
 
 
 
