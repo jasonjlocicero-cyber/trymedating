@@ -136,6 +136,29 @@ export default function ProfilePage() {
     return true
   }, [me?.id, profile.handle, profile.is_public, profile.avatar_url, saving])
 
+  // Public profile link (your app uses /u/:handle)
+  const publicPath = useMemo(() => {
+    const h = (profile.handle || '').trim()
+    return h ? `/u/${h}` : ''
+  }, [profile.handle])
+
+  const publicUrl = useMemo(() => {
+    if (!publicPath) return ''
+    return `${window.location.origin}${publicPath}`
+  }, [publicPath])
+
+  async function copyPublicProfileLink() {
+    if (!publicUrl) return
+    try {
+      await navigator.clipboard.writeText(publicUrl)
+      setErr('')
+      setMsg('Public profile link copied!')
+    } catch {
+      // fallback
+      window.prompt('Copy this link:', publicUrl)
+    }
+  }
+
   async function saveProfile(e) {
     e?.preventDefault?.()
     if (!me?.id) return
@@ -337,7 +360,12 @@ export default function ProfilePage() {
             </label>
 
             {profile.avatar_url && (
-              <button type="button" className="btn btn-neutral btn-pill" onClick={handleRemoveAvatar} disabled={uploading}>
+              <button
+                type="button"
+                className="btn btn-neutral btn-pill"
+                onClick={handleRemoveAvatar}
+                disabled={uploading}
+              >
                 Remove
               </button>
             )}
@@ -356,7 +384,7 @@ export default function ProfilePage() {
               required
             />
             <div className="helper-muted" style={{ fontSize: 12 }}>
-              Your public URL will be <code>/u/{profile.handle || '…'}</code>
+              Your public URL will be <code>{publicPath || '/u/…'}</code>
             </div>
           </label>
 
@@ -404,6 +432,37 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {/* ✅ Public profile link buttons */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+            <Link
+              className="btn btn-neutral btn-pill"
+              to={publicPath || '/'}
+              style={{
+                pointerEvents: publicPath ? 'auto' : 'none',
+                opacity: publicPath ? 1 : 0.55,
+              }}
+              title={profile.is_public ? 'Open your public profile' : 'Preview what others would see (currently private)'}
+            >
+              {profile.is_public ? 'View public profile' : 'Preview public profile'}
+            </Link>
+
+            <button
+              type="button"
+              className="btn btn-neutral btn-pill"
+              onClick={copyPublicProfileLink}
+              disabled={!publicUrl}
+              title="Copy shareable link"
+            >
+              Copy link
+            </button>
+
+            {!profile.is_public && (
+              <span className="helper-muted" style={{ fontSize: 12 }}>
+                (Currently private)
+              </span>
+            )}
+          </div>
+
           {/* ✅ Save + Connections next to each other (coral) */}
           <div className="actions-row">
             <button className="btn btn-primary btn-pill" type="submit" disabled={!canSave}>
@@ -424,6 +483,7 @@ export default function ProfilePage() {
     </div>
   )
 }
+
 
 
 
