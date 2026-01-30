@@ -6,8 +6,8 @@ import { applyTheme, getTheme } from "../lib/theme";
 
 const LS_NOTIF_ENABLED = "tmd_notifications_enabled";
 
-// Client-side VAPID public key (base64url)
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || "";
+// Client-side VAPID public key (must be injected at build time)
+const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY || "").trim();
 
 function isStandalonePWA() {
   // iOS Safari uses navigator.standalone, others use display-mode
@@ -21,19 +21,26 @@ function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent || "");
 }
 
-// VAPID helper
+function clampMsg(s, max = 240) {
+  const str = String(s || "").replace(/\s+/g, " ").trim();
+  return str.length > max ? `${str.slice(0, max)}…` : str;
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
 }
 
-async function getAccessToken() {
-  const { data } = await supabase.auth.getSession();
-  return data?.session?.access_token || "";
+function arrayBufferToBase64(buf) {
+  if (!buf) return "";
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
 }
 
 export default function SettingsPage() {
@@ -49,21 +56,22 @@ export default function SettingsPage() {
     setTheme(applied);
   }
 
-  // Notifications support
+  // Push support
   const supported = useMemo(() => {
     return (
       typeof window !== "undefined" &&
       "Notification" in window &&
-      "serviceWorker" in navigator
+      "serviceWorker" in navigator &&
+      "PushManager" in window
     );
   }, []);
 
-  // ✅ DEFAULT ON for every device unless user explicitly turned it off on THAT device
+  // Default ON for users who have never set it on this device
   const [notifEnabled, setNotifEnabled] = useState(() => {
     try {
-      const raw = localStorage.getItem(LS_NOTIF_ENABLED);
-      if (raw === null) return true; // default ON
-      return raw === "1";
+      const v = localStorage.getItem(LS_NOTIF_ENABLED);
+      if (v === null) return true; // ✅ default ON
+      return v === "1";
     } catch {
       return true;
     }
@@ -71,6 +79,23 @@ export default function SettingsPage() {
 
   const [notifMsg, setNotifMsg] = useState("");
   const [notifBusy, setNotifBusy] = useState(false);
+
+  const [permission, setPermission] = useState(() => {
+    try {
+      return typeof Notification !== "undefined" ? Notification.permission : "unsupported";
+    } catch {
+      return "unsupported";
+    }
+  });
+
+  const [installed, setInstalled] = useState(() => {
+    try {
+      return isStandalonePWA();
+    } catch {
+      return false;
+    }
+  });
+
   const [hasSub, setHasSub] = useState(false);
 
   // Danger zone – delete
@@ -92,9 +117,11 @@ export default function SettingsPage() {
         if (alive) setLoading(false);
       }
     })();
+
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setMe(session?.user || null);
     });
+
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
@@ -107,17 +134,26 @@ export default function SettingsPage() {
     }
   }, [notifEnabled]);
 
-  async function refreshSubscriptionState() {
+  // Track permission/installed/subscription status
+  async function refreshPushStatus() {
+    try {
+      setPermission(Notification.permission);
+    } catch {
+      setPermission("unsupported");
+    }
+    try {
+      setInstalled(isStandalonePWA());
+    } catch {
+      setInstalled(false);
+    }
+
     if (!supported) {
       setHasSub(false);
       return;
     }
+
     try {
       const reg = await navigator.serviceWorker.ready;
-      if (!reg?.pushManager) {
-        setHasSub(false);
-        return;
-      }
       const sub = await reg.pushManager.getSubscription();
       setHasSub(!!sub);
     } catch {
@@ -125,119 +161,168 @@ export default function SettingsPage() {
     }
   }
 
-  async function registerDeviceSubscription({ allowPrompt } = { allowPrompt: false }) {
-    setNotifMsg("");
+  useEffect(() => {
+    refreshPushStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supported]);
 
-    if (!supported) {
-      setNotifMsg("Notifications aren’t supported on this browser/device.");
-      setHasSub(false);
-      return false;
+  async function saveSubscriptionToDb(subscription) {
+    if (!me?.id) throw new Error("Not signed in.");
+    if (!subscription?.endpoint) throw new Error("Missing subscription endpoint.");
+
+    const p256dh = arrayBufferToBase64(subscription.getKey("p256dh"));
+    const auth = arrayBufferToBase64(subscription.getKey("auth"));
+
+    const row = {
+      user_id: me.id,
+      endpoint: subscription.endpoint,
+      p256dh,
+      auth,
+      user_agent: navigator.userAgent || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Try a couple common conflict keys so this works with different schemas
+    let r = await supabase.from("push_subscriptions").upsert(row, { onConflict: "endpoint" });
+    if (r.error) {
+      r = await supabase.from("push_subscriptions").upsert(row, { onConflict: "user_id,endpoint" });
     }
-
-    // iOS note: push works best (and often only) when installed to home screen
-    if (isIOS() && !isStandalonePWA()) {
-      setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
-      // still continue; some states can still work, but iOS is inconsistent
-    }
-
-    if (!VAPID_PUBLIC_KEY) {
-      setNotifMsg("Missing VITE_VAPID_PUBLIC_KEY. Add it to Netlify + local env, then rebuild.");
-      return false;
-    }
-
-    // Permission path
-    if (Notification.permission !== "granted") {
-      if (!allowPrompt) {
-        // Don’t prompt automatically (browsers punish this). Just show guidance.
-        setNotifMsg("Notifications are ON by default, but you still need to allow permission on this device.");
-        return false;
+    if (r.error) {
+      // last resort
+      const ins = await supabase.from("push_subscriptions").insert(row);
+      if (ins.error && ins.error.code === "23505") {
+        const up = await supabase
+          .from("push_subscriptions")
+          .update(row)
+          .eq("user_id", me.id)
+          .eq("endpoint", row.endpoint);
+        if (up.error) throw up.error;
+      } else if (ins.error) {
+        throw ins.error;
       }
-      const perm = await Notification.requestPermission();
-      if (perm !== "granted") {
-        setNotifMsg("Permission denied. Enable notifications in your browser/iOS settings.");
-        setNotifEnabled(false);
-        setHasSub(false);
-        return false;
-      }
-    }
-
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      if (!reg?.pushManager) {
-        setNotifMsg("PushManager unavailable on this device/browser.");
-        setHasSub(false);
-        return false;
-      }
-
-      // Get or create subscription
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        const appServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: appServerKey,
-        });
-      }
-
-      // Save subscription server-side
-      const token = await getAccessToken();
-      if (!token) {
-        setNotifMsg("You must be signed in to enable notifications.");
-        setHasSub(false);
-        return false;
-      }
-
-      const res = await fetch("/.netlify/functions/push-subscribe", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ subscription: sub }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Subscribe failed (${res.status})`);
-      }
-
-      setHasSub(true);
-      setNotifEnabled(true);
-      setNotifMsg("Notifications enabled on this device.");
-      return true;
-    } catch (e) {
-      setHasSub(false);
-      setNotifMsg(e?.message || "Failed to enable notifications.");
-      return false;
     }
   }
 
-  async function unsubscribeDevice() {
-    if (!supported) {
-      setHasSub(false);
-      return;
+  async function deleteSubscriptionFromDb(endpoint) {
+    if (!me?.id || !endpoint) return;
+    const { error } = await supabase
+      .from("push_subscriptions")
+      .delete()
+      .eq("user_id", me.id)
+      .eq("endpoint", endpoint);
+
+    // If RLS blocks this, we don’t hard-fail the UI — but we do surface it.
+    if (error) throw error;
+  }
+
+  async function ensureSubscribed({ force = false, silent = false } = {}) {
+    if (!supported) throw new Error("Notifications aren’t supported on this device/browser.");
+    if (!VAPID_PUBLIC_KEY) {
+      throw new Error("Missing VITE_VAPID_PUBLIC_KEY. Add it to Netlify + local .env, then rebuild.");
     }
+    if (Notification.permission !== "granted") {
+      throw new Error("Permission not granted. Enable notifications first.");
+    }
+
+    const reg = await navigator.serviceWorker.ready;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && force) {
+      try {
+        await sub.unsubscribe();
+      } catch {
+        // ignore
+      }
+      sub = null;
+    }
+
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+
+    await saveSubscriptionToDb(sub);
+    await refreshPushStatus();
+
+    if (!silent) setNotifMsg("Device registered for push notifications ✅");
+  }
+
+  async function disableNotifications() {
+    setNotifMsg("");
+    setNotifBusy(true);
     try {
+      setNotifEnabled(false);
+
+      if (!supported) return;
+
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
-      if (sub) {
-        // Try to tell server (optional endpoint)
+      if (sub?.endpoint) {
         try {
-          const token = await getAccessToken();
-          await fetch("/.netlify/functions/push-unsubscribe", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ endpoint: sub.endpoint }),
-          }).catch(() => {});
-        } catch {}
-
-        await sub.unsubscribe().catch(() => {});
+          await sub.unsubscribe();
+        } catch {
+          // ignore
+        }
+        try {
+          await deleteSubscriptionFromDb(sub.endpoint);
+        } catch (e) {
+          setNotifMsg(
+            clampMsg(
+              `Disabled on this device, but could not remove server subscription (RLS/policy). ${e?.message || ""}`
+            )
+          );
+        }
       }
-    } catch {}
-    setHasSub(false);
+
+      await refreshPushStatus();
+      if (!notifMsg) setNotifMsg("Notifications disabled on this device.");
+    } finally {
+      setNotifBusy(false);
+    }
+  }
+
+  async function toggleNotifications(next) {
+    setNotifMsg("");
+    if (!supported) {
+      setNotifMsg("Notifications aren’t supported on this browser/device.");
+      setNotifEnabled(false);
+      return;
+    }
+
+    if (next) {
+      // iOS guidance: push-style UX is best when installed to Home Screen
+      if (isIOS() && !isStandalonePWA()) {
+        setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
+        // still allow enabling; user can proceed
+      }
+
+      setNotifBusy(true);
+      try {
+        const perm = await Notification.requestPermission();
+        setPermission(perm);
+
+        if (perm !== "granted") {
+          setNotifEnabled(false);
+          setNotifMsg("Permission denied. Enable notifications in your browser/iOS settings.");
+          return;
+        }
+
+        setNotifEnabled(true);
+
+        // Create + save a PushSubscription (this is the missing piece on Android right now)
+        await ensureSubscribed({ force: false, silent: true });
+        setNotifMsg("Notifications enabled ✅");
+      } catch (e) {
+        setNotifEnabled(false);
+        setNotifMsg(clampMsg(e?.message || "Failed to enable notifications."));
+      } finally {
+        setNotifBusy(false);
+      }
+    } else {
+      await disableNotifications();
+    }
   }
 
   async function testNotification() {
@@ -261,54 +346,48 @@ export default function SettingsPage() {
       });
       setNotifMsg("Test notification sent.");
     } catch (e) {
-      setNotifMsg(e?.message || "Failed to send test notification.");
+      setNotifMsg(clampMsg(e?.message || "Failed to send test notification."));
     }
   }
 
-  async function toggleNotifications(next) {
+  async function reregisterDevice() {
     setNotifMsg("");
     if (!supported) {
       setNotifMsg("Notifications aren’t supported on this browser/device.");
-      setNotifEnabled(false);
-      setHasSub(false);
       return;
     }
-
+    if (Notification.permission !== "granted") {
+      setNotifMsg("Permission not granted. Turn notifications on first.");
+      return;
+    }
     setNotifBusy(true);
     try {
-      if (next) {
-        // User gesture: we’re allowed to prompt here
-        await registerDeviceSubscription({ allowPrompt: true });
-      } else {
-        // Turning off on this device
-        setNotifEnabled(false);
-        setNotifMsg("Notifications disabled on this device.");
-        await unsubscribeDevice();
-      }
+      await ensureSubscribed({ force: true, silent: false });
+    } catch (e) {
+      setNotifMsg(clampMsg(e?.message || "Failed to re-register device."));
     } finally {
       setNotifBusy(false);
     }
   }
 
-  // ✅ On load: if default ON and permission already granted, auto-register silently
+  // If user has notifications ON and permission already granted, try to self-heal “Subscription: no”
   useEffect(() => {
     if (!supported) return;
-    (async () => {
-      await refreshSubscriptionState();
+    if (!notifEnabled) return;
+    if (!me?.id) return;
+    if (Notification.permission !== "granted") return;
+    if (hasSub) return;
+    if (!VAPID_PUBLIC_KEY) return;
 
-      if (notifEnabled && Notification.permission === "granted") {
-        // No prompt needed. Just ensure it’s registered and saved server-side.
-        await registerDeviceSubscription({ allowPrompt: false });
-      } else if (notifEnabled && Notification.permission !== "granted") {
-        // Default ON, but we can’t auto-prompt.
-        // Leave enabled, show a helpful message only if user is on iOS not installed.
-        if (isIOS() && !isStandalonePWA()) {
-          setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best notification behavior.");
-        }
+    (async () => {
+      try {
+        await ensureSubscribed({ silent: true });
+      } catch {
+        // silent
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supported, notifEnabled, me?.id, hasSub]);
 
   async function handleDelete() {
     setDeleteMsg("");
@@ -405,8 +484,7 @@ export default function SettingsPage() {
         ) : (
           <>
             <div className="muted" style={{ marginBottom: 10 }}>
-              Default is <b>ON</b>. You’ll still need to allow permission on each device.
-              {isIOS() ? <> (Best on iPhone when installed to Home Screen.)</> : null}
+              <b>Default is ON.</b> You’ll still need to allow permission on each device.
             </div>
 
             <div
@@ -436,7 +514,7 @@ export default function SettingsPage() {
                 Enable notifications
               </label>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button
                   className="btn btn-neutral btn-pill"
                   type="button"
@@ -449,9 +527,9 @@ export default function SettingsPage() {
                 <button
                   className="btn btn-neutral btn-pill"
                   type="button"
-                  onClick={() => registerDeviceSubscription({ allowPrompt: true })}
-                  disabled={notifBusy || !notifEnabled}
-                  title="Re-register this device"
+                  onClick={reregisterDevice}
+                  disabled={!notifEnabled || notifBusy || Notification.permission !== "granted"}
+                  title="Refresh your device subscription (useful after reinstall/updates)"
                 >
                   Re-register device
                 </button>
@@ -459,15 +537,27 @@ export default function SettingsPage() {
             </div>
 
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-              Permission: <code>{Notification.permission}</code>
-              {" • "}Subscription: <code>{hasSub ? "yes" : "no"}</code>
-              {" • "}Installed: <code>{isStandalonePWA() ? "yes" : "no"}</code>
-              {" • "}VAPID key: <code>{VAPID_PUBLIC_KEY ? "set" : "missing"}</code>
+              Permission: <code>{permission}</code> • Subscription: <code>{hasSub ? "yes" : "no"}</code> • Installed:{" "}
+              <code>{installed ? "yes" : "no"}</code> • VAPID key: <code>{VAPID_PUBLIC_KEY ? "set" : "missing"}</code>
+              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
             </div>
+
+            {!VAPID_PUBLIC_KEY && (
+              <div className="helper-muted" style={{ marginTop: 10 }}>
+                Missing <code>VITE_VAPID_PUBLIC_KEY</code>. Add it to Netlify + your local <code>.env</code>, then rebuild.
+              </div>
+            )}
+
+            {notifEnabled && Notification.permission !== "granted" && (
+              <div className="helper-muted" style={{ marginTop: 10 }}>
+                Notifications are ON, but permission is <code>{Notification.permission}</code>. Toggle OFF then ON to prompt again,
+                or enable permission in your device/browser settings.
+              </div>
+            )}
 
             {notifMsg && (
               <div className="helper-muted" style={{ marginTop: 10 }}>
-                {notifMsg}
+                {clampMsg(notifMsg)}
               </div>
             )}
           </>
@@ -500,19 +590,13 @@ export default function SettingsPage() {
           padding: 16,
         }}
       >
-        <div style={{ fontWeight: 800, marginBottom: 6, color: "#b91c1c" }}>
-          Danger zone
-        </div>
+        <div style={{ fontWeight: 800, marginBottom: 6, color: "#b91c1c" }}>Danger zone</div>
         <div className="muted" style={{ marginBottom: 10 }}>
           Permanently delete your account and all associated data. This cannot be undone.
         </div>
 
         {!showDeleteConfirm ? (
-          <button
-            className="btn btn-accent"
-            type="button"
-            onClick={() => setShowDeleteConfirm(true)}
-          >
+          <button className="btn btn-accent" type="button" onClick={() => setShowDeleteConfirm(true)}>
             Delete my account
           </button>
         ) : (
@@ -530,12 +614,7 @@ export default function SettingsPage() {
             <label className="form-label" style={{ fontWeight: 700 }}>
               Type <code>DELETE</code> to confirm
             </label>
-            <input
-              className="input"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="DELETE"
-            />
+            <input className="input" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="DELETE" />
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 className="btn btn-accent"
@@ -569,6 +648,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
 
 
 
