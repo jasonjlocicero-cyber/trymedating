@@ -18,6 +18,16 @@ function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent || "");
 }
 
+function readLsBool(key, defaultValue) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null || v === undefined) return defaultValue;
+    return v === "1";
+  } catch {
+    return defaultValue;
+  }
+}
+
 export default function SettingsPage() {
   const nav = useNavigate();
 
@@ -26,13 +36,12 @@ export default function SettingsPage() {
 
   // ✅ Theme
   const [theme, setTheme] = useState(() => getTheme()); // "light" | "dark"
-
   function setThemeAndApply(next) {
     const applied = applyTheme(next);
     setTheme(applied);
   }
 
-  // Notifications
+  // Notifications support (API availability only)
   const supported = useMemo(() => {
     return (
       typeof window !== "undefined" &&
@@ -41,13 +50,12 @@ export default function SettingsPage() {
     );
   }, []);
 
-  const [notifEnabled, setNotifEnabled] = useState(() => {
-    try {
-      return localStorage.getItem(LS_NOTIF_ENABLED) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // ✅ DEFAULT ON:
+  // If the user has never set this before, we treat notifications as ON (preference),
+  // and we persist that to localStorage on first load.
+  const [notifEnabled, setNotifEnabled] = useState(() =>
+    readLsBool(LS_NOTIF_ENABLED, true)
+  );
 
   const [notifMsg, setNotifMsg] = useState("");
   const [notifBusy, setNotifBusy] = useState(false);
@@ -77,6 +85,17 @@ export default function SettingsPage() {
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
+  // ✅ First-visit: if LS key is missing, lock in default ON immediately.
+  useEffect(() => {
+    try {
+      const existing = localStorage.getItem(LS_NOTIF_ENABLED);
+      if (existing === null) localStorage.setItem(LS_NOTIF_ENABLED, "1");
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Keep localStorage in sync
   useEffect(() => {
     try {
@@ -86,16 +105,60 @@ export default function SettingsPage() {
     }
   }, [notifEnabled]);
 
+  const perm = supported ? Notification.permission : "unsupported";
+  const ios = isIOS();
+  const standalone = typeof window !== "undefined" ? isStandalonePWA() : false;
+
+  const canShowSystemNotif =
+    supported && notifEnabled && Notification.permission === "granted";
+
+  async function requestPermission() {
+    setNotifMsg("");
+    if (!supported) {
+      setNotifMsg("Notifications aren’t supported on this browser/device.");
+      return;
+    }
+
+    // iOS guidance: push-style UX is best when installed to Home Screen
+    if (ios && !standalone) {
+      setNotifMsg(
+        "On iPhone: install the app (Share → Add to Home Screen) for best notification behavior."
+      );
+      // Still allow requesting permission; user may proceed.
+    }
+
+    setNotifBusy(true);
+    try {
+      const nextPerm = await Notification.requestPermission();
+      if (nextPerm !== "granted") {
+        setNotifMsg(
+          "Permission not granted. On iPhone, check iOS Settings → Notifications, and also make sure the app is installed to Home Screen."
+        );
+        return;
+      }
+      setNotifMsg("Permission granted ✅");
+    } catch (e) {
+      setNotifMsg(e?.message || "Failed to request notification permission.");
+    } finally {
+      setNotifBusy(false);
+    }
+  }
+
   async function testNotification() {
     setNotifMsg("");
     if (!supported) {
       setNotifMsg("Notifications aren’t supported on this browser/device.");
       return;
     }
-    if (Notification.permission !== "granted") {
-      setNotifMsg("Permission not granted. Turn notifications on first.");
+    if (!notifEnabled) {
+      setNotifMsg("Turn notifications on first.");
       return;
     }
+    if (Notification.permission !== "granted") {
+      setNotifMsg("Permission not granted yet. Tap “Grant permission”.");
+      return;
+    }
+
     try {
       // Prefer showing via SW (more consistent in PWAs)
       const reg = await navigator.serviceWorker.ready;
@@ -112,44 +175,21 @@ export default function SettingsPage() {
     }
   }
 
-  async function toggleNotifications(next) {
+  function toggleNotifications(next) {
     setNotifMsg("");
-    if (!supported) {
+    if (!supported && next) {
       setNotifMsg("Notifications aren’t supported on this browser/device.");
       setNotifEnabled(false);
       return;
     }
+    setNotifEnabled(next);
 
-    if (next) {
-      // iOS guidance: push-style UX is best when installed to Home Screen
-      if (isIOS() && !isStandalonePWA()) {
-        setNotifMsg(
-          "On iPhone: install the app (Share → Add to Home Screen) for best notification behavior."
-        );
-        // still allow enabling; user can proceed
-      }
+    // If they turn it ON but permission isn’t granted, guide them.
+    if (next && supported && Notification.permission !== "granted") {
+      setNotifMsg("Notifications are ON. Tap “Grant permission” to allow alerts.");
+    }
 
-      setNotifBusy(true);
-      try {
-        const perm = await Notification.requestPermission();
-        if (perm !== "granted") {
-          setNotifEnabled(false);
-          setNotifMsg(
-            "Permission denied. Enable notifications in your browser/iOS settings."
-          );
-          return;
-        }
-        setNotifEnabled(true);
-        setNotifMsg("Notifications enabled.");
-      } catch (e) {
-        setNotifEnabled(false);
-        setNotifMsg(e?.message || "Failed to enable notifications.");
-      } finally {
-        setNotifBusy(false);
-      }
-    } else {
-      // Turning off: we stop showing notifications (device-local)
-      setNotifEnabled(false);
+    if (!next) {
       setNotifMsg("Notifications disabled on this device.");
     }
   }
@@ -251,8 +291,12 @@ export default function SettingsPage() {
         ) : (
           <>
             <div className="muted" style={{ marginBottom: 10 }}>
-              When enabled, you’ll get a phone-style notification when a new
-              message arrives (best in the installed PWA).
+              Notifications are <b>ON by default</b>. To receive system alerts, you must also grant permission.
+              <br />
+              <span style={{ fontSize: 13 }}>
+                Note: Without real Web Push, system alerts only work reliably while the app is open. iPhone background alerts
+                require the installed PWA + Web Push setup.
+              </span>
             </div>
 
             <div
@@ -282,20 +326,40 @@ export default function SettingsPage() {
                 Enable notifications
               </label>
 
-              <button
-                className="btn btn-neutral btn-pill"
-                type="button"
-                onClick={testNotification}
-                disabled={!notifEnabled || notifBusy}
-              >
-                Test notification
-              </button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  className="btn btn-primary btn-pill"
+                  type="button"
+                  onClick={requestPermission}
+                  disabled={!notifEnabled || notifBusy || Notification.permission === "granted"}
+                >
+                  {Notification.permission === "granted" ? "Permission granted" : "Grant permission"}
+                </button>
+
+                <button
+                  className="btn btn-neutral btn-pill"
+                  type="button"
+                  onClick={testNotification}
+                  disabled={!canShowSystemNotif || notifBusy}
+                >
+                  Test notification
+                </button>
+              </div>
             </div>
 
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-              Permission: <code>{Notification.permission}</code>
-              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
+              Status:{" "}
+              <code>
+                pref={notifEnabled ? "on" : "off"} • perm={perm} • iOS={ios ? "yes" : "no"} • pwa={standalone ? "yes" : "no"}
+              </code>
             </div>
+
+            {ios ? (
+              <div className="helper-muted" style={{ marginTop: 10 }}>
+                iPhone notes: install to Home Screen for best behavior. If you don’t see alerts, check iOS Settings → Notifications
+                and make sure TryMeDating is allowed.
+              </div>
+            ) : null}
 
             {notifMsg && (
               <div className="helper-muted" style={{ marginTop: 10 }}>
@@ -336,8 +400,7 @@ export default function SettingsPage() {
           Danger zone
         </div>
         <div className="muted" style={{ marginBottom: 10 }}>
-          Permanently delete your account and all associated data. This cannot be
-          undone.
+          Permanently delete your account and all associated data. This cannot be undone.
         </div>
 
         {!showDeleteConfirm ? (
@@ -402,6 +465,7 @@ export default function SettingsPage() {
     </div>
   );
 }
+
 
 
 
