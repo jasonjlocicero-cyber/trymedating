@@ -1,10 +1,5 @@
-const webpush = require("web-push");
+// netlify/functions/push-subscribe.js
 const { createClient } = require("@supabase/supabase-js");
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 function json(statusCode, body) {
   return {
@@ -14,72 +9,75 @@ function json(statusCode, body) {
   };
 }
 
+function getBearerToken(headers) {
+  const h = headers || {};
+  const raw = h.authorization || h.Authorization || "";
+  if (!raw || typeof raw !== "string") return "";
+  if (!raw.toLowerCase().startsWith("bearer ")) return "";
+  return raw.slice(7).trim();
+}
+
 exports.handler = async (event) => {
   try {
-    // Optional shared secret so random callers can’t hit this endpoint
-    const secret = event.headers["x-tmd-secret"];
-    if (process.env.PUSH_WEBHOOK_SECRET && secret !== process.env.PUSH_WEBHOOK_SECRET) {
-      return json(401, { error: "Unauthorized" });
+    if (event.httpMethod !== "POST") {
+      return json(405, { error: "Method not allowed" });
     }
 
-    const payload = JSON.parse(event.body || "{}");
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return json(500, { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    }
 
-    // Expect recipient and message info
-    const recipientId =
-      payload?.record?.recipient || payload?.recipientId || payload?.recipient_id;
+    const token = getBearerToken(event.headers);
+    if (!token) {
+      return json(401, { error: "Missing Authorization: Bearer <access_token>" });
+    }
 
-    const senderId =
-      payload?.record?.sender || payload?.senderId || payload?.sender_id;
-
-    const text =
-      payload?.record?.body || payload?.body || "New message";
-
-    if (!recipientId) return json(400, { error: "Missing recipientId" });
-
-    // Configure VAPID
-    webpush.setVapidDetails(
-      process.env.VAPID_SUBJECT || "mailto:support@trymedating.com",
-      process.env.VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { persistSession: false } }
     );
 
-    // Pull all subscriptions for this recipient
-    const { data: subs, error } = await supabase
-      .from("push_subscriptions")
-      .select("endpoint, p256dh, auth")
-      .eq("user_id", recipientId);
+    // ✅ Verify who is calling
+    const { data: u, error: uErr } = await supabase.auth.getUser(token);
+    if (uErr || !u?.user?.id) {
+      return json(401, { error: "Invalid/expired token" });
+    }
+    const userId = u.user.id;
 
-    if (error) throw error;
-    if (!subs?.length) return json(200, { ok: true, sent: 0, note: "No subscriptions" });
+    const body = JSON.parse(event.body || "{}");
+    const sub = body?.subscription;
 
-    const notif = {
-      title: "New message",
-      body: text?.startsWith?.("[[file:") ? "📎 Attachment" : String(text).slice(0, 120),
-      url: "/connections", // where to open when tapped
-      tag: `msg:${senderId || "unknown"}`, // helps collapse spam
-    };
+    const endpoint = sub?.endpoint;
+    const p256dh = sub?.keys?.p256dh;
+    const auth = sub?.keys?.auth;
 
-    let sent = 0;
-
-    // Send to each device subscription
-    for (const s of subs) {
-      const subscription = {
-        endpoint: s.endpoint,
-        keys: { p256dh: s.p256dh, auth: s.auth },
-      };
-
-      try {
-        await webpush.sendNotification(subscription, JSON.stringify(notif));
-        sent++;
-      } catch (e) {
-        // If subscription is dead (410/404), you can clean it up later
-        console.log("Push failed:", e?.statusCode, e?.body || e?.message);
-      }
+    if (!endpoint || !p256dh || !auth) {
+      return json(400, { error: "Missing subscription endpoint/keys (p256dh/auth)" });
     }
 
-    return json(200, { ok: true, sent });
+    const row = {
+      user_id: userId,
+      endpoint,
+      p256dh,
+      auth,
+      user_agent: event.headers?.["user-agent"] || event.headers?.["User-Agent"] || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    // ✅ Store/update this device subscription
+    // Recommended DB constraint: UNIQUE(endpoint)
+    // If you instead use UNIQUE(user_id, endpoint), change onConflict accordingly.
+    const { error: upErr } = await supabase
+      .from("push_subscriptions")
+      .upsert(row, { onConflict: "endpoint" });
+
+    if (upErr) throw upErr;
+
+    return json(200, { ok: true });
   } catch (e) {
-    console.error("push-message error:", e);
+    console.error("push-subscribe error:", e);
     return json(500, { error: e?.message || "Server error" });
   }
 };
+;
