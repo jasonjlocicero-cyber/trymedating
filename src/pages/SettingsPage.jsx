@@ -1,627 +1,507 @@
-// src/pages/SettingsPage.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabaseClient";
-import { applyTheme, getTheme } from "../lib/theme";
+// src/pages/Settings.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { supabase } from '../lib/supabaseClient'
+import { isStandaloneDisplayMode, onDisplayModeChange } from '../lib/pwa'
 
-const LS_NOTIF_ENABLED = "tmd_notifications_enabled";
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY || "";
-
-function isStandalonePWA() {
-  return (
-    window.matchMedia?.("(display-mode: standalone)")?.matches ||
-    window.navigator?.standalone === true
-  );
-}
-
-function isIOS() {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent || "");
-}
-
-// VAPID key helper (base64url -> Uint8Array)
 function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-  return outputArray;
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
 }
 
-// Avoid dumping HTML error pages into UI
-function safeErrorText(e) {
-  const msg = String(e?.message || e || "").trim();
-  if (!msg) return "Unknown error";
-  const lower = msg.toLowerCase();
-  if (lower.includes("<!doctype html") || lower.includes("<html")) {
-    return "Server returned an HTML error (likely a 404/500). Check your endpoint / Netlify function path.";
-  }
-  return msg.length > 220 ? msg.slice(0, 220) + "…" : msg;
+function arrayBufferToBase64(buf) {
+  if (!buf) return ''
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
 }
 
-export default function SettingsPage() {
-  const nav = useNavigate();
+function safeJsonParse(text) {
+  try {
+    return { ok: true, value: JSON.parse(text) }
+  } catch {
+    return { ok: false, value: text }
+  }
+}
 
-  const [me, setMe] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // ✅ Theme
-  const [theme, setTheme] = useState(() => getTheme()); // "light" | "dark"
-  function setThemeAndApply(next) {
-    const applied = applyTheme(next);
-    setTheme(applied);
+export default function Settings() {
+  // ===== Theme =====
+  const [theme, setTheme] = useState(() => localStorage.getItem('tmd:theme') || 'dark')
+  const applyTheme = (t) => {
+    setTheme(t)
+    localStorage.setItem('tmd:theme', t)
+    // be resilient: support both "dark" class and data-theme patterns
+    document.documentElement.classList.toggle('dark', t === 'dark')
+    document.documentElement.dataset.theme = t
   }
 
-  // Notifications support (true Web Push requires PushManager)
-  const supported = useMemo(() => {
+  useEffect(() => {
+    applyTheme(theme)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ===== Auth/User =====
+  const [user, setUser] = useState(null)
+  const [userEmail, setUserEmail] = useState('')
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      const { data } = await supabase.auth.getUser()
+      if (!mounted) return
+      setUser(data?.user || null)
+      setUserEmail(data?.user?.email || '')
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  // ===== PWA / Push status =====
+  const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY || ''
+  const hasVapidKey = !!vapidPublicKey
+
+  const pushSupported = useMemo(() => {
     return (
-      typeof window !== "undefined" &&
-      "Notification" in window &&
-      "serviceWorker" in navigator &&
-      "PushManager" in window
-    );
-  }, []);
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      'serviceWorker' in navigator &&
+      'PushManager' in window
+    )
+  }, [])
 
-  // Default ON for everyone (device-local)
-  const [notifEnabled, setNotifEnabled] = useState(() => {
-    try {
-      const v = localStorage.getItem(LS_NOTIF_ENABLED);
-      if (v === null) return true; // ✅ default ON
-      return v === "1";
-    } catch {
-      return true;
-    }
-  });
-
-  const [notifMsg, setNotifMsg] = useState("");
-  const [notifBusy, setNotifBusy] = useState(false);
-
-  // Push subscription state
-  const [hasSub, setHasSub] = useState(false);
-  const [endpointPreview, setEndpointPreview] = useState("");
-
-  // Danger zone – delete
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [confirmText, setConfirmText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [deleteMsg, setDeleteMsg] = useState("");
-
-  // Auth load
+  const [installed, setInstalled] = useState(isStandaloneDisplayMode())
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!alive) return;
-        setMe(user || null);
-      } finally {
-        if (alive) setLoading(false);
+    const unsub = onDisplayModeChange((isInstalled) => setInstalled(!!isInstalled))
+    setInstalled(isStandaloneDisplayMode())
+    return () => unsub?.()
+  }, [])
+
+  const [enabled, setEnabled] = useState(() => {
+    const v = localStorage.getItem('tmd:push:enabled')
+    return v === null ? true : v === 'true'
+  })
+
+  const [permission, setPermission] = useState(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported'
+    return Notification.permission
+  })
+
+  const [subscription, setSubscription] = useState(null)
+  const [endpointPreview, setEndpointPreview] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [testBusy, setTestBusy] = useState(false)
+  const [statusMsg, setStatusMsg] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
+
+  const lastSavedEndpointRef = useRef('')
+
+  const refreshPermission = () => {
+    if (!('Notification' in window)) return setPermission('unsupported')
+    setPermission(Notification.permission)
+  }
+
+  const getRegistration = async () => {
+    // Prefer an existing ready SW (most reliable)
+    try {
+      const ready = await navigator.serviceWorker.ready
+      return ready
+    } catch {
+      // If not ready, try to get or register
+      const existing = await navigator.serviceWorker.getRegistration('/')
+      if (existing) return existing
+      // last resort: register at /sw.js (matches your Workbox setup)
+      return await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    }
+  }
+
+  const refreshSubscription = async () => {
+    if (!pushSupported) {
+      setSubscription(null)
+      setEndpointPreview('')
+      return
+    }
+    try {
+      const reg = await getRegistration()
+      const sub = await reg.pushManager.getSubscription()
+      setSubscription(sub)
+      const ep = sub?.endpoint || ''
+      setEndpointPreview(ep ? `${ep.slice(0, 70)}${ep.length > 70 ? '…' : ''}` : '')
+      if (ep) lastSavedEndpointRef.current = ep
+    } catch (e) {
+      setSubscription(null)
+      setEndpointPreview('')
+      setErrorMsg(e?.message || String(e))
+    }
+  }
+
+  useEffect(() => {
+    refreshPermission()
+    refreshSubscription()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushSupported])
+
+  // ===== DB write helpers =====
+  const saveSubscriptionToDb = async (sub) => {
+    if (!user?.id) throw new Error('Not signed in')
+    if (!sub?.endpoint) throw new Error('Missing subscription endpoint')
+
+    const row = {
+      user_id: user.id,
+      endpoint: sub.endpoint,
+      p256dh: arrayBufferToBase64(sub.getKey('p256dh')),
+      auth: arrayBufferToBase64(sub.getKey('auth')),
+      updated_at: new Date().toISOString()
+    }
+
+    // Primary path: upsert by endpoint (requires UNIQUE constraint on endpoint)
+    const upsertAttempt = await supabase
+      .from('push_subscriptions')
+      .upsert(row, { onConflict: 'endpoint' })
+
+    if (!upsertAttempt.error) return true
+
+    // Fallback path (prevents your “ON CONFLICT…” crash):
+    // If your table does NOT have a unique constraint yet, upsert will fail.
+    // We'll try: delete exact (user_id + endpoint), then insert.
+    const msg = upsertAttempt.error?.message || ''
+    if (msg.toLowerCase().includes('on conflict')) {
+      // best-effort cleanup then insert
+      await supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('endpoint', row.endpoint)
+
+      const ins = await supabase.from('push_subscriptions').insert(row)
+      if (ins.error) throw ins.error
+      return true
+    }
+
+    throw upsertAttempt.error
+  }
+
+  const deleteSubscriptionFromDb = async (endpoint) => {
+    if (!user?.id || !endpoint) return
+    await supabase.from('push_subscriptions').delete().eq('user_id', user.id).eq('endpoint', endpoint)
+  }
+
+  // ===== Main actions =====
+  const ensureSubscribed = async ({ forceReregister = false } = {}) => {
+    setBusy(true)
+    setErrorMsg('')
+    setStatusMsg('')
+
+    try {
+      if (!pushSupported) {
+        throw new Error('Push not supported in this browser/device context.')
       }
-    })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      setMe(session?.user || null);
-    });
-    return () => sub?.subscription?.unsubscribe?.();
-  }, []);
+      if (!hasVapidKey) {
+        throw new Error('Missing VITE_VAPID_PUBLIC_KEY (client). Add it to Netlify + local .env, then rebuild.')
+      }
+      if (!user?.id) {
+        throw new Error('You must be signed in to enable notifications.')
+      }
 
-  // Keep localStorage in sync
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_NOTIF_ENABLED, notifEnabled ? "1" : "0");
-    } catch {
-      // ignore
+      // Permission
+      refreshPermission()
+      let p = Notification.permission
+      if (p !== 'granted') {
+        p = await Notification.requestPermission()
+        setPermission(p)
+      }
+      if (p !== 'granted') {
+        throw new Error('Notification permission is not granted. Enable it in device/browser settings.')
+      }
+
+      // SW + subscription
+      const reg = await getRegistration()
+
+      let sub = await reg.pushManager.getSubscription()
+
+      if (forceReregister && sub) {
+        try {
+          await sub.unsubscribe()
+        } catch {}
+        sub = null
+      }
+
+      if (!sub) {
+        const appServerKey = urlBase64ToUint8Array(vapidPublicKey)
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appServerKey
+        })
+      }
+
+      setSubscription(sub)
+      setEndpointPreview(
+        sub?.endpoint ? `${sub.endpoint.slice(0, 70)}${sub.endpoint.length > 70 ? '…' : ''}` : ''
+      )
+
+      // Save to DB
+      await saveSubscriptionToDb(sub)
+
+      lastSavedEndpointRef.current = sub.endpoint
+      setStatusMsg(forceReregister ? 'Device re-registered and saved.' : 'Subscription saved.')
+      return true
+    } catch (e) {
+      setErrorMsg(e?.message || String(e))
+      return false
+    } finally {
+      setBusy(false)
+      refreshPermission()
+      refreshSubscription()
     }
-  }, [notifEnabled]);
+  }
 
-  const getReg = useCallback(async () => {
-    const reg = await navigator.serviceWorker.ready;
-    return reg;
-  }, []);
-
-  const refreshPushState = useCallback(async () => {
-    if (!supported) {
-      setHasSub(false);
-      setEndpointPreview("");
-      return;
-    }
+  const disableNotifications = async () => {
+    setBusy(true)
+    setErrorMsg('')
+    setStatusMsg('')
     try {
-      const reg = await getReg();
-      const sub = await reg.pushManager.getSubscription();
-      const ok = !!sub;
-      setHasSub(ok);
+      if (!pushSupported) return
+
+      const reg = await getRegistration()
+      const sub = await reg.pushManager.getSubscription()
+
       if (sub?.endpoint) {
-        const s = sub.endpoint;
-        setEndpointPreview(s.length > 64 ? s.slice(0, 64) + "…" : s);
-      } else {
-        setEndpointPreview("");
+        await deleteSubscriptionFromDb(sub.endpoint)
       }
-    } catch {
-      setHasSub(false);
-      setEndpointPreview("");
-    }
-  }, [supported, getReg]);
-
-  // Save subscription to DB (Fix #2: conflict on endpoint)
-  const saveSubscription = useCallback(
-    async (sub) => {
-      if (!me?.id) throw new Error("Not signed in");
-      if (!sub?.endpoint) throw new Error("Missing subscription endpoint");
-
-      const json = typeof sub.toJSON === "function" ? sub.toJSON() : null;
-      const keys = json?.keys || {};
-      const endpoint = sub.endpoint;
-      const p256dh = keys.p256dh;
-      const auth = keys.auth;
-
-      if (!p256dh || !auth) throw new Error("Missing subscription keys");
-
-      const payload = {
-        user_id: me.id,
-        endpoint,
-        p256dh,
-        auth,
-        updated_at: new Date().toISOString(),
-      };
-
-      // ✅ This requires a UNIQUE constraint/index on endpoint in Supabase:
-      // create unique index ... on push_subscriptions(endpoint);
-      const { error } = await supabase
-        .from("push_subscriptions")
-        .upsert(payload, { onConflict: "endpoint" });
-
-      if (error) throw error;
-      return endpoint;
-    },
-    [me?.id]
-  );
-
-  const ensureSubscribed = useCallback(
-    async ({ force = false } = {}) => {
-      setNotifMsg("");
-
-      if (!supported) {
-        setNotifMsg("Notifications aren’t supported on this browser/device.");
-        setHasSub(false);
-        setEndpointPreview("");
-        return;
-      }
-
-      if (!VAPID_PUBLIC_KEY) {
-        setNotifMsg("Missing VITE_VAPID_PUBLIC_KEY. Add it to Netlify + local env, then rebuild.");
-        return;
-      }
-
-      if (!me?.id) {
-        setNotifMsg("Sign in to register this device for notifications.");
-        return;
-      }
-
-      if (Notification.permission !== "granted") {
-        setNotifMsg("Permission not granted. Turn notifications on first.");
-        return;
-      }
-
-      setNotifBusy(true);
-      try {
-        const reg = await getReg();
-        let sub = await reg.pushManager.getSubscription();
-
-        if (force && sub) {
-          try {
-            await sub.unsubscribe();
-          } catch {
-            // ignore
-          }
-          sub = null;
-        }
-
-        if (!sub) {
-          sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-          });
-        }
-
-        const endpoint = await saveSubscription(sub);
-
-        setHasSub(true);
-        setEndpointPreview(endpoint.length > 64 ? endpoint.slice(0, 64) + "…" : endpoint);
-        setNotifMsg(force ? "Device re-registered for push ✅" : "Device registered for push ✅");
-      } catch (e) {
-        setHasSub(false);
-        setEndpointPreview("");
-        setNotifMsg(safeErrorText(e));
-      } finally {
-        setNotifBusy(false);
-      }
-    },
-    [supported, me?.id, getReg, saveSubscription]
-  );
-
-  const disableAndUnsubscribe = useCallback(async () => {
-    setNotifMsg("");
-    if (!supported) return;
-
-    setNotifBusy(true);
-    try {
-      const reg = await getReg();
-      const sub = await reg.pushManager.getSubscription();
-      const endpoint = sub?.endpoint;
 
       if (sub) {
         try {
-          await sub.unsubscribe();
-        } catch {
-          // ignore
-        }
+          await sub.unsubscribe()
+        } catch {}
       }
 
-      if (endpoint) {
-        // Best-effort cleanup in DB
-        await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
-      }
-
-      setHasSub(false);
-      setEndpointPreview("");
-      setNotifMsg("Notifications disabled on this device.");
+      setSubscription(null)
+      setEndpointPreview('')
+      setStatusMsg('Notifications disabled on this device.')
     } catch (e) {
-      setNotifMsg(safeErrorText(e));
+      setErrorMsg(e?.message || String(e))
     } finally {
-      setNotifBusy(false);
-    }
-  }, [supported, getReg]);
-
-  // Auto-refresh state and (if already granted) auto-register when default ON
-  useEffect(() => {
-    refreshPushState();
-
-    // If default ON and permission already granted, try to ensure we have a subscription saved
-    if (notifEnabled && supported && Notification.permission === "granted") {
-      // Don’t force a permission prompt here (no user gesture)
-      ensureSubscribed({ force: false }).catch(() => {});
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notifEnabled, supported, me?.id]);
-
-  async function testNotification() {
-    setNotifMsg("");
-    if (!supported) {
-      setNotifMsg("Notifications aren’t supported on this browser/device.");
-      return;
-    }
-    if (Notification.permission !== "granted") {
-      setNotifMsg("Permission not granted. Turn notifications on first.");
-      return;
-    }
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification("TryMeDating", {
-        body: "Test notification ✅",
-        icon: "/icons/icon-192.png",
-        badge: "/icons/icon-192.png",
-        tag: "tmd-test",
-        data: { url: "/" },
-      });
-      setNotifMsg("Test notification sent.");
-    } catch (e) {
-      setNotifMsg(safeErrorText(e));
+      setBusy(false)
+      refreshPermission()
+      refreshSubscription()
     }
   }
 
-  async function toggleNotifications(next) {
-    setNotifMsg("");
-
-    if (!supported) {
-      setNotifMsg("Notifications aren’t supported on this browser/device.");
-      setNotifEnabled(false);
-      return;
-    }
+  const onToggleEnabled = async (next) => {
+    setEnabled(next)
+    localStorage.setItem('tmd:push:enabled', String(next))
+    setErrorMsg('')
+    setStatusMsg('')
 
     if (next) {
-      if (isIOS() && !isStandalonePWA()) {
-        setNotifMsg("On iPhone: install the app (Share → Add to Home Screen) for best behavior.");
-      }
-
-      setNotifBusy(true);
-      try {
-        const perm = await Notification.requestPermission();
-        if (perm !== "granted") {
-          setNotifEnabled(false);
-          setNotifMsg("Permission denied. Enable notifications in your browser/device settings.");
-          return;
-        }
-        setNotifEnabled(true);
-
-        // ✅ Register device subscription + save to DB
-        await ensureSubscribed({ force: false });
-      } catch (e) {
-        setNotifEnabled(false);
-        setNotifMsg(safeErrorText(e));
-      } finally {
-        setNotifBusy(false);
-      }
+      await ensureSubscribed({ forceReregister: false })
     } else {
-      setNotifEnabled(false);
-      await disableAndUnsubscribe();
+      await disableNotifications()
     }
   }
 
-  async function handleDelete() {
-    setDeleteMsg("");
-    setDeleting(true);
+  const testNotification = async () => {
+    setTestBusy(true)
+    setErrorMsg('')
+    setStatusMsg('')
     try {
-      const res = await fetch("/.netlify/functions/delete-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({}),
-      });
+      if (!user?.id) throw new Error('Not signed in')
+      // NOTE: This must be POST. GET will give you a Netlify HTML/404 page.
+      const res = await fetch('/.netlify/functions/push-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientId: user.id,
+          body: '🔔 Test notification from Settings'
+        })
+      })
+
+      const text = await res.text()
+      const parsed = safeJsonParse(text)
 
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Delete failed (${res.status})`);
+        throw new Error(
+          parsed.ok
+            ? `Test failed (${res.status}): ${parsed.value?.error || JSON.stringify(parsed.value)}`
+            : `Test failed (${res.status}): ${String(parsed.value).slice(0, 160)}`
+        )
       }
 
-      await supabase.auth.signOut();
-      nav("/", { replace: true });
+      // If your function returns { ok, sent }, surface it
+      if (parsed.ok) {
+        setStatusMsg(`Test request sent. Server response: ${JSON.stringify(parsed.value)}`)
+      } else {
+        setStatusMsg('Test request sent.')
+      }
     } catch (e) {
-      setDeleteMsg(safeErrorText(e));
+      setErrorMsg(e?.message || String(e))
     } finally {
-      setDeleting(false);
+      setTestBusy(false)
     }
   }
 
-  if (loading) {
-    return (
-      <div className="container" style={{ padding: "28px 0" }}>
-        <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Settings</h1>
-        <div className="muted">Loading…</div>
-      </div>
-    );
-  }
+  // Keep subscription fresh if enabled
+  useEffect(() => {
+    if (!enabled) return
+    if (!user?.id) return
+    // light background refresh
+    refreshSubscription()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, user?.id])
 
-  const installed = isStandalonePWA();
-  const vapidSet = !!VAPID_PUBLIC_KEY;
+  const subscriptionYesNo = subscription?.endpoint ? 'yes' : 'no'
+  const installedYesNo = installed ? 'yes' : 'no'
+  const vapidYesNo = hasVapidKey ? 'set' : 'missing'
 
   return (
-    <div className="container" style={{ padding: "28px 0", maxWidth: 860 }}>
-      <h1 style={{ fontWeight: 900, marginBottom: 8 }}>Settings</h1>
+    <div className="page">
+      <div className="container" style={{ maxWidth: 980 }}>
+        <h1 className="h1">Settings</h1>
 
-      {/* ✅ Appearance */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          background: "var(--bg-light)",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontWeight: 800, marginBottom: 10 }}>Appearance</div>
-        <div className="muted" style={{ marginBottom: 10 }}>
-          Choose a theme for this device.
-        </div>
+        {/* Appearance */}
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-body">
+            <h2 className="h2">Appearance</h2>
+            <p className="muted">Choose a theme for this device.</p>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={`btn ${theme === "light" ? "btn-primary" : "btn-neutral"} btn-pill`}
-            onClick={() => setThemeAndApply("light")}
-            aria-pressed={theme === "light"}
-          >
-            Light
-          </button>
-
-          <button
-            type="button"
-            className={`btn ${theme === "dark" ? "btn-primary" : "btn-neutral"} btn-pill`}
-            onClick={() => setThemeAndApply("dark")}
-            aria-pressed={theme === "dark"}
-          >
-            Dark
-          </button>
-        </div>
-
-        <div className="helper-muted" style={{ marginTop: 10 }}>
-          Saved as <code>{theme}</code>.
-        </div>
-      </section>
-
-      {/* Notifications */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          background: "var(--bg-light)",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontWeight: 800, marginBottom: 10 }}>Notifications</div>
-
-        {!supported ? (
-          <div className="muted">This device/browser doesn’t support notifications.</div>
-        ) : (
-          <>
-            <div className="muted" style={{ marginBottom: 10, lineHeight: 1.5 }}>
-              Default is <b>ON</b>. You’ll still need to allow permission on each device.
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  fontWeight: 800,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={notifEnabled}
-                  disabled={notifBusy}
-                  onChange={(e) => toggleNotifications(e.target.checked)}
-                  style={{ width: 18, height: 18 }}
-                />
-                Enable notifications
-              </label>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button
-                  className="btn btn-neutral btn-pill"
-                  type="button"
-                  onClick={testNotification}
-                  disabled={!notifEnabled || notifBusy || Notification.permission !== "granted"}
-                >
-                  Test notification
-                </button>
-
-                <button
-                  className="btn btn-neutral btn-pill"
-                  type="button"
-                  onClick={() => ensureSubscribed({ force: true })}
-                  disabled={
-                    notifBusy ||
-                    !notifEnabled ||
-                    Notification.permission !== "granted" ||
-                    !vapidSet
-                  }
-                >
-                  Re-register device
-                </button>
-              </div>
-            </div>
-
-            <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-              Permission: <code>{Notification.permission}</code> • Subscription:{" "}
-              <code>{hasSub ? "yes" : "no"}</code> • Installed: <code>{installed ? "yes" : "no"}</code> •
-              VAPID key: <code>{vapidSet ? "set" : "missing"}</code>
-              {isIOS() ? <> • iPhone tip: install to Home Screen for best results</> : null}
-            </div>
-
-            {hasSub && endpointPreview ? (
-              <div className="helper-muted" style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5 }}>
-                Endpoint:<br />
-                <code style={{ wordBreak: "break-all" }}>{endpointPreview}</code>
-              </div>
-            ) : null}
-
-            {!vapidSet ? (
-              <div className="helper-muted" style={{ marginTop: 10 }}>
-                Missing <code>VITE_VAPID_PUBLIC_KEY</code>. Add it to Netlify + local <code>.env</code>, then rebuild.
-              </div>
-            ) : null}
-
-            {notifMsg ? (
-              <div className="helper-muted" style={{ marginTop: 10 }}>
-                {notifMsg}
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
-
-      {/* Account overview */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          background: "var(--bg-light)",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ fontWeight: 800, marginBottom: 10 }}>Account</div>
-        <div className="muted">Signed in as</div>
-        <div style={{ marginTop: 4 }}>
-          <code>{me?.email || me?.id}</code>
-        </div>
-      </section>
-
-      {/* Danger zone */}
-      <section
-        style={{
-          border: "1px solid var(--border)",
-          background: "var(--bg-light)",
-          borderRadius: 12,
-          padding: 16,
-        }}
-      >
-        <div style={{ fontWeight: 800, marginBottom: 6, color: "#b91c1c" }}>
-          Danger zone
-        </div>
-        <div className="muted" style={{ marginBottom: 10 }}>
-          Permanently delete your account and all associated data. This cannot be undone.
-        </div>
-
-        {!showDeleteConfirm ? (
-          <button className="btn btn-accent" type="button" onClick={() => setShowDeleteConfirm(true)}>
-            Delete my account
-          </button>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gap: 8,
-              border: "1px dashed var(--border)",
-              borderRadius: 12,
-              padding: 12,
-              maxWidth: 560,
-              background: "var(--bg-light)",
-            }}
-          >
-            <label className="form-label" style={{ fontWeight: 700 }}>
-              Type <code>DELETE</code> to confirm
-            </label>
-            <input
-              className="input"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="DELETE"
-            />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="row" style={{ gap: 10, marginTop: 10 }}>
               <button
-                className="btn btn-accent"
+                className={`btn btn-pill ${theme === 'light' ? 'btn-primary' : 'btn-neutral'}`}
+                onClick={() => applyTheme('light')}
                 type="button"
-                onClick={handleDelete}
-                disabled={deleting || confirmText.trim() !== "DELETE"}
               >
-                {deleting ? "Deleting…" : "Yes, delete my account"}
+                Light
               </button>
               <button
-                className="btn btn-neutral"
+                className={`btn btn-pill ${theme === 'dark' ? 'btn-primary' : 'btn-neutral'}`}
+                onClick={() => applyTheme('dark')}
                 type="button"
-                onClick={() => {
-                  setShowDeleteConfirm(false);
-                  setConfirmText("");
-                  setDeleteMsg("");
-                }}
-                disabled={deleting}
               >
-                Cancel
+                Dark
               </button>
             </div>
-            {deleteMsg ? (
-              <div className="helper-error" style={{ marginTop: 4 }}>
-                {deleteMsg}
-              </div>
-            ) : null}
+
+            <div className="muted" style={{ marginTop: 10 }}>
+              Saved as <b>{theme}</b>.
+            </div>
           </div>
-        )}
-      </section>
+        </div>
+
+        {/* Notifications */}
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-body">
+            <h2 className="h2">Notifications</h2>
+            <p className="muted">
+              Default is <b>ON</b>. You still need to allow permission on each device.
+            </p>
+
+            {!pushSupported && (
+              <div className="muted" style={{ marginTop: 10 }}>
+                Push is not supported in this browser context.
+              </div>
+            )}
+
+            <label className="row" style={{ alignItems: 'center', gap: 10, marginTop: 10 }}>
+              <input
+                type="checkbox"
+                checked={!!enabled}
+                onChange={(e) => onToggleEnabled(e.target.checked)}
+                disabled={!pushSupported || busy}
+              />
+              <span style={{ fontWeight: 700 }}>Enable notifications</span>
+            </label>
+
+            <div className="row" style={{ gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-neutral btn-pill"
+                type="button"
+                onClick={testNotification}
+                disabled={!enabled || !pushSupported || testBusy || busy}
+              >
+                {testBusy ? 'Testing…' : 'Test notification'}
+              </button>
+
+              <button
+                className="btn btn-neutral btn-pill"
+                type="button"
+                onClick={() => ensureSubscribed({ forceReregister: true })}
+                disabled={!enabled || !pushSupported || busy}
+              >
+                {busy ? 'Working…' : 'Re-register device'}
+              </button>
+            </div>
+
+            <div className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
+              Permission: <b>{permission}</b> • Subscription: <b>{subscriptionYesNo}</b> • Installed:{' '}
+              <b>{installedYesNo}</b> • VAPID key: <b>{vapidYesNo}</b>
+            </div>
+
+            {endpointPreview && (
+              <div className="muted" style={{ marginTop: 10 }}>
+                Endpoint: <span style={{ wordBreak: 'break-all' }}>{endpointPreview}</span>
+              </div>
+            )}
+
+            {statusMsg && (
+              <div className="muted" style={{ marginTop: 12 }}>
+                {statusMsg}
+              </div>
+            )}
+
+            {errorMsg && (
+              <div style={{ marginTop: 12, color: 'var(--colorDanger, #ef4444)', fontWeight: 600 }}>
+                {errorMsg}
+              </div>
+            )}
+
+            <div className="muted" style={{ marginTop: 12 }}>
+              <b>Important:</b> If your Netlify function log shows{' '}
+              <code>410 push subscription has unsubscribed or expired</code>, that means the server is pushing to
+              a dead subscription. Use <b>Re-register device</b> here, and you should also delete dead endpoints on
+              the server (see notes below).
+            </div>
+          </div>
+        </div>
+
+        {/* Account */}
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-body">
+            <h2 className="h2">Account</h2>
+            <div className="muted">Signed in as</div>
+            <div style={{ marginTop: 8, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+              {userEmail || '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Danger zone (kept simple so we don't break your existing flows) */}
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-body">
+            <h2 className="h2" style={{ color: 'var(--colorDanger, #ef4444)' }}>
+              Danger zone
+            </h2>
+            <p className="muted">
+              Permanently delete your account and all associated data. This cannot be undone.
+            </p>
+            <button
+              className="btn btn-pill"
+              style={{ background: 'var(--colorDanger, #ef4444)', color: '#fff' }}
+              type="button"
+              onClick={() => alert('Account deletion is not wired in this Settings page file.')}
+            >
+              Delete my account
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
-  );
+  )
 }
+
 
 
 
