@@ -152,8 +152,7 @@ const Btn = ({ onClick, label, tone = "primary", disabled, title }) => {
       : tone === "ghost"
       ? "var(--chat-ghost-bg)"
       : "var(--brand-teal)";
-  const fg =
-    tone === "ghost" ? "var(--chat-ghost-text)" : "#fff";
+  const fg = tone === "ghost" ? "var(--chat-ghost-text)" : "#fff";
 
   return (
     <button
@@ -355,8 +354,7 @@ function AttachmentPreview({ meta, mine, onDelete, deleting }) {
         {url ? (
           isPDF ? (
             <PdfThumb url={url} name={meta?.name || "document.pdf"} />
-          ) : meta?.type?.startsWith?.("image/") ||
-            /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "") ? (
+          ) : meta?.type?.startsWith?.("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(meta?.name || "") ? (
             <img
               src={url}
               alt={meta?.name || "image"}
@@ -425,9 +423,6 @@ export default function ChatDock(props) {
   const typingChannelRef = useRef(null);
   const lastTypingSentRef = useRef(0);
 
-  // Delete-last state
-  const [deleteBusy, setDeleteBusy] = useState(false);
-
   // Composer refs / responsive
   const textareaRef = useRef(null);
   const [isNarrow, setIsNarrow] = useState(false);
@@ -454,7 +449,6 @@ export default function ChatDock(props) {
     overflowX: "hidden",
     background: "var(--chat-list-bg)",
     minHeight: 140,
-
     display: "flex",
     flexDirection: "column",
     gap: 10,
@@ -588,9 +582,7 @@ export default function ChatDock(props) {
       const filter = `or=(and(${C.requester}.eq.${uid},${C.addressee}.eq.${peer}),and(${C.requester}.eq.${peer},${C.addressee}.eq.${uid}))`;
       const ch = supabase
         .channel(`conn:${uid}<->${peer}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () =>
-          fetchLatestConn(uid)
-        )
+        .on("postgres_changes", { event: "*", schema: "public", table: CONN_TABLE, filter }, () => fetchLatestConn(uid))
         .subscribe();
       return () => supabase.removeChannel(ch);
     },
@@ -659,10 +651,8 @@ export default function ChatDock(props) {
     fetchMessages();
     const ch = supabase
       .channel(`msgs:${conn.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` },
-        () => fetchMessages()
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `connection_id=eq.${conn.id}` }, () =>
+        fetchMessages()
       )
       .subscribe();
     return () => supabase.removeChannel(ch);
@@ -809,9 +799,7 @@ export default function ChatDock(props) {
 
       const recip = otherPartyId(conn, myId);
       const tomb =
-        tagStart("deleted") +
-        encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name })) +
-        CLOSE;
+        tagStart("deleted") + encodeURIComponent(JSON.stringify({ path: meta.path, name: meta.name })) + CLOSE;
       const { error: msgErr } = await supabase.from("messages").insert({
         connection_id: conn.id,
         sender: myId,
@@ -872,12 +860,7 @@ export default function ChatDock(props) {
         return;
       }
 
-      if (
-        row &&
-        row[C.status] === "pending" &&
-        toId(row[C.requester]) === peer &&
-        toId(row[C.addressee]) === myId
-      ) {
+      if (row && row[C.status] === "pending" && toId(row[C.requester]) === peer && toId(row[C.addressee]) === myId) {
         await acceptRequest(row.id);
         return;
       }
@@ -980,37 +963,14 @@ export default function ChatDock(props) {
     }
   };
 
-  /* -------- Delete my last message (calls RPC) -------- */
-  const canDeleteLast = useMemo(
-    () => !!myId && !!conn?.id && items.some((m) => isMine(m)),
-    [myId, conn?.id, items]
-  );
-
-  const deleteMyLastMessage = async () => {
-    if (!conn?.id || !myId) return;
-    if (!confirm("Delete your last message for this conversation?")) return;
-    setDeleteBusy(true);
-    try {
-      const { error } = await supabase.rpc("tmd_delete_last_message", { p_connection_id: conn.id });
-      if (error) throw error;
-      await fetchMessages();
-      onRead?.();
-    } catch (e) {
-      alert(e?.message || "Failed to delete last message.");
-      console.error("[delete last message]", e);
-    } finally {
-      setDeleteBusy(false);
-    }
-  };
-
   // ✅ Auto-grow textarea so users can see what they’re typing
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "0px";
-    const cap = isNarrow ? 220 : 160;
+    const cap = isNarrow ? 260 : 200; // ⬅️ higher cap so it feels less cramped
     const next = Math.min(el.scrollHeight || 0, cap);
-    el.style.height = `${Math.max(next, 44)}px`;
+    el.style.height = `${Math.max(next, 54)}px`; // ⬅️ taller minimum height
   }, [text, isNarrow]);
 
   /* connection controls */
@@ -1254,7 +1214,7 @@ export default function ChatDock(props) {
             style={{
               display: "grid",
               gridTemplateRows: "1fr auto",
-              gap: 8,
+              gap: 10,
               flex: 1,
               minHeight: 0,
               minWidth: 0,
@@ -1338,7 +1298,7 @@ export default function ChatDock(props) {
               </div>
             )}
 
-            {/* ✅ Mobile composer: textarea gets full width, actions below */}
+            {/* ✅ Composer: remove Delete last + expand textarea */}
             <form
               onSubmit={send}
               onDragOver={(e) => e.preventDefault()}
@@ -1347,19 +1307,15 @@ export default function ChatDock(props) {
                 isNarrow
                   ? {
                       display: "grid",
-                      gridTemplateColumns: "auto 1fr",
+                      gridTemplateColumns: "1fr",
                       gridTemplateRows: "auto auto",
                       gap: 8,
-                      alignItems: "end",
+                      alignItems: "stretch",
                       minWidth: 0,
                     }
-                  : { display: "flex", gap: 8, alignItems: "center", minWidth: 0 }
+                  : { display: "flex", gap: 10, alignItems: "flex-end", minWidth: 0 }
               }
             >
-              <div style={isNarrow ? { gridColumn: "1 / 2", gridRow: "1 / 2" } : undefined}>
-                <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
-              </div>
-
               <textarea
                 ref={textareaRef}
                 rows={2}
@@ -1377,19 +1333,20 @@ export default function ChatDock(props) {
                 }}
                 disabled={uploading}
                 style={{
-                  gridColumn: isNarrow ? "2 / 3" : undefined,
+                  gridColumn: isNarrow ? "1 / 2" : undefined,
                   gridRow: isNarrow ? "1 / 2" : undefined,
                   flex: 1,
+                  width: "100%",
                   minWidth: 0,
                   border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  padding: "10px 12px",
+                  borderRadius: 14,
+                  padding: "12px 14px",
                   fontSize: isNarrow ? 16 : 14,
                   resize: "none",
                   lineHeight: 1.35,
                   overflowY: "auto",
-                  minHeight: 44,
-                  maxHeight: isNarrow ? 220 : 160,
+                  minHeight: 54,
+                  maxHeight: isNarrow ? 260 : 200,
                   background: "var(--chat-input-bg)",
                   color: "var(--chat-input-text)",
                 }}
@@ -1398,31 +1355,25 @@ export default function ChatDock(props) {
               <div
                 style={
                   isNarrow
-                    ? { gridColumn: "1 / 3", gridRow: "2 / 3", display: "flex", gap: 8, justifyContent: "flex-end" }
-                    : { display: "flex", gap: 8, alignItems: "center" }
+                    ? {
+                        gridColumn: "1 / 2",
+                        gridRow: "2 / 3",
+                        display: "flex",
+                        gap: 10,
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }
+                    : { display: "flex", gap: 10, alignItems: "center" }
                 }
               >
-                <button
-                  type="button"
-                  onClick={deleteMyLastMessage}
-                  disabled={!canDeleteLast || deleteBusy || uploading}
-                  title="Delete your last message in this conversation"
-                  className="btn btn-neutral btn-pill"
-                  style={{
-                    opacity: !canDeleteLast || deleteBusy || uploading ? 0.6 : 1,
-                    flex: "0 0 auto",
-                    padding: isNarrow ? "10px 12px" : undefined,
-                  }}
-                >
-                  {isNarrow ? "🗑️" : deleteBusy ? "Deleting…" : "Delete last"}
-                </button>
+                <AttachmentButton onPick={pickAttachment} disabled={!conn?.id || uploading} />
 
                 <button
                   type="submit"
                   disabled={!canSend || uploading}
                   style={{
-                    padding: "10px 14px",
-                    borderRadius: 12,
+                    padding: "12px 16px",
+                    borderRadius: 14,
                     background: !canSend || uploading ? "var(--chat-disabled-bg)" : "var(--chat-send-bg)",
                     color: "#fff",
                     border: "none",
@@ -1430,6 +1381,7 @@ export default function ChatDock(props) {
                     fontWeight: 900,
                     flex: "0 0 auto",
                     opacity: !canSend || uploading ? 0.75 : 1,
+                    minWidth: 92,
                   }}
                 >
                   Send
