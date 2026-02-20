@@ -1,36 +1,19 @@
 /* eslint-disable no-restricted-globals */
-import {
-  precacheAndRoute,
-  cleanupOutdatedCaches,
-  createHandlerBoundToURL
-} from 'workbox-precaching'
+import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
+import { clientsClaim } from 'workbox-core'
 import { registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkOnly } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 
-// ------------------------------------------------------------
-// IMPORTANT:
-// Do NOT auto-call skipWaiting() / clientsClaim().
-//
-// On Android (installed PWA), Chrome can show a system message like:
-// "This site has been updated in the background" when a new SW takes
-// control while the app is closed.
-// We avoid that by using the normal SW lifecycle.
-//
-// If you ever want to force-activate a waiting SW, have the app post:
-// navigator.serviceWorker?.controller?.postMessage({ type: 'SKIP_WAITING' })
-// ------------------------------------------------------------
-self.addEventListener('message', (event) => {
-  if (event?.data?.type === 'SKIP_WAITING') {
-    self.skipWaiting()
-  }
-})
+// Take control quickly
+self.skipWaiting()
+clientsClaim()
 
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST || [])
 
-// SPA navigation fallback (same denylist you had)
+// SPA navigation fallback
 const denylist = [
   /\/auth\//i,
   /\/rest\//i,
@@ -74,63 +57,86 @@ registerRoute(
   new NetworkOnly({ cacheName: 'supabase-rest' })
 )
 
-// ===== PUSH NOTIFICATIONS (works when app is closed) =====
-//
-// Your manifest shows icons like /icons/icon-192.png and /icons/icon-512.png.
-// Using those here ensures Android shows the app icon instead of a generic one.
-const PUSH_ICON = '/icons/icon-192.png'
-const PUSH_BADGE = '/icons/icon-192.png' // you can swap to a dedicated small badge if you add one
+/* =======================
+   PUSH NOTIFICATIONS
+   (works when app is closed)
+   ======================= */
+
+function safeJsonFromPush(event) {
+  try {
+    if (!event?.data) return {}
+    // Prefer JSON payload
+    return event.data.json()
+  } catch {
+    try {
+      const t = event?.data?.text?.() || ''
+      return { title: 'TryMeDating', body: t || 'New message' }
+    } catch {
+      return {}
+    }
+  }
+}
 
 self.addEventListener('push', (event) => {
-  let data = {}
-  try {
-    data = event.data ? event.data.json() : {}
-  } catch {
-    data = { title: 'TryMeDating', body: event.data ? event.data.text() : 'New notification' }
-  }
+  event.waitUntil(
+    (async () => {
+      const data = safeJsonFromPush(event)
 
-  const title = data.title || 'TryMeDating'
-  const body = data.body || 'New message'
-  const url = data.url || '/connections'
+      const title = data.title || 'TryMeDating'
+      const body = data.body || 'New message'
+      const rawUrl = data.url || '/connections'
+      const url = new URL(rawUrl, self.location.origin).href
 
-  const options = {
-    body,
-    tag: data.tag || 'tmd:msg',
-    renotify: true,
-    data: { url },
+      // IMPORTANT:
+      // - icon = the big icon in the notification drawer
+      // - badge = the small monochrome-ish icon on Android status bar
+      // If badge isn’t valid/usable, Android often shows a generic bell.
+      const options = {
+        body,
+        tag: data.tag || 'tmd:msg',
+        renotify: true,
+        data: { url },
 
-    // Use real app icons (must exist in /public/icons)
-    icon: data.icon || PUSH_ICON,
-    badge: data.badge || PUSH_BADGE
-  }
+        // ✅ Use icons that you DO have
+        icon: '/icons/icon-192.png',
+        badge: '/icons/maskable-192.png'
+      }
 
-  event.waitUntil(self.registration.showNotification(title, options))
+      try {
+        await self.registration.showNotification(title, options)
+      } catch (err) {
+        // If anything goes wrong, show *something* so Chrome won't fall back to
+        // “This site has been updated in the background”
+        await self.registration.showNotification('TryMeDating', {
+          body: 'New message',
+          data: { url }
+        })
+      }
+    })()
+  )
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const targetUrl = event.notification?.data?.url || '/'
+  const url = event.notification?.data?.url || new URL('/', self.location.origin).href
 
   event.waitUntil(
     (async () => {
       const allClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
 
-      // If a tab/PWA is already open, focus it then navigate
       for (const client of allClients) {
         try {
           const u = new URL(client.url)
           if (u.origin === self.location.origin) {
             await client.focus()
-            client.navigate(targetUrl).catch(() => {})
+            client.navigate(url).catch(() => {})
             return
           }
         } catch {}
       }
 
-      // Otherwise open a new window
-      await self.clients.openWindow(targetUrl)
+      await self.clients.openWindow(url)
     })()
   )
 })
-
 
