@@ -34,7 +34,6 @@ export default function Settings() {
   const applyTheme = (t) => {
     setTheme(t)
     localStorage.setItem('tmd:theme', t)
-    // be resilient: support both "dark" class and data-theme patterns
     document.documentElement.classList.toggle('dark', t === 'dark')
     document.documentElement.dataset.theme = t
   }
@@ -98,7 +97,10 @@ export default function Settings() {
   const [statusMsg, setStatusMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
+  const [swInfo, setSwInfo] = useState({ scriptURL: '', state: '' })
+
   const lastSavedEndpointRef = useRef('')
+  const autoEnsuredOnceRef = useRef(false)
 
   const refreshPermission = () => {
     if (!('Notification' in window)) return setPermission('unsupported')
@@ -111,11 +113,26 @@ export default function Settings() {
       const ready = await navigator.serviceWorker.ready
       return ready
     } catch {
-      // If not ready, try to get or register
       const existing = await navigator.serviceWorker.getRegistration('/')
       if (existing) return existing
-      // last resort: register at /sw.js (matches your Workbox setup)
       return await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    }
+  }
+
+  const refreshSwInfo = async () => {
+    if (!('serviceWorker' in navigator)) {
+      setSwInfo({ scriptURL: '', state: '' })
+      return
+    }
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/')
+      const active = reg?.active || reg?.waiting || reg?.installing
+      setSwInfo({
+        scriptURL: active?.scriptURL || '',
+        state: active?.state || ''
+      })
+    } catch {
+      setSwInfo({ scriptURL: '', state: '' })
     }
   }
 
@@ -129,9 +146,12 @@ export default function Settings() {
       const reg = await getRegistration()
       const sub = await reg.pushManager.getSubscription()
       setSubscription(sub)
+
       const ep = sub?.endpoint || ''
       setEndpointPreview(ep ? `${ep.slice(0, 70)}${ep.length > 70 ? '…' : ''}` : '')
       if (ep) lastSavedEndpointRef.current = ep
+
+      await refreshSwInfo()
     } catch (e) {
       setSubscription(null)
       setEndpointPreview('')
@@ -145,7 +165,7 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pushSupported])
 
-  // ===== DB write helpers =====
+  // ===== DB write helpers (NO ON CONFLICT / NO UPSERT) =====
   const saveSubscriptionToDb = async (sub) => {
     if (!user?.id) throw new Error('Not signed in')
     if (!sub?.endpoint) throw new Error('Missing subscription endpoint')
@@ -158,31 +178,62 @@ export default function Settings() {
       updated_at: new Date().toISOString()
     }
 
-    // Primary path: upsert by endpoint (requires UNIQUE constraint on endpoint)
-    const upsertAttempt = await supabase
+    // 1) If endpoint exists for this user, UPDATE it
+    // 2) Else INSERT it
+    // This works whether or not you added a UNIQUE index on endpoint.
+    const { data: existing, error: selErr } = await supabase
       .from('push_subscriptions')
-      .upsert(row, { onConflict: 'endpoint' })
+      .select('id, user_id')
+      .eq('endpoint', row.endpoint)
+      .limit(1)
 
-    if (!upsertAttempt.error) return true
+    if (selErr) throw selErr
 
-    // Fallback path (prevents your “ON CONFLICT…” crash):
-    // If your table does NOT have a unique constraint yet, upsert will fail.
-    // We'll try: delete exact (user_id + endpoint), then insert.
-    const msg = upsertAttempt.error?.message || ''
-    if (msg.toLowerCase().includes('on conflict')) {
-      // best-effort cleanup then insert
-      await supabase
+    if (existing && existing.length > 0) {
+      const owner = existing[0]?.user_id
+      if (owner && owner !== user.id) {
+        throw new Error('Subscription endpoint already exists for another user (unexpected).')
+      }
+
+      const upd = await supabase
         .from('push_subscriptions')
-        .delete()
-        .eq('user_id', user.id)
+        .update({
+          p256dh: row.p256dh,
+          auth: row.auth,
+          updated_at: row.updated_at
+        })
         .eq('endpoint', row.endpoint)
+        .eq('user_id', user.id)
 
-      const ins = await supabase.from('push_subscriptions').insert(row)
-      if (ins.error) throw ins.error
+      if (upd.error) throw upd.error
       return true
     }
 
-    throw upsertAttempt.error
+    // Try insert
+    const ins = await supabase.from('push_subscriptions').insert(row)
+
+    // If you added UNIQUE(endpoint) and we raced a duplicate, fall back to UPDATE
+    if (ins.error) {
+      const msg = (ins.error?.message || '').toLowerCase()
+      if (msg.includes('duplicate') || msg.includes('unique')) {
+        const upd = await supabase
+          .from('push_subscriptions')
+          .update({
+            p256dh: row.p256dh,
+            auth: row.auth,
+            updated_at: row.updated_at
+          })
+          .eq('endpoint', row.endpoint)
+          .eq('user_id', user.id)
+
+        if (upd.error) throw upd.error
+        return true
+      }
+
+      throw ins.error
+    }
+
+    return true
   }
 
   const deleteSubscriptionFromDb = async (endpoint) => {
@@ -197,19 +248,16 @@ export default function Settings() {
     setStatusMsg('')
 
     try {
-      if (!pushSupported) {
-        throw new Error('Push not supported in this browser/device context.')
-      }
+      if (!pushSupported) throw new Error('Push not supported in this browser/device context.')
       if (!hasVapidKey) {
         throw new Error('Missing VITE_VAPID_PUBLIC_KEY (client). Add it to Netlify + local .env, then rebuild.')
       }
-      if (!user?.id) {
-        throw new Error('You must be signed in to enable notifications.')
-      }
+      if (!user?.id) throw new Error('You must be signed in to enable notifications.')
 
-      // Permission
       refreshPermission()
       let p = Notification.permission
+
+      // Request permission only from a user gesture (this function is called from buttons/toggle)
       if (p !== 'granted') {
         p = await Notification.requestPermission()
         setPermission(p)
@@ -218,12 +266,15 @@ export default function Settings() {
         throw new Error('Notification permission is not granted. Enable it in device/browser settings.')
       }
 
-      // SW + subscription
       const reg = await getRegistration()
-
       let sub = await reg.pushManager.getSubscription()
 
-      if (forceReregister && sub) {
+      // IMPORTANT: if we’re forcing a re-register, delete the OLD endpoint from DB first
+      if (forceReregister && sub?.endpoint) {
+        const oldEndpoint = sub.endpoint
+        try {
+          await deleteSubscriptionFromDb(oldEndpoint)
+        } catch {}
         try {
           await sub.unsubscribe()
         } catch {}
@@ -243,11 +294,11 @@ export default function Settings() {
         sub?.endpoint ? `${sub.endpoint.slice(0, 70)}${sub.endpoint.length > 70 ? '…' : ''}` : ''
       )
 
-      // Save to DB
       await saveSubscriptionToDb(sub)
 
       lastSavedEndpointRef.current = sub.endpoint
       setStatusMsg(forceReregister ? 'Device re-registered and saved.' : 'Subscription saved.')
+      await refreshSwInfo()
       return true
     } catch (e) {
       setErrorMsg(e?.message || String(e))
@@ -310,7 +361,7 @@ export default function Settings() {
     setStatusMsg('')
     try {
       if (!user?.id) throw new Error('Not signed in')
-      // NOTE: This must be POST. GET will give you a Netlify HTML/404 page.
+
       const res = await fetch('/.netlify/functions/push-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -331,12 +382,7 @@ export default function Settings() {
         )
       }
 
-      // If your function returns { ok, sent }, surface it
-      if (parsed.ok) {
-        setStatusMsg(`Test request sent. Server response: ${JSON.stringify(parsed.value)}`)
-      } else {
-        setStatusMsg('Test request sent.')
-      }
+      setStatusMsg(parsed.ok ? `Test request sent. Server: ${JSON.stringify(parsed.value)}` : 'Test request sent.')
     } catch (e) {
       setErrorMsg(e?.message || String(e))
     } finally {
@@ -344,14 +390,20 @@ export default function Settings() {
     }
   }
 
-  // Keep subscription fresh if enabled
+  // If enabled + permission already granted, auto-ensure a subscription once (no permission prompts)
   useEffect(() => {
     if (!enabled) return
+    if (!pushSupported) return
+    if (!hasVapidKey) return
     if (!user?.id) return
-    // light background refresh
-    refreshSubscription()
+    if (permission !== 'granted') return
+    if (autoEnsuredOnceRef.current) return
+
+    autoEnsuredOnceRef.current = true
+    // no force re-register here; just make sure we have a sub + it’s saved
+    ensureSubscribed({ forceReregister: false }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, user?.id])
+  }, [enabled, pushSupported, hasVapidKey, user?.id, permission])
 
   const subscriptionYesNo = subscription?.endpoint ? 'yes' : 'no'
   const installedYesNo = installed ? 'yes' : 'no'
@@ -440,6 +492,15 @@ export default function Settings() {
               <b>{installedYesNo}</b> • VAPID key: <b>{vapidYesNo}</b>
             </div>
 
+            {(swInfo.scriptURL || swInfo.state) && (
+              <div className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
+                SW: <b>{swInfo.state || 'unknown'}</b>{' '}
+                {swInfo.scriptURL ? (
+                  <span style={{ wordBreak: 'break-all' }}>• {swInfo.scriptURL}</span>
+                ) : null}
+              </div>
+            )}
+
             {endpointPreview && (
               <div className="muted" style={{ marginTop: 10 }}>
                 Endpoint: <span style={{ wordBreak: 'break-all' }}>{endpointPreview}</span>
@@ -460,9 +521,14 @@ export default function Settings() {
 
             <div className="muted" style={{ marginTop: 12 }}>
               <b>Important:</b> If your Netlify function log shows{' '}
-              <code>410 push subscription has unsubscribed or expired</code>, that means the server is pushing to
-              a dead subscription. Use <b>Re-register device</b> here, and you should also delete dead endpoints on
-              the server (see notes below).
+              <code>410 push subscription has unsubscribed or expired</code>, that endpoint is dead.
+              This page now removes the old endpoint from Supabase when you <b>Re-register device</b>.
+            </div>
+
+            <div className="muted" style={{ marginTop: 12 }}>
+              <b>Note:</b> The “This site has been updated in the background” notification is a <b>browser</b>
+              update message (Chrome), not your message push. Once real push is delivering, those message
+              notifications will show your app icon from the service worker.
             </div>
           </div>
         </div>
@@ -478,15 +544,13 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Danger zone (kept simple so we don't break your existing flows) */}
+        {/* Danger zone */}
         <div className="card" style={{ marginTop: 16 }}>
           <div className="card-body">
             <h2 className="h2" style={{ color: 'var(--colorDanger, #ef4444)' }}>
               Danger zone
             </h2>
-            <p className="muted">
-              Permanently delete your account and all associated data. This cannot be undone.
-            </p>
+            <p className="muted">Permanently delete your account and all associated data. This cannot be undone.</p>
             <button
               className="btn btn-pill"
               style={{ background: 'var(--colorDanger, #ef4444)', color: '#fff' }}
