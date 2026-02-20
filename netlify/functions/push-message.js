@@ -1,12 +1,10 @@
 const webpush = require("web-push");
 const { createClient } = require("@supabase/supabase-js");
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const serviceKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE; // support either env var name
-
-const supabase = createClient(supabaseUrl, serviceKey);
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 function json(statusCode, body) {
   return {
@@ -18,7 +16,7 @@ function json(statusCode, body) {
 
 exports.handler = async (event) => {
   try {
-    // Optional shared secret so random callers can’t hit this endpoint
+    // Optional shared secret
     const secret = event.headers["x-tmd-secret"];
     if (process.env.PUSH_WEBHOOK_SECRET && secret !== process.env.PUSH_WEBHOOK_SECRET) {
       return json(401, { error: "Unauthorized" });
@@ -37,31 +35,32 @@ exports.handler = async (event) => {
 
     if (!recipientId) return json(400, { error: "Missing recipientId" });
 
-    // Configure VAPID
+    // VAPID
     webpush.setVapidDetails(
       process.env.VAPID_SUBJECT || "mailto:support@trymedating.com",
       process.env.VAPID_PUBLIC_KEY,
       process.env.VAPID_PRIVATE_KEY
     );
 
-    // Pull all subscriptions for this recipient
+    // Load subscriptions
     const { data: subs, error } = await supabase
       .from("push_subscriptions")
       .select("endpoint, p256dh, auth")
       .eq("user_id", recipientId);
 
     if (error) throw error;
-    if (!subs?.length) return json(200, { ok: true, sent: 0, removed: 0, note: "No subscriptions" });
+    if (!subs?.length) return json(200, { ok: true, sent: 0, deleted: 0, note: "No subscriptions" });
 
     const notif = {
-      title: "New message",
-      body: text?.startsWith?.("[[file:") ? "📎 Attachment" : String(text).slice(0, 120),
+      title: "TryMeDating",
+      body: String(text).startsWith("[[file:") ? "📎 Attachment" : String(text).slice(0, 120),
       url: "/connections",
       tag: `msg:${senderId || "unknown"}`,
     };
 
     let sent = 0;
-    let removed = 0;
+    let deleted = 0;
+    let failed = 0;
 
     for (const s of subs) {
       const subscription = {
@@ -70,30 +69,30 @@ exports.handler = async (event) => {
       };
 
       try {
-        await webpush.sendNotification(subscription, JSON.stringify(notif));
+        // Make delivery more “immediate” on mobile networks
+        await webpush.sendNotification(subscription, JSON.stringify(notif), {
+          TTL: 60 * 60,          // 1 hour
+          urgency: "high",
+        });
         sent++;
       } catch (e) {
+        failed++;
         const code = e?.statusCode;
-        const msg = e?.body || e?.message || "Push failed";
 
-        console.log("Push failed:", code, msg);
-
-        // AUTO-DELETE dead subscriptions
+        // ✅ AUTO-DELETE dead endpoints so your DB doesn’t rot
         if (code === 410 || code === 404) {
-          try {
-            await supabase
-              .from("push_subscriptions")
-              .delete()
-              .eq("endpoint", s.endpoint);
-            removed++;
-          } catch (delErr) {
-            console.log("Failed to delete dead subscription:", delErr?.message || delErr);
-          }
+          await supabase
+            .from("push_subscriptions")
+            .delete()
+            .eq("endpoint", s.endpoint);
+          deleted++;
         }
+
+        console.log("Push failed:", code, e?.body || e?.message);
       }
     }
 
-    return json(200, { ok: true, sent, removed, total: subs.length });
+    return json(200, { ok: true, sent, failed, deleted });
   } catch (e) {
     console.error("push-message error:", e);
     return json(500, { error: e?.message || "Server error" });
