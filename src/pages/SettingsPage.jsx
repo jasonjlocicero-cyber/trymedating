@@ -28,6 +28,8 @@ function safeJsonParse(text) {
   }
 }
 
+const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
 export default function Settings() {
   // ===== Theme =====
   const [theme, setTheme] = useState(() => localStorage.getItem('tmd:theme') || 'dark')
@@ -97,43 +99,91 @@ export default function Settings() {
   const [statusMsg, setStatusMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
-  const [swInfo, setSwInfo] = useState({ scriptURL: '', state: '' })
+  // SW diagnostics
+  const [swInfo, setSwInfo] = useState({
+    controller: '',
+    active: '',
+    waiting: '',
+    scope: '',
+  })
 
   const lastSavedEndpointRef = useRef('')
-  const autoEnsuredOnceRef = useRef(false)
 
   const refreshPermission = () => {
     if (!('Notification' in window)) return setPermission('unsupported')
     setPermission(Notification.permission)
   }
 
-  const getRegistration = async () => {
-    // Prefer an existing ready SW (most reliable)
-    try {
-      const ready = await navigator.serviceWorker.ready
-      return ready
-    } catch {
-      const existing = await navigator.serviceWorker.getRegistration('/')
-      if (existing) return existing
-      return await navigator.serviceWorker.register('/sw.js', { scope: '/' })
-    }
-  }
-
   const refreshSwInfo = async () => {
     if (!('serviceWorker' in navigator)) {
-      setSwInfo({ scriptURL: '', state: '' })
+      setSwInfo({ controller: '', active: '', waiting: '', scope: '' })
       return
     }
     try {
       const reg = await navigator.serviceWorker.getRegistration('/')
-      const active = reg?.active || reg?.waiting || reg?.installing
-      setSwInfo({
-        scriptURL: active?.scriptURL || '',
-        state: active?.state || ''
-      })
+      const controller = navigator.serviceWorker.controller?.scriptURL || ''
+      const active = reg?.active?.scriptURL || ''
+      const waiting = reg?.waiting?.scriptURL || ''
+      const scope = reg?.scope || ''
+      setSwInfo({ controller, active, waiting, scope })
     } catch {
-      setSwInfo({ scriptURL: '', state: '' })
+      setSwInfo({ controller: '', active: '', waiting: '', scope: '' })
     }
+  }
+
+  const waitForControllerChange = async (timeoutMs = 6000) => {
+    if (!('serviceWorker' in navigator)) return false
+    return await new Promise((resolve) => {
+      let done = false
+      const t = setTimeout(() => {
+        if (done) return
+        done = true
+        resolve(false)
+      }, timeoutMs)
+
+      const onChange = () => {
+        if (done) return
+        done = true
+        clearTimeout(t)
+        navigator.serviceWorker.removeEventListener('controllerchange', onChange)
+        resolve(true)
+      }
+
+      navigator.serviceWorker.addEventListener('controllerchange', onChange)
+    })
+  }
+
+  const activateWaitingIfAny = async (reg) => {
+    if (!reg?.waiting) return false
+    try {
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+      const changed = await waitForControllerChange(6000)
+      await wait(250)
+      return changed
+    } catch {
+      return false
+    }
+  }
+
+  const getRegistration = async ({ activateWaiting = true } = {}) => {
+    // Always work at root scope for PWA push
+    let reg = await navigator.serviceWorker.getRegistration('/')
+    if (!reg) {
+      reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    }
+
+    // If there’s a waiting SW, activate it (optional)
+    if (activateWaiting) {
+      await activateWaitingIfAny(reg)
+      reg = await navigator.serviceWorker.getRegistration('/')
+    }
+
+    // Ensure ready
+    try {
+      await navigator.serviceWorker.ready
+    } catch {}
+
+    return reg
   }
 
   const refreshSubscription = async () => {
@@ -143,15 +193,12 @@ export default function Settings() {
       return
     }
     try {
-      const reg = await getRegistration()
+      const reg = await getRegistration({ activateWaiting: false })
       const sub = await reg.pushManager.getSubscription()
       setSubscription(sub)
-
       const ep = sub?.endpoint || ''
       setEndpointPreview(ep ? `${ep.slice(0, 70)}${ep.length > 70 ? '…' : ''}` : '')
       if (ep) lastSavedEndpointRef.current = ep
-
-      await refreshSwInfo()
     } catch (e) {
       setSubscription(null)
       setEndpointPreview('')
@@ -162,10 +209,11 @@ export default function Settings() {
   useEffect(() => {
     refreshPermission()
     refreshSubscription()
+    refreshSwInfo()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pushSupported])
 
-  // ===== DB write helpers (NO ON CONFLICT / NO UPSERT) =====
+  // ===== DB write helpers =====
   const saveSubscriptionToDb = async (sub) => {
     if (!user?.id) throw new Error('Not signed in')
     if (!sub?.endpoint) throw new Error('Missing subscription endpoint')
@@ -175,65 +223,23 @@ export default function Settings() {
       endpoint: sub.endpoint,
       p256dh: arrayBufferToBase64(sub.getKey('p256dh')),
       auth: arrayBufferToBase64(sub.getKey('auth')),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     }
 
-    // 1) If endpoint exists for this user, UPDATE it
-    // 2) Else INSERT it
-    // This works whether or not you added a UNIQUE index on endpoint.
-    const { data: existing, error: selErr } = await supabase
-      .from('push_subscriptions')
-      .select('id, user_id')
-      .eq('endpoint', row.endpoint)
-      .limit(1)
+    // Primary path: upsert by endpoint (requires UNIQUE constraint on endpoint)
+    const upsertAttempt = await supabase.from('push_subscriptions').upsert(row, { onConflict: 'endpoint' })
+    if (!upsertAttempt.error) return true
 
-    if (selErr) throw selErr
-
-    if (existing && existing.length > 0) {
-      const owner = existing[0]?.user_id
-      if (owner && owner !== user.id) {
-        throw new Error('Subscription endpoint already exists for another user (unexpected).')
-      }
-
-      const upd = await supabase
-        .from('push_subscriptions')
-        .update({
-          p256dh: row.p256dh,
-          auth: row.auth,
-          updated_at: row.updated_at
-        })
-        .eq('endpoint', row.endpoint)
-        .eq('user_id', user.id)
-
-      if (upd.error) throw upd.error
+    // Fallback path (prevents “ON CONFLICT…” crash if constraint is missing)
+    const msg = upsertAttempt.error?.message || ''
+    if (msg.toLowerCase().includes('on conflict')) {
+      await supabase.from('push_subscriptions').delete().eq('user_id', user.id).eq('endpoint', row.endpoint)
+      const ins = await supabase.from('push_subscriptions').insert(row)
+      if (ins.error) throw ins.error
       return true
     }
 
-    // Try insert
-    const ins = await supabase.from('push_subscriptions').insert(row)
-
-    // If you added UNIQUE(endpoint) and we raced a duplicate, fall back to UPDATE
-    if (ins.error) {
-      const msg = (ins.error?.message || '').toLowerCase()
-      if (msg.includes('duplicate') || msg.includes('unique')) {
-        const upd = await supabase
-          .from('push_subscriptions')
-          .update({
-            p256dh: row.p256dh,
-            auth: row.auth,
-            updated_at: row.updated_at
-          })
-          .eq('endpoint', row.endpoint)
-          .eq('user_id', user.id)
-
-        if (upd.error) throw upd.error
-        return true
-      }
-
-      throw ins.error
-    }
-
-    return true
+    throw upsertAttempt.error
   }
 
   const deleteSubscriptionFromDb = async (endpoint) => {
@@ -254,10 +260,9 @@ export default function Settings() {
       }
       if (!user?.id) throw new Error('You must be signed in to enable notifications.')
 
+      // Permission
       refreshPermission()
       let p = Notification.permission
-
-      // Request permission only from a user gesture (this function is called from buttons/toggle)
       if (p !== 'granted') {
         p = await Notification.requestPermission()
         setPermission(p)
@@ -266,15 +271,14 @@ export default function Settings() {
         throw new Error('Notification permission is not granted. Enable it in device/browser settings.')
       }
 
-      const reg = await getRegistration()
+      // Ensure SW is registered and (optionally) activated
+      // This prevents the “site updated in background” situation from being the only thing you see.
+      const reg = await getRegistration({ activateWaiting: true })
+      await refreshSwInfo()
+
       let sub = await reg.pushManager.getSubscription()
 
-      // IMPORTANT: if we’re forcing a re-register, delete the OLD endpoint from DB first
-      if (forceReregister && sub?.endpoint) {
-        const oldEndpoint = sub.endpoint
-        try {
-          await deleteSubscriptionFromDb(oldEndpoint)
-        } catch {}
+      if (forceReregister && sub) {
         try {
           await sub.unsubscribe()
         } catch {}
@@ -285,20 +289,17 @@ export default function Settings() {
         const appServerKey = urlBase64ToUint8Array(vapidPublicKey)
         sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: appServerKey
+          applicationServerKey: appServerKey,
         })
       }
 
       setSubscription(sub)
-      setEndpointPreview(
-        sub?.endpoint ? `${sub.endpoint.slice(0, 70)}${sub.endpoint.length > 70 ? '…' : ''}` : ''
-      )
+      setEndpointPreview(sub?.endpoint ? `${sub.endpoint.slice(0, 70)}${sub.endpoint.length > 70 ? '…' : ''}` : '')
 
       await saveSubscriptionToDb(sub)
 
       lastSavedEndpointRef.current = sub.endpoint
       setStatusMsg(forceReregister ? 'Device re-registered and saved.' : 'Subscription saved.')
-      await refreshSwInfo()
       return true
     } catch (e) {
       setErrorMsg(e?.message || String(e))
@@ -307,6 +308,7 @@ export default function Settings() {
       setBusy(false)
       refreshPermission()
       refreshSubscription()
+      refreshSwInfo()
     }
   }
 
@@ -317,12 +319,10 @@ export default function Settings() {
     try {
       if (!pushSupported) return
 
-      const reg = await getRegistration()
+      const reg = await getRegistration({ activateWaiting: false })
       const sub = await reg.pushManager.getSubscription()
 
-      if (sub?.endpoint) {
-        await deleteSubscriptionFromDb(sub.endpoint)
-      }
+      if (sub?.endpoint) await deleteSubscriptionFromDb(sub.endpoint)
 
       if (sub) {
         try {
@@ -339,6 +339,7 @@ export default function Settings() {
       setBusy(false)
       refreshPermission()
       refreshSubscription()
+      refreshSwInfo()
     }
   }
 
@@ -355,6 +356,27 @@ export default function Settings() {
     }
   }
 
+  const activateUpdateNow = async () => {
+    setBusy(true)
+    setErrorMsg('')
+    setStatusMsg('')
+    try {
+      if (!('serviceWorker' in navigator)) throw new Error('Service workers not supported here.')
+      const reg = await navigator.serviceWorker.getRegistration('/')
+      if (!reg?.waiting) {
+        setStatusMsg('No waiting service worker found.')
+        return
+      }
+      const ok = await activateWaitingIfAny(reg)
+      await refreshSwInfo()
+      setStatusMsg(ok ? 'Activated update (controller changed).' : 'Tried to activate update, but controller did not change.')
+    } catch (e) {
+      setErrorMsg(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const testNotification = async () => {
     setTestBusy(true)
     setErrorMsg('')
@@ -367,8 +389,8 @@ export default function Settings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           recipientId: user.id,
-          body: '🔔 Test notification from Settings'
-        })
+          body: `🔔 Test notification @ ${new Date().toLocaleTimeString()}`,
+        }),
       })
 
       const text = await res.text()
@@ -390,20 +412,13 @@ export default function Settings() {
     }
   }
 
-  // If enabled + permission already granted, auto-ensure a subscription once (no permission prompts)
   useEffect(() => {
     if (!enabled) return
-    if (!pushSupported) return
-    if (!hasVapidKey) return
     if (!user?.id) return
-    if (permission !== 'granted') return
-    if (autoEnsuredOnceRef.current) return
-
-    autoEnsuredOnceRef.current = true
-    // no force re-register here; just make sure we have a sub + it’s saved
-    ensureSubscribed({ forceReregister: false }).catch(() => {})
+    refreshSubscription()
+    refreshSwInfo()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, pushSupported, hasVapidKey, user?.id, permission])
+  }, [enabled, user?.id])
 
   const subscriptionYesNo = subscription?.endpoint ? 'yes' : 'no'
   const installedYesNo = installed ? 'yes' : 'no'
@@ -485,21 +500,37 @@ export default function Settings() {
               >
                 {busy ? 'Working…' : 'Re-register device'}
               </button>
+
+              <button
+                className="btn btn-neutral btn-pill"
+                type="button"
+                onClick={activateUpdateNow}
+                disabled={!pushSupported || busy}
+              >
+                {busy ? 'Working…' : 'Activate update'}
+              </button>
             </div>
 
             <div className="muted" style={{ marginTop: 12, lineHeight: 1.5 }}>
-              Permission: <b>{permission}</b> • Subscription: <b>{subscriptionYesNo}</b> • Installed:{' '}
-              <b>{installedYesNo}</b> • VAPID key: <b>{vapidYesNo}</b>
+              Permission: <b>{permission}</b> • Subscription: <b>{subscriptionYesNo}</b> • Installed: <b>{installedYesNo}</b> • VAPID key:{' '}
+              <b>{vapidYesNo}</b>
             </div>
 
-            {(swInfo.scriptURL || swInfo.state) && (
-              <div className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
-                SW: <b>{swInfo.state || 'unknown'}</b>{' '}
-                {swInfo.scriptURL ? (
-                  <span style={{ wordBreak: 'break-all' }}>• {swInfo.scriptURL}</span>
-                ) : null}
+            {/* SW diagnostics */}
+            <div className="muted" style={{ marginTop: 10, lineHeight: 1.5 }}>
+              <div>
+                SW controller: <span style={{ wordBreak: 'break-all' }}>{swInfo.controller || '—'}</span>
               </div>
-            )}
+              <div>
+                SW active: <span style={{ wordBreak: 'break-all' }}>{swInfo.active || '—'}</span>
+              </div>
+              <div>
+                SW waiting: <span style={{ wordBreak: 'break-all' }}>{swInfo.waiting || '—'}</span>
+              </div>
+              <div>
+                SW scope: <span style={{ wordBreak: 'break-all' }}>{swInfo.scope || '—'}</span>
+              </div>
+            </div>
 
             {endpointPreview && (
               <div className="muted" style={{ marginTop: 10 }}>
@@ -520,15 +551,8 @@ export default function Settings() {
             )}
 
             <div className="muted" style={{ marginTop: 12 }}>
-              <b>Important:</b> If your Netlify function log shows{' '}
-              <code>410 push subscription has unsubscribed or expired</code>, that endpoint is dead.
-              This page now removes the old endpoint from Supabase when you <b>Re-register device</b>.
-            </div>
-
-            <div className="muted" style={{ marginTop: 12 }}>
-              <b>Note:</b> The “This site has been updated in the background” notification is a <b>browser</b>
-              update message (Chrome), not your message push. Once real push is delivering, those message
-              notifications will show your app icon from the service worker.
+              <b>Note:</b> If you’re seeing <i>“This site has been updated in the background”</i>, that’s Chrome reporting a service worker update —
+              not your push message. The buttons above help ensure the correct SW is active before subscribing/testing.
             </div>
           </div>
         </div>
