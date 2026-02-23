@@ -4,14 +4,19 @@
   command = "npm run build"
   publish = "dist"
 
-[dev]
-  command = "npm run dev"
-  targetPort = 5173
-  port = 8888
-  framework = "vite"
-
 [functions]
   directory = "netlify/functions"
+
+# -------------------------
+# Netlify Dev (LOCAL ONLY)
+# - Avoid port 5173 conflicts
+# - Keep proxy port stable at 8888
+# -------------------------
+[dev]
+  command = "npm run dev -- --port 5180 --strictPort"
+  targetPort = 5180
+  port = 8888
+  autoLaunch = false
 
 # SPA fallback
 [[redirects]]
@@ -21,12 +26,12 @@
 
 # -------------------------
 # Security headers (global)
+# NOTE: CSP MUST be single-line or Netlify CLI can crash locally
 # -------------------------
 [[headers]]
   for = "/*"
   [headers.values]
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-    # IMPORTANT: must be a SINGLE LINE or Netlify CLI / Node will crash locally
     Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
@@ -50,6 +55,12 @@
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
 [[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+    Content-Type = "application/manifest+json; charset=utf-8"
+
+[[headers]]
   for = "/sw.js"
   [headers.values]
     Service-Worker-Allowed = "/"
@@ -60,6 +71,13 @@
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
+# Icons can be cached (they change rarely)
+[[headers]]
+  for = "/icons/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# Built assets can be cached aggressively
 [[headers]]
   for = "/assets/*"
   [headers.values]
