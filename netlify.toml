@@ -4,6 +4,12 @@
   command = "npm run build"
   publish = "dist"
 
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  framework = "vite"
+
 [functions]
   directory = "netlify/functions"
 
@@ -20,8 +26,8 @@
   for = "/*"
   [headers.values]
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-    # IMPORTANT: single-line CSP (no newlines) so Netlify CLI / Node doesn't crash
-    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+    # IMPORTANT: must be a SINGLE LINE or Netlify CLI / Node will crash locally
+    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
     X-Content-Type-Options = "nosniff"
@@ -33,34 +39,27 @@
 # Prevent stale deploys (critical for SPA + PWA)
 # -----------------------------------------
 
-# Never cache the HTML shell
 [[headers]]
   for = "/index.html"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Also cover the root path in case Netlify serves "/" directly
 [[headers]]
   for = "/"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Service worker
 [[headers]]
   for = "/sw.js"
   [headers.values]
     Service-Worker-Allowed = "/"
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Workbox helper file(s) are generated with hashed names sometimes — don't cache them either
 [[headers]]
   for = "/workbox-*.js"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# -----------------------------------------
-# Cache built assets aggressively (safe + fast)
-# -----------------------------------------
 [[headers]]
   for = "/assets/*"
   [headers.values]
