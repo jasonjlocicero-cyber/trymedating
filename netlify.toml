@@ -4,6 +4,11 @@
   command = "npm run build"
   publish = "dist"
 
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+
 [functions]
   directory = "netlify/functions"
 
@@ -20,7 +25,7 @@
   for = "/*"
   [headers.values]
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';"
+    Content-Security-Policy = "default-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; img-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
     X-Content-Type-Options = "nosniff"
@@ -32,28 +37,36 @@
 # Prevent stale deploys (critical for SPA + PWA)
 # -----------------------------------------
 
-# Never cache the HTML shell
 [[headers]]
   for = "/index.html"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Also cover the root path in case Netlify serves "/" directly
 [[headers]]
   for = "/"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Your build output shows the service worker is: dist/sw.js
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+    Content-Type = "application/manifest+json; charset=utf-8"
+
 [[headers]]
   for = "/sw.js"
   [headers.values]
     Service-Worker-Allowed = "/"
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
-# Workbox helper file(s) are generated with hashed names sometimes — don't cache them either
 [[headers]]
   for = "/workbox-*.js"
+  [headers.values]
+    Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
+
+# Optional: keep icons uncached while you’re still tuning them
+[[headers]]
+  for = "/icons/*"
   [headers.values]
     Cache-Control = "no-store, no-cache, must-revalidate, max-age=0"
 
