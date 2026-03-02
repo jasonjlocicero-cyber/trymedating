@@ -46,6 +46,8 @@ export default defineConfig(() => {
           "robots.txt",
           "offline.html",
           "manifest.webmanifest",
+          // NOTE: sw-push.js lives in /public so it will be copied to dist automatically.
+          // We don't need it here, but leaving this comment for clarity.
         ],
 
         workbox: {
@@ -57,6 +59,13 @@ export default defineConfig(() => {
           navigateFallback: "/index.html",
 
           /**
+           * ✅ CRITICAL FOR "APP CLOSED" PUSH:
+           * Import our push handlers into the generated Workbox service worker.
+           * This ensures the active sw.js listens for `push` and `notificationclick`.
+           */
+          importScripts: ["/sw-push.js"],
+
+          /**
            * DENYLIST:
            * Any URL you want to be treated as a real file (NOT SPA navigation fallback)
            * MUST be denylisted here.
@@ -65,6 +74,7 @@ export default defineConfig(() => {
             // Never “SPA-fallback” core PWA assets
             /\/manifest\.webmanifest$/i,
             /\/sw\.js$/i,
+            /\/sw-push\.js$/i,
             /\/offline\.html$/i,
             /\/robots\.txt$/i,
             /\/favicon\.ico$/i,
